@@ -17,7 +17,7 @@ from handlers.menu_handlers import main_menu
 # --- НОВІ ІМПОРТИ ---
 from bot.states import States
 from handlers.static_handlers import (
-    realtime_transport, route_planner, lost_items
+    realtime_transport, lost_items
 )
 from handlers.feedback_handlers import show_feedback_menu
 from handlers.tickets_handlers import show_tickets_menu, handle_ticket_static
@@ -60,8 +60,6 @@ class TransportBot:
 
         # --- ОБРОБНИКИ МЕНЮ 1-ГО РІВНЯ ---
         self.app.add_handler(CallbackQueryHandler(realtime_transport, pattern="^realtime_transport$"))
-        self.app.add_handler(CallbackQueryHandler(route_planner, pattern="^route_planner$"))
-        self.app.add_handler(CallbackQueryHandler(show_tickets_menu, pattern="^tickets_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_info_menu, pattern="^info_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"))
@@ -82,8 +80,6 @@ class TransportBot:
 
         # Обробник "Загублені речі"
         self.app.add_handler(CallbackQueryHandler(lost_items, pattern="^lost_items$"))
-
-        # --- CONVERSATION HANDLERS ---
 
         # CONVERSATION: СКАРГИ (існуючий)
         # --- CONVERSATION HANDLERS ---

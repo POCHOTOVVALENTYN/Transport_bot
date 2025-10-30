@@ -23,27 +23,9 @@ async def realtime_transport(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("➡️ Завантажити для iPhone (App Store)",
-                              url="https://apps.apple.com/ua/app/misto-reloaded/id1447604994")],
+                              url="https://apps.apple.com/ua/app/misto/id6738929703")],
         [InlineKeyboardButton("➡️ Завантажити для Android (Google Play)",
-                              url="https://play.google.com/store/apps/details?id=com.misto.reloaded")],
-        [InlineKeyboardButton("⬅️ Головне меню", callback_data="main_menu")]
-    ])
-
-    await query.edit_message_text(text=text, reply_markup=keyboard, disable_web_page_preview=True)
-
-
-async def route_planner(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробник для 'Прокласти маршрут'"""
-    query = update.callback_query
-    await query.answer()
-
-    text = "Для прокладання оптимального маршруту з урахуванням руху електротранспорту, будь ласка, скористайтеся офіційним партнерським додатком 'MISTO'."
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("➡️ Завантажити для iPhone (App Store)",
-                              url="https://apps.apple.com/ua/app/misto-reloaded/id1447604994")],
-        [InlineKeyboardButton("➡️ Завантажити для Android (Google Play)",
-                              url="https://play.google.com/store/apps/details?id=com.misto.reloaded")],
+                              url="https://play.google.com/store/apps/details?id=tech.misto.android.misto&hl=uk")],
         [InlineKeyboardButton("⬅️ Головне меню", callback_data="main_menu")]
     ])
 
