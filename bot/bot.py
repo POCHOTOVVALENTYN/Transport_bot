@@ -86,8 +86,12 @@ class TransportBot:
         # --- CONVERSATION HANDLERS ---
 
         # CONVERSATION: СКАРГИ (існуючий)
+        # --- CONVERSATION HANDLERS ---
+
+        # CONVERSATION: СКАРГИ (існуючий)
         complaint_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(complaint_start, pattern="^complaint$")],
+            entry_points=[CallbackQueryHandler(complaint_start, pattern="^complaint$", block=False)],
+            # <-- ДОДАНО block=False
             states={
                 States.COMPLAINT_PROBLEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_route)],
                 States.COMPLAINT_ROUTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_board)],
@@ -100,7 +104,8 @@ class TransportBot:
 
         # CONVERSATION: ПОДЯКИ (існуючий)
         thanks_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(thanks_start, pattern="^thanks$")],
+            entry_points=[CallbackQueryHandler(thanks_start, pattern="^thanks$", block=False)],
+            # <-- ДОДАНО block=False
             states={
                 States.THANKS_PROBLEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_get_route)],
                 States.THANKS_ROUTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_get_board)],
@@ -111,7 +116,8 @@ class TransportBot:
 
         # NEW CONVERSATION: ПРОПОЗИЦІЇ
         suggestion_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(suggestion_start, pattern="^suggestion$")],
+            entry_points=[CallbackQueryHandler(suggestion_start, pattern="^suggestion$", block=False)],
+            # <-- ДОДАНО block=False
             states={
                 States.SUGGESTION_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_get_text)],
                 States.SUGGESTION_CONTACT: [
@@ -124,7 +130,8 @@ class TransportBot:
 
         # NEW CONVERSATION: РЕЄСТРАЦІЯ В МУЗЕЙ
         museum_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(museum_register_start, pattern="^museum:register_start$")],
+            entry_points=[CallbackQueryHandler(museum_register_start, pattern="^museum:register_start$", block=False)],
+            # <-- ДОДАНО block=False
             states={
                 States.MUSEUM_DATE: [CallbackQueryHandler(museum_get_date, pattern="^museum_date:")],
                 States.MUSEUM_PEOPLE_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_people_count)],
@@ -142,12 +149,9 @@ class TransportBot:
 
         logger.info("✅ All handlers configured")
 
-    async def start(self):
-        """Запуск бота"""
+    def start(self):
         logger.info("🚀 Starting bot polling...")
-        await self.app.initialize()
-        await self.app.start()
-        await self.app.updater.start_polling()
+        self.app.run_polling()
 
     async def stop(self):
         """Зупинка бота"""

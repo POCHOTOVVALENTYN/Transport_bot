@@ -1,4 +1,4 @@
-import asyncio
+
 import logging
 from config.settings import TELEGRAM_BOT_TOKEN, LOG_LEVEL
 from bot.bot import TransportBot
@@ -21,7 +21,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("⛔ Бот зупинено користувачем")
+    bot = TransportBot(TELEGRAM_BOT_TOKEN)
+    bot.start()
