@@ -1,0 +1,17 @@
+.env
+.env.local
+*.pem
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.idea/
+.vscode/
+*.log
+logs/
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
+integrations/google_sheets/credentials.json
