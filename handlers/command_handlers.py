@@ -8,7 +8,6 @@ async def get_main_menu_keyboard():
     """Повертає клавіатуру головного меню"""
     keyboard = [
         [InlineKeyboardButton("📍 Де мій транспорт? (Real-time)", callback_data="realtime_transport")],
-        [InlineKeyboardButton("🗺️ Прокласти маршрут", callback_data="route_planner")],
         [InlineKeyboardButton("🎫 Квитки та тарифи", callback_data="tickets_menu")],
         [InlineKeyboardButton("✍️ Зворотний зв'язок", callback_data="feedback_menu")],
         [InlineKeyboardButton("ℹ️ Довідкова інформація", callback_data="info_menu")],
