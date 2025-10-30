@@ -14,4 +14,4 @@ logs/
 *.sqlite
 *.sqlite3
 .DS_Store
-integrations/google_sheets/credentials.json
+integrations/google_sheets/credentails.json

@@ -61,8 +61,8 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(main_menu, pattern="^main_menu$"))
 
         # --- ОБРОБНИКИ МЕНЮ 1-ГО РІВНЯ ---
-        self.app.add_handler(CallbackQueryHandler(show_tickets_menu, pattern="^tickets_menu$"))
         self.app.add_handler(CallbackQueryHandler(realtime_transport, pattern="^realtime_transport$"))
+        self.app.add_handler(CallbackQueryHandler(show_tickets_menu, pattern="^tickets_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_info_menu, pattern="^info_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"))

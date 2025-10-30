@@ -28,3 +28,9 @@ ROUTES = {
     "tram": [1, 3, 5, 7, 9, 10, 12, 14, 16],
     "trolleybus": [2, 4, 6, 8, 11, 13, 15],
 }
+
+# ===== IMAGES PATH =====
+IMAGES_PATH = BASE_DIR / "assets" / "images"
+
+# Зображення для квитків
+TICKET_PASSES_IMAGE = IMAGES_PATH / "ticket_passes.png"
