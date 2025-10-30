@@ -1,22 +1,22 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import ContextTypes
 from utils.logger import logger
+# Імпортуємо нашу нову функцію клавіатури
+from handlers.command_handlers import get_main_menu_keyboard
 
 logger = logging.getLogger(__name__)
 
 
 async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Меню"""
-    logger.info(f"User {update.effective_user.id} in menu")
+    """Повернення в головне меню (по натисканню кнопки 'назад' або 'main_menu')"""
+    logger.info(f"User {update.effective_user.id} returned to main menu")
 
-    keyboard = [
-        [InlineKeyboardButton("😞 Скарга", callback_data="complaint")],
-        [InlineKeyboardButton("❤️ Подяка", callback_data="thanks")],
-        [InlineKeyboardButton("💡 Пропозиція", callback_data="suggestion")],
-    ]
+    query = update.callback_query
+    await query.answer()
 
-    await update.callback_query.edit_message_text(
-        text="Оберіть:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+    keyboard = await get_main_menu_keyboard()
+    await query.edit_message_text(
+        text="🚊 Оберіть потрібну опцію:",  # Або ваш WELCOME_MESSAGE
+        reply_markup=keyboard
     )

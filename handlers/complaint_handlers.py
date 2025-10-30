@@ -4,15 +4,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from services.tickets_service import TicketsService
 from config.messages import MESSAGES
 from utils.logger import logger
-
-
-# Стани
-class States:
-    PROBLEM = 1
-    ROUTE = 2
-    BOARD = 3
-    DATETIME = 4
-    CONTACT = 5
+from bot.states import States
 
 
 # ===== СКАРГИ =====
@@ -21,7 +13,7 @@ async def complaint_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Початок скарги"""
     logger.info(f"User {update.effective_user.id} started complaint")
     await update.callback_query.edit_message_text(text=MESSAGES['complaint_start'])
-    return States.PROBLEM
+    return States.COMPLAINT_PROBLEM  # <-- Оновлений стан
 
 
 async def complaint_get_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -29,7 +21,7 @@ async def complaint_get_route(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data['complaint_problem'] = update.message.text
     logger.info(f"Problem: {update.message.text[:50]}")
     await update.message.reply_text(MESSAGES['complaint_route'])
-    return States.ROUTE
+    return States.COMPLAINT_ROUTE # <-- Оновлений стан
 
 
 async def complaint_get_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -37,7 +29,7 @@ async def complaint_get_board(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data['complaint_route'] = update.message.text
     logger.info(f"Route: {update.message.text}")
     await update.message.reply_text(MESSAGES['complaint_board'])
-    return States.BOARD
+    return States.COMPLAINT_BOARD  # <-- Оновлений стан
 
 
 async def complaint_get_datetime(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -45,7 +37,7 @@ async def complaint_get_datetime(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data['complaint_board'] = update.message.text
     logger.info(f"Board: {update.message.text}")
     await update.message.reply_text(MESSAGES['complaint_datetime'])
-    return States.DATETIME
+    return States.COMPLAINT_DATETIME  # <-- Оновлений стан
 
 
 async def complaint_get_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53,7 +45,7 @@ async def complaint_get_contact(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['complaint_datetime'] = update.message.text
     logger.info(f"DateTime: {update.message.text}")
     await update.message.reply_text(MESSAGES['complaint_contact'])
-    return States.CONTACT
+    return States.COMPLAINT_CONTACT  # <-- Оновлений стан
 
 
 async def complaint_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -100,7 +92,7 @@ async def thanks_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Початок подяки"""
     logger.info(f"User {update.effective_user.id} started thanks")
     await update.callback_query.edit_message_text(text="❤️ Напишіть, за що дякуєте:")
-    return States.PROBLEM
+    return States.THANKS_PROBLEM  # <-- Оновлений стан
 
 
 async def thanks_get_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,7 +100,7 @@ async def thanks_get_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['thanks_text'] = update.message.text
     logger.info(f"Thanks: {update.message.text[:50]}")
     await update.message.reply_text("Маршрут (або 'n'):")
-    return States.ROUTE
+    return States.THANKS_ROUTE  # <-- Оновлений стан
 
 
 async def thanks_get_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -117,7 +109,7 @@ async def thanks_get_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['thanks_route'] = route
     logger.info(f"Thanks route: {route}")
     await update.message.reply_text("Борт №  (або 'n'):")
-    return States.BOARD
+    return States.THANKS_BOARD  # <-- Оновлений стан
 
 
 async def thanks_save(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -76,6 +76,52 @@ class TicketsService:
                 "message": "❌ Сталася помилка"
             }
 
+    async def create_suggestion_ticket(
+            self,
+            telegram_id: int,
+            text: str,
+            contact_info: str = "N/A"
+    ) -> dict:
+        """Створення тікету пропозиції"""
+        try:
+            ticket_id = format_ticket_id()
+
+            row_data = [
+                datetime.now().strftime("%d.%m.%Y %H:%M"),
+                ticket_id,
+                "💡 Пропозиція",
+                "🟢 Низька",
+                "N/A",  # Маршрут
+                text[:100],
+                "N/A",  # Борт
+                contact_info.split(',')[0].strip() if contact_info != "N/A" else "Анонімно",  # Імя
+                contact_info if contact_info != "N/A" else "N/A",  # Телефон/Контакт
+                "",
+                ""
+            ]
+
+            success = self.sheets.append_row(
+                sheet_name=SHEET_NAMES["suggestions"],
+                values=row_data
+            )
+
+            if success:
+                logger.info(f"✅ Suggestion ticket created: {ticket_id}")
+                return {
+                    "success": True,
+                    "ticket_id": ticket_id,
+                    "message": f"💡 Дякуємо! Ваша пропозиція зареєстрована.\nНомер: {ticket_id}"
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": "❌ Помилка при збереженні пропозиції"
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Error creating suggestion: {e}")
+            return {"success": False, "message": "❌ Сталася помилка"}
+
     async def create_thanks_ticket(
             self,
             telegram_id: int,
