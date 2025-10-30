@@ -20,7 +20,9 @@ from handlers.static_handlers import (
     realtime_transport, lost_items
 )
 from handlers.feedback_handlers import show_feedback_menu
-from handlers.tickets_handlers import show_tickets_menu, handle_ticket_static
+from handlers.tickets_handlers import (
+    show_tickets_menu, handle_ticket_static, show_passes_list
+)
 from handlers.info_handlers import show_info_menu, handle_info_static
 from handlers.company_handlers import (
     show_company_menu, handle_company_static, show_vacancies_menu,
@@ -66,6 +68,7 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(show_company_menu, pattern="^company_menu$"))
 
         # --- ОБРОБНИКИ 2-ГО+ РІВНЯ (РОУТЕРИ) ---
+        self.app.add_handler(CallbackQueryHandler(show_passes_list, pattern="^tickets:passes$"))
         self.app.add_handler(CallbackQueryHandler(handle_ticket_static, pattern="^tickets:"))
         self.app.add_handler(CallbackQueryHandler(handle_info_static, pattern="^info:"))
         self.app.add_handler(CallbackQueryHandler(handle_museum_static,
