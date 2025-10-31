@@ -35,3 +35,7 @@ IMAGES_PATH = BASE_DIR / "assets" / "images"
 # Зображення для квитків
 TICKET_PASSES_IMAGE_1 = IMAGES_PATH / "passes_part_1.png"
 TICKET_PASSES_IMAGE_2 = IMAGES_PATH / "passes_part_2.png"
+
+# ===== DOCUMENTS PATH =====
+DOCUMENTS_PATH = BASE_DIR / "documents"
+RULES_PDF_PATH = DOCUMENTS_PATH / "rules_of_use.pdf"

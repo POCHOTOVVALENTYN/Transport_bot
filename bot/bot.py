@@ -23,7 +23,9 @@ from handlers.feedback_handlers import show_feedback_menu
 from handlers.tickets_handlers import (
     show_tickets_menu, handle_ticket_static, show_passes_list
 )
-from handlers.info_handlers import show_info_menu, handle_info_static
+from handlers.info_handlers import (
+    show_info_menu, handle_info_static, send_rules_pdf
+)
 from handlers.company_handlers import (
     show_company_menu, handle_company_static, show_vacancies_menu,
     show_vacancy_list, show_vacancy_details
@@ -71,6 +73,7 @@ class TransportBot:
         # --- ОБРОБНИКИ 2-ГО+ РІВНЯ (РОУТЕРИ) ---
         self.app.add_handler(CallbackQueryHandler(show_passes_list, pattern="^tickets:passes$"))
         self.app.add_handler(CallbackQueryHandler(handle_ticket_static, pattern="^tickets:"))
+        self.app.add_handler(CallbackQueryHandler(send_rules_pdf, pattern="^info:rules$"))
         self.app.add_handler(CallbackQueryHandler(handle_info_static, pattern="^info:"))
         self.app.add_handler(CallbackQueryHandler(handle_museum_static,
                                                   pattern="^museum:"))  # Обережно: не має перетинатись з 'museum:register_start'
