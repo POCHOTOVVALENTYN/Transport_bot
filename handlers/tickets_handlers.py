@@ -2,7 +2,9 @@ import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from config.messages import MESSAGES
-from config.settings import TICKET_PASSES_IMAGE
+from config.settings import (
+    TICKET_PASSES_IMAGE_1, TICKET_PASSES_IMAGE_2
+)
 from handlers.common import get_back_keyboard # <-- Використовуємо get_back_keyboard
 from telegram.constants import ParseMode
 
@@ -46,36 +48,52 @@ async def show_tickets_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_passes_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Надсилає зображення + текст з видами проїзних."""
+    """Надсилає 2 зображення з видами проїзних, а потім текстове повідомлення."""
     query = update.callback_query
     await query.answer()
 
-    # get_back_keyboard вже містить "Назад" і "Головне меню"
+    # Отримуємо клавіатуру "Назад", яку прикріпимо до ОСТАННЬОГО повідомлення
     keyboard = await get_back_keyboard("tickets_menu")
+
+    # Отримуємо текст для ОСТАННЬОГО повідомлення
+    purchase_info_text = MESSAGES.get("tickets_purchase_info")
 
     try:
         # 1. Видаляємо поточне повідомлення (меню "Квитки та тарифи")
         await query.delete_message()
 
-        # 2. Надсилаємо зображення
-        with open(TICKET_PASSES_IMAGE, 'rb') as photo:
+        # 2. Надсилаємо перше зображення (без кнопок)
+        with open(TICKET_PASSES_IMAGE_1, 'rb') as photo_1:
             await query.message.reply_photo(
-                photo=photo,
-                caption="🎫 Всі види проїзних для громадського транспорту Одеси:",
-                reply_markup=keyboard
+                photo=photo_1,
+                caption="Види проїзних (Частина 1)"
             )
 
-        logger.info("✅ Passes image sent successfully")
+        # 3. Надсилаємо друге зображення (без кнопок)
+        with open(TICKET_PASSES_IMAGE_2, 'rb') as photo_2:
+            await query.message.reply_photo(
+                photo=photo_2,
+                caption="Види проїзних (Частина 2)"
+            )
 
-    except FileNotFoundError:
-        logger.error(f"❌ Image file not found: {TICKET_PASSES_IMAGE}")
+        # 4. Надсилаємо текстове повідомлення (з кнопками "Назад")
+        await query.message.reply_text(
+            text=purchase_info_text,
+            reply_markup=keyboard
+        )
+
+        logger.info("✅ Passes images and info text sent successfully")
+
+    except FileNotFoundError as e:
+        logger.error(f"❌ Image file not found: {e.filename}")
+        # Відправляємо повідомлення про помилку з кнопками
         await query.message.reply_text(
             "❌ Зображення не знайдено. Спробуйте пізніше.",
             reply_markup=keyboard
         )
-
     except Exception as e:
-        logger.error(f"❌ Error sending passes image: {e}")
+        logger.error(f"❌ Error sending passes images: {e}")
+        # Відправляємо повідомлення про помилку з кнопками
         await query.message.reply_text(
             "❌ Сталася помилка при завантаженні зображення.",
             reply_markup=keyboard
