@@ -23,7 +23,7 @@ async def show_tickets_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💰 Вартість проїзду", callback_data="tickets:cost")],
         [InlineKeyboardButton("💳 Способи оплати", callback_data="tickets:payment")],
         [InlineKeyboardButton("🧾 Види проїзних", callback_data="tickets:passes")],
-        [InlineKeyboardButton("🏪 Де придбати/поповнити", callback_data="tickets:purchase")],
+        [InlineKeyboardButton("🏪 Де придбати?", callback_data="tickets:purchase")],
         [InlineKeyboardButton("👵 Пільговий проїзд", callback_data="tickets:benefits")],
         # Використовуємо стандартні кнопки "Назад" і "Головне меню" з get_back_keyboard
         [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")],
@@ -79,7 +79,8 @@ async def show_passes_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 4. Надсилаємо текстове повідомлення (з кнопками "Назад")
         await query.message.reply_text(
             text=purchase_info_text,
-            reply_markup=keyboard
+            reply_markup=keyboard,
+            parse_mode=ParseMode.HTML
         )
 
         logger.info("✅ Passes images and info text sent successfully")
