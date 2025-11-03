@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler
@@ -147,7 +147,10 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
                 # 'callback_data' тепер містить саму дату
                 keyboard.append([InlineKeyboardButton(date_str, callback_data=f"museum_date:{date_str}")])
 
-        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="museum_menu")])
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Назад", callback_data="museum_menu"),
+            InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")
+        ])
 
         await query.edit_message_text(
             text=text,
@@ -206,27 +209,35 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
 
     context.user_data['museum_people_count'] = count
-    await update.message.reply_text("✅ Чудово! Вкажіть Ваші ПІБ та контактний телефон для підтвердження реєстрації.")
-    return States.MUSEUM_CONTACT_INFO
+    await update.message.reply_text("✅ Чудово! Тепер вкажіть Ваше ПІБ (наприклад: Писаренко Олег Анатолійович):")
+    return States.MUSEUM_NAME
+
+async def museum_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отримує ПІБ та запитує телефон."""
+    context.user_data['museum_name'] = update.message.text
+    await update.message.reply_text("📞 Вкажіть контактний телефон для підтвердження (наприклад: 0994564778):")
+    return States.MUSEUM_PHONE
 
 
-async def museum_save_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Зберігає реєстрацію, пише в Sheet ТА надсилає адміну."""
-    contact_info = update.message.text
-
+    # Отримуємо дані з context та останнього повідомлення
     date = context.user_data.get('museum_date', 'НЕ ВКАЗАНО')
     count = context.user_data.get('museum_people_count', 'НЕ ВКАЗАНО')
+    name = context.user_data.get('museum_name', 'НЕ ВКАЗАНО')
+    phone = update.message.text  # Телефон - це останнє повідомлення
 
-    logger.info(f"New museum registration: {date}, {count} people, contact: {contact_info}")
+    logger.info(f"New museum registration: Date={date}, Count={count}, Name={name}, Phone={phone}")
 
     # --- ЗБЕРІГАЄМО В GOOGLE SHEETS ("MuseumBookings") ---
     try:
         sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
         row_data = [
-            datetime.now().strftime("%d.%m.%Y %H:%M"), # Час заявки
-            date, # Обрана дата
-            count, # Кількість
-            contact_info # ПІБ + Телефон
+            datetime.now().strftime("%d.%m.%Y %H:%M"),  # A: Дата реєстрації
+            date,  # B: Дата екскурсії
+            count,  # C: Кількість
+            name,  # D: П.І.Б.
+            phone  # E: Телефон
         ]
         sheets.append_row(sheet_name="MuseumBookings", values=row_data)
         logger.info("✅ Museum booking saved to Google Sheets")
@@ -239,9 +250,10 @@ async def museum_save_registration(update: Update, context: ContextTypes.DEFAULT
     try:
         admin_message = (
             f"🔔 Нова заявка на екскурсію до Музею!\n\n"
-            f"🗓 <b>Дата:</b> {date}\n"
+            f"🗓 <b>Дата екскурсії:</b> {date}\n"
             f"👥 <b>Кількість:</b> {count}\n"
-            f"👤 <b>Контакти:</b> {contact_info}"
+            f"👤 <b>ПІБ:</b> {name}\n"
+            f"📞 <b>Телефон:</b> {phone}"
         )
         await context.bot.send_message(
             chat_id=MUSEUM_ADMIN_ID,

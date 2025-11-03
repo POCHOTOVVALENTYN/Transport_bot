@@ -22,4 +22,5 @@ class States:
     # Нові стани для реєстрації в музей
     MUSEUM_DATE = 11
     MUSEUM_PEOPLE_COUNT = 12
-    MUSEUM_CONTACT_INFO = 13
+    MUSEUM_NAME = 13  # <--- ЗМІНЕНО
+    MUSEUM_PHONE = 14

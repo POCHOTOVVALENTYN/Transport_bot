@@ -32,7 +32,8 @@ from handlers.company_handlers import (
 )
 from handlers.museum_handlers import (
     show_museum_menu, handle_museum_static, museum_register_start,
-    museum_get_date, museum_get_people_count, museum_save_registration, show_museum_info
+    museum_get_date, museum_get_people_count, museum_get_name,
+    museum_get_phone_and_save, show_museum_info
 )
 from handlers.suggestion_handlers import (
     suggestion_start, suggestion_get_text, suggestion_save, suggestion_skip_contact
@@ -141,11 +142,11 @@ class TransportBot:
         # NEW CONVERSATION: РЕЄСТРАЦІЯ В МУЗЕЙ
         museum_conv = ConversationHandler(
             entry_points=[CallbackQueryHandler(museum_register_start, pattern="^museum:register_start$", block=False)],
-            # <-- ДОДАНО block=False
             states={
                 States.MUSEUM_DATE: [CallbackQueryHandler(museum_get_date, pattern="^museum_date:")],
                 States.MUSEUM_PEOPLE_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_people_count)],
-                States.MUSEUM_CONTACT_INFO: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_save_registration)],
+                States.MUSEUM_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_name)],
+                States.MUSEUM_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_phone_and_save)],
             },
             # 'fallbacks' повертає до меню музею, а не головного
             fallbacks=[CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$")]
