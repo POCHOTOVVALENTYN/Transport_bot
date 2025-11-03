@@ -15,7 +15,6 @@ async def show_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     keyboard = [
-        [InlineKeyboardButton("🗺️ Наші маршрути (схеми)", callback_data="info:routes")],
         [InlineKeyboardButton("📜 Правила користування", callback_data="info:rules")],
         [InlineKeyboardButton("♿ Доступність (Інклюзивність)", callback_data="info:accessibility")],
         [InlineKeyboardButton("📞 Контакти", callback_data="info:contacts")],
@@ -99,12 +98,8 @@ async def handle_info_static(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.warning("handle_info_static received 'rules' key. Ignored.")
         return
 
-    if key == "routes":
-        text = MESSAGES.get("info_routes", "Тут буде список маршрутів...")
-    elif key == "rules":
-        text = MESSAGES.get("info_rules", "Тут буде PDF з правилами...")
-    else:
-        text = MESSAGES.get(f"info_{key}", "Інформація не знайдена.")
+    # 'rules' обробляється send_rules_pdf, 'routes' видалено
+    text = MESSAGES.get(f"info_{key}", "Інформація не знайдена.")
 
     keyboard = await get_back_keyboard("info_menu")
     await query.edit_message_text(
