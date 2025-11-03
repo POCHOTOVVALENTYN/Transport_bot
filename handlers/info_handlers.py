@@ -1,4 +1,5 @@
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 from config.messages import MESSAGES
 from handlers.common import get_back_keyboard
@@ -106,4 +107,8 @@ async def handle_info_static(update: Update, context: ContextTypes.DEFAULT_TYPE)
         text = MESSAGES.get(f"info_{key}", "Інформація не знайдена.")
 
     keyboard = await get_back_keyboard("info_menu")
-    await query.edit_message_text(text=text, reply_markup=keyboard)
+    await query.edit_message_text(
+        text=text,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.HTML  # <-- ДОДАЛИ АРГУМЕНТ ДЛЯ ОБРОБКИ
+    )
