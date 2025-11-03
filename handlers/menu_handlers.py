@@ -18,6 +18,18 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # Перевіряємо, чи є ID медіа-повідомлень у user_data
+    if 'media_message_ids' in context.user_data:
+        chat_id = update.effective_chat.id
+        for msg_id in context.user_data['media_message_ids']:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except Exception as e:
+                logger.warning(f"Could not delete message {msg_id} in main_menu: {e}")
+
+        # Очищуємо список
+        del context.user_data['media_message_ids']
+
     keyboard = await get_main_menu_keyboard()
     text = "🚊 Оберіть потрібну опцію:"
 

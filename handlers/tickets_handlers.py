@@ -19,6 +19,20 @@ async def show_tickets_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # Перевіряємо, чи є ID медіа-повідомлень у user_data (залишені з show_passes_list)
+    if 'media_message_ids' in context.user_data:
+        chat_id = update.effective_chat.id
+        # Проходимо по списку ID і видаляємо кожне повідомлення
+        for msg_id in context.user_data['media_message_ids']:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except Exception as e:
+                # Попередження, якщо повідомлення не вдалося видалити (напр., воно застаріле)
+                logger.warning(f"Could not delete message {msg_id} in show_tickets_menu: {e}")
+
+        # Очищуємо список, щоб не спробувати видалити їх знову
+        del context.user_data['media_message_ids']
+
     keyboard = [
         [InlineKeyboardButton("💰 Вартість проїзду", callback_data="tickets:cost")],
         [InlineKeyboardButton("💳 Способи оплати", callback_data="tickets:payment")],
@@ -64,19 +78,23 @@ async def show_passes_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # 2. Надсилаємо перше зображення (без кнопок)
         with open(TICKET_PASSES_IMAGE_1, 'rb') as photo_1:
-            await query.message.reply_photo(
+            sent_photo_1 = await query.message.reply_photo(
                 photo=photo_1,
                 caption="Види проїзних (Частина 1)"
             )
 
         # 3. Надсилаємо друге зображення (без кнопок)
         with open(TICKET_PASSES_IMAGE_2, 'rb') as photo_2:
-            await query.message.reply_photo(
+            sent_photo_2 = await query.message.reply_photo(
                 photo=photo_2,
                 caption="Види проїзних (Частина 2)"
             )
+        # 4. Зберігаємо ID надісланих фото у context.user_data
+        #    Ми будемо використовувати цей список для їх видалення пізніше
+        context.user_data['media_message_ids'] = [sent_photo_1.message_id, sent_photo_2.message_id]
 
-        # 4. Надсилаємо текстове повідомлення (з кнопками "Назад")
+
+        # 5. Надсилаємо текстове повідомлення (з кнопками "Назад")
         await query.message.reply_text(
             text=purchase_info_text,
             reply_markup=keyboard,
