@@ -32,7 +32,7 @@ from handlers.company_handlers import (
 )
 from handlers.museum_handlers import (
     show_museum_menu, handle_museum_static, museum_register_start,
-    museum_get_date, museum_get_people_count, museum_save_registration
+    museum_get_date, museum_get_people_count, museum_save_registration, show_museum_info
 )
 from handlers.suggestion_handlers import (
     suggestion_start, suggestion_get_text, suggestion_save, suggestion_skip_contact
@@ -75,8 +75,15 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(handle_ticket_static, pattern="^tickets:"))
         self.app.add_handler(CallbackQueryHandler(send_rules_pdf, pattern="^info:rules$"))
         self.app.add_handler(CallbackQueryHandler(handle_info_static, pattern="^info:"))
+        # --- ПОЧАТОК ЗМІН (Музей) --- 03/11/2025
+        # 1. Новий обробник для "Інфо" (фото + текст)
+        self.app.add_handler(CallbackQueryHandler(show_museum_info, pattern="^museum:info$"))
+        # 2. Старий обробник тепер ТІЛЬКИ для "Соц. мережі"
         self.app.add_handler(CallbackQueryHandler(handle_museum_static,
-                                                  pattern="^museum:"))  # Обережно: не має перетинатись з 'museum:register_start'
+                                                  pattern="^museum:socials$"))
+        # (Обробник "museum:register_start" вже є у ConversationHandler,
+        #  тому ці патерни більше не конфліктують)
+        # --- КІНЕЦЬ ЗМІН ---
 
         # Обробники "Про підприємство" (складніші)
         self.app.add_handler(

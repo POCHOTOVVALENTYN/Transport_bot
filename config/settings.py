@@ -10,7 +10,8 @@ DEBUG = os.getenv("DEBUG", "False") == "True"
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+DEVELOPER_ID = int(os.getenv("DEVELOPER_ID", 0))
+MUSEUM_ADMIN_ID = int(os.getenv("MUSEUM_ADMIN_ID", 0))
 
 # Google Sheets
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID")
@@ -39,3 +40,5 @@ TICKET_PASSES_IMAGE_2 = IMAGES_PATH / "passes_part_2.png"
 # ===== DOCUMENTS PATH =====
 DOCUMENTS_PATH = BASE_DIR / "documents"
 RULES_PDF_PATH = DOCUMENTS_PATH / "rules_of_use.pdf"
+
+MUSEUM_LOGO_IMAGE = IMAGES_PATH / "museum_logo.png"
