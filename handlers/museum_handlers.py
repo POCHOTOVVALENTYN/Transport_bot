@@ -19,23 +19,54 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # Блок видалення медіа (фото), який у вас вже є
+    # --- ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З КНОПКОЮ "СКАСУВАТИ" ---
+    if 'cancel_message_id' in context.user_data:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=context.user_data['cancel_message_id']
+            )
+            logger.info(f"✅ Deleted cancel button message: {context.user_data['cancel_message_id']}")
+        except Exception as e:
+            logger.warning(f"Could not delete cancel message: {e}")
+        del context.user_data['cancel_message_id']
+
+    # --- ВИДАЛЯЄМО ФОТО ---
     if 'media_message_ids' in context.user_data:
         chat_id = update.effective_chat.id
         for msg_id in context.user_data['media_message_ids']:
             try:
                 await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
             except Exception as e:
-                logger.warning(f"Could not delete message {msg_id} in show_museum_menu: {e}")
+                logger.warning(f"Could not delete message {msg_id}: {e}")
         del context.user_data['media_message_ids']
 
-        # Очищуємо всі дані реєстрації, якщо користувач скасував
-    if 'museum_date' in context.user_data:
-        del context.user_data['museum_date']
-    if 'museum_people_count' in context.user_data:
-        del context.user_data['museum_people_count']
-    if 'museum_name' in context.user_data:
-        del context.user_data['museum_name']
+    # --- ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З ДАТАМИ ---
+    if 'dates_message_id' in context.user_data:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=context.user_data['dates_message_id']
+            )
+            logger.info(f"✅ Deleted dates message: {context.user_data['dates_message_id']}")
+        except Exception as e:
+            logger.warning(f"Could not delete dates message: {e}")
+        del context.user_data['dates_message_id']
+
+    # --- ВИДАЛЯЄМО ПОТОЧНЕ ПОВІДОМЛЕННЯ (якщо воно ще існує) ---
+    # ВАЖЛИВО: Це може бути те саме повідомлення, яке ми вже видалили вище
+    # Тому просто ігноруємо помилку
+    try:
+        await query.message.delete()
+        logger.info(f"✅ Deleted current message in show_museum_menu")
+    except Exception as e:
+        # Це нормально - повідомлення могло бути вже видалене
+        logger.info(f"ℹ️ Current message already deleted or not found: {e}")
+
+    # Очищуємо всі дані реєстрації
+    context.user_data.pop('museum_date', None)
+    context.user_data.pop('museum_people_count', None)
+    context.user_data.pop('museum_name', None)
 
     keyboard = [
         [InlineKeyboardButton("🖼️ Інфо про музей", callback_data="museum:info")],
@@ -48,23 +79,12 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = "🏛️ Розділ 'Музей КП 'ОМЕТ''. Оберіть опцію:"
 
-    # --- ПОЧАТОТОК ВИПРАВЛЕННЯ (ЛОГІКА ЯК В MAIN_MENU) ---
-    if query.message.text:
-        # Якщо це було текстове повідомлення, редагуємо
-        await query.edit_message_text(
-            text=text,
-            reply_markup=reply_markup
-        )
-    else:
-        # Якщо це було повідомлення з фото/документом, видаляємо та надсилаємо нове
-        await query.message.delete()
-        await query.message.reply_text(
-            text=text,
-            reply_markup=reply_markup
-        )
+    # Надсилаємо НОВЕ повідомлення
+    await query.message.reply_text(
+        text=text,
+        reply_markup=reply_markup
+    )
 
-    # --- ГОЛОВНЕ ВИПРАВЛЕННЯ ---
-    # Чітко завершуємо ConversationHandler
     return ConversationHandler.END
 
 
@@ -146,6 +166,14 @@ async def handle_museum_static(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Початок реєстрації до музею (ДИНАМІЧНИЙ)."""
+    # --- КРИТИЧНЕ ЛОГУВАННЯ ---
+    logger.info(f"🔥 museum_register_start CALLED by user {update.effective_user.id}")
+    logger.info(f"🔥 Update type: {type(update)}")
+    logger.info(f"🔥 Has callback_query: {update.callback_query is not None}")
+    if update.callback_query:
+        logger.info(f"🔥 Callback data: {update.callback_query.data}")
+    # --- КІНЕЦЬ ЛОГУВАННЯ ---
+
     query = update.callback_query
     await query.answer()
 
@@ -157,12 +185,20 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
         # Читаємо дати з аркуша "MuseumDates", стовпець A
         dates_data = sheets.read_range(sheet_range="MuseumDates!A1:A50")
 
+        # --- ДОДАНО: Діагностичне логування ---
+        logger.info(f"📊 Google Sheets read result: {dates_data}")
+        logger.info(f"📊 Number of dates loaded: {len(dates_data) if dates_data else 0}")
+        # --- КІНЕЦЬ ДОДАВАННЯ ---
+
         if not dates_data:
             keyboard = await get_back_keyboard("museum_menu")
-            await query.edit_message_text(
+            # --- ВИПРАВЛЕННЯ: Видаляємо + надсилаємо нове ---
+            await query.message.delete()
+            await query.message.reply_text(
                 text="😢 На жаль, наразі вільних дат для запису немає. Спробуйте пізніше.",
                 reply_markup=keyboard
             )
+            # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
             return ConversationHandler.END
 
         keyboard = []
@@ -179,19 +215,27 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
             InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")
         ])
 
-        await query.edit_message_text(
+        # --- ВИПРАВЛЕННЯ: Видаляємо старе повідомлення + надсилаємо нове ---
+        await query.message.delete()
+        sent_message = await query.message.reply_text(
             text=text,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
+        # Зберігаємо ID нового повідомлення
+        context.user_data['dates_message_id'] = sent_message.message_id
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
         return States.MUSEUM_DATE
 
     except Exception as e:
         logger.error(f"Failed to read museum dates from sheets: {e}")
         keyboard = await get_back_keyboard("museum_menu")
-        await query.edit_message_text(
+        # --- ВИПРАВЛЕННЯ: Видаляємо + надсилаємо нове ---
+        await query.message.delete()
+        await query.message.reply_text(
             text=f"❌ Сталася помилка при завантаженні дат: {e}",
             reply_markup=keyboard
         )
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
         return ConversationHandler.END
 
 
@@ -206,15 +250,40 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['museum_date'] = selected_date
 
     keyboard = await get_cancel_keyboard("museum_menu")
-    await query.edit_message_text(
+
+    # --- ВИПРАВЛЕННЯ: Видаляємо повідомлення з датами ---
+    if 'dates_message_id' in context.user_data:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=context.user_data['dates_message_id']
+            )
+            logger.info(f"✅ Deleted dates message: {context.user_data['dates_message_id']}")
+        except Exception as e:
+            logger.warning(f"Could not delete dates message: {e}")
+        del context.user_data['dates_message_id']
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+
+    # Надсилаємо НОВЕ повідомлення (не редагуємо!)
+    sent_message = await query.message.reply_text(
         "Вкажіть кількість осіб у вашій групі (напишіть цифрою):",
         reply_markup=keyboard
     )
+    context.user_data['cancel_message_id'] = sent_message.message_id
+
     return States.MUSEUM_PEOPLE_COUNT
 
 
 async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримує кількість осіб."""
+
+    # --- ДОДАНО: Видаляємо повідомлення користувача ---
+    try:
+        await update.message.delete()
+    except Exception as e:
+        logger.warning(f"Could not delete user message: {e}")
+    # --- КІНЕЦЬ ДОДАВАННЯ ---
+
     try:
         count = int(update.message.text)
     except ValueError:
@@ -241,20 +310,31 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
 
     context.user_data['museum_people_count'] = count
     keyboard = await get_cancel_keyboard("museum_menu")
-    await update.message.reply_text(
+    sent_message = await update.message.reply_text(
         "✅ Чудово! Тепер вкажіть Ваше ПІБ (наприклад: Писаренко Олег Анатолійович):",
         reply_markup=keyboard
     )
+    context.user_data['cancel_message_id'] = sent_message.message_id
     return States.MUSEUM_NAME
 
 async def museum_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримує ПІБ та запитує телефон."""
+
+    # --- ДОДАНО: Видаляємо повідомлення користувача ---
+    try:
+        await update.message.delete()
+    except Exception as e:
+        logger.warning(f"Could not delete user message: {e}")
+    # --- КІНЕЦЬ ДОДАВАННЯ ---
+
     context.user_data['museum_name'] = update.message.text
     keyboard = await get_cancel_keyboard("museum_menu")
-    await update.message.reply_text(
+    # --- ЗМІНА: Зберігаємо ID повідомлення ---
+    sent_message = await update.message.reply_text(
         "📞 Вкажіть контактний телефон для підтвердження (наприклад: 0994564778):",
         reply_markup=keyboard
     )
+    context.user_data['cancel_message_id'] = sent_message.message_id
     return States.MUSEUM_PHONE
 
 

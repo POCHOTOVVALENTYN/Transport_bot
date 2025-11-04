@@ -60,48 +60,12 @@ class TransportBot:
         self.app.add_handler(CommandHandler("start", cmd_start))
         self.app.add_handler(CommandHandler("help", cmd_help))
 
-        # --- ГОЛОВНЕ МЕНЮ ---
-        self.app.add_handler(CallbackQueryHandler(main_menu, pattern="^main_menu$"))
-
-        # --- ОБРОБНИКИ МЕНЮ 1-ГО РІВНЯ ---
-        self.app.add_handler(CallbackQueryHandler(realtime_transport, pattern="^realtime_transport$"))
-        self.app.add_handler(CallbackQueryHandler(show_tickets_menu, pattern="^tickets_menu$"))
-        self.app.add_handler(CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"))
-        self.app.add_handler(CallbackQueryHandler(show_info_menu, pattern="^info_menu$"))
-        self.app.add_handler(CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"))
-        self.app.add_handler(CallbackQueryHandler(show_company_menu, pattern="^company_menu$"))
-
-        # --- ОБРОБНИКИ 2-ГО+ РІВНЯ (РОУТЕРИ) ---
-        self.app.add_handler(CallbackQueryHandler(show_passes_list, pattern="^tickets:passes$"))
-        self.app.add_handler(CallbackQueryHandler(handle_ticket_static, pattern="^tickets:"))
-        self.app.add_handler(CallbackQueryHandler(send_rules_pdf, pattern="^info:rules$"))
-        self.app.add_handler(CallbackQueryHandler(handle_info_static, pattern="^info:"))
-        # --- ПОЧАТОК ЗМІН (Музей) --- 03/11/2025
-        # 1. Новий обробник для "Інфо" (фото + текст)
-        self.app.add_handler(CallbackQueryHandler(show_museum_info, pattern="^museum:info$"))
-        # 2. Старий обробник тепер ТІЛЬКИ для "Соц. мережі"
-        self.app.add_handler(CallbackQueryHandler(handle_museum_static,
-                                                  pattern="^museum:socials$"))
-        # (Обробник "museum:register_start" вже є у ConversationHandler,
-        #  тому ці патерни більше не конфліктують)
-        # --- КІНЕЦЬ ЗМІН ---
-
-        # Обробники "Про підприємство" (складніші)
-        self.app.add_handler(
-            CallbackQueryHandler(handle_company_static, pattern="^company:(education|services|socials)$"))
-        self.app.add_handler(CallbackQueryHandler(show_vacancies_menu, pattern="^company:vacancies$"))
-        self.app.add_handler(CallbackQueryHandler(show_vacancy_list, pattern="^vacancy_type:"))
-        self.app.add_handler(CallbackQueryHandler(show_vacancy_details, pattern="^vacancy:"))
-
-        # Обробник "Загублені речі"
-        self.app.add_handler(CallbackQueryHandler(lost_items, pattern="^lost_items$"))
-
-        # CONVERSATION: СКАРГИ (існуючий)
+        ## CONVERSATION: СКАРГИ (існуючий)
         # --- CONVERSATION HANDLERS ---
 
         # CONVERSATION: СКАРГИ (існуючий)
         complaint_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(complaint_start, pattern="^complaint$", block=False)],
+            entry_points=[CallbackQueryHandler(complaint_start, pattern="^complaint$")],
             # <-- ДОДАНО block=False
             states={
                 States.COMPLAINT_PROBLEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_route)],
@@ -115,7 +79,7 @@ class TransportBot:
 
         # CONVERSATION: ПОДЯКИ (існуючий)
         thanks_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(thanks_start, pattern="^thanks$", block=False)],
+            entry_points=[CallbackQueryHandler(thanks_start, pattern="^thanks$")],
             # <-- ДОДАНО block=False
             states={
                 States.THANKS_PROBLEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_get_route)],
@@ -127,7 +91,7 @@ class TransportBot:
 
         # NEW CONVERSATION: ПРОПОЗИЦІЇ
         suggestion_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(suggestion_start, pattern="^suggestion$", block=False)],
+            entry_points=[CallbackQueryHandler(suggestion_start, pattern="^suggestion$")],
             # <-- ДОДАНО block=False
             states={
                 States.SUGGESTION_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_get_text)],
@@ -141,7 +105,7 @@ class TransportBot:
 
         # NEW CONVERSATION: РЕЄСТРАЦІЯ В МУЗЕЙ
         museum_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(museum_register_start, pattern="^museum:register_start$", block=False)],
+            entry_points=[CallbackQueryHandler(museum_register_start, pattern="^museum:register_start$")],
             states={
                 States.MUSEUM_DATE: [
                     CallbackQueryHandler(museum_get_date, pattern="^museum_date:"),
@@ -181,6 +145,44 @@ class TransportBot:
         self.app.add_handler(museum_conv)
 
         logger.info("✅ All handlers configured")
+
+        # --- ГОЛОВНЕ МЕНЮ ---
+        self.app.add_handler(CallbackQueryHandler(main_menu, pattern="^main_menu$"))
+
+        # --- ОБРОБНИКИ МЕНЮ 1-ГО РІВНЯ ---
+        self.app.add_handler(CallbackQueryHandler(realtime_transport, pattern="^realtime_transport$"))
+        self.app.add_handler(CallbackQueryHandler(show_tickets_menu, pattern="^tickets_menu$"))
+        self.app.add_handler(CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"))
+        self.app.add_handler(CallbackQueryHandler(show_info_menu, pattern="^info_menu$"))
+        self.app.add_handler(CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"))
+        self.app.add_handler(CallbackQueryHandler(show_company_menu, pattern="^company_menu$"))
+
+        # --- ОБРОБНИКИ 2-ГО+ РІВНЯ (РОУТЕРИ) ---
+        self.app.add_handler(CallbackQueryHandler(show_passes_list, pattern="^tickets:passes$"))
+        self.app.add_handler(CallbackQueryHandler(handle_ticket_static, pattern="^tickets:"))
+        self.app.add_handler(CallbackQueryHandler(send_rules_pdf, pattern="^info:rules$"))
+        self.app.add_handler(CallbackQueryHandler(handle_info_static, pattern="^info:"))
+        # --- ПОЧАТОК ЗМІН (Музей) --- 03/11/2025
+        # 1. Новий обробник для "Інфо" (фото + текст)
+        self.app.add_handler(CallbackQueryHandler(show_museum_info, pattern="^museum:info$"))
+        # 2. Старий обробник тепер ТІЛЬКИ для "Соц. мережі"
+        self.app.add_handler(CallbackQueryHandler(handle_museum_static,
+                                                  pattern="^museum:socials$"))
+        # (Обробник "museum:register_start" вже є у ConversationHandler,
+        #  тому ці патерни більше не конфліктують)
+        # --- КІНЕЦЬ ЗМІН ---
+
+        # Обробники "Про підприємство" (складніші)
+        self.app.add_handler(
+            CallbackQueryHandler(handle_company_static, pattern="^company:(education|services|socials)$"))
+        self.app.add_handler(CallbackQueryHandler(show_vacancies_menu, pattern="^company:vacancies$"))
+        self.app.add_handler(CallbackQueryHandler(show_vacancy_list, pattern="^vacancy_type:"))
+        self.app.add_handler(CallbackQueryHandler(show_vacancy_details, pattern="^vacancy:"))
+
+        # Обробник "Загублені речі"
+        self.app.add_handler(CallbackQueryHandler(lost_items, pattern="^lost_items$"))
+
+
 
     def start(self):
         logger.info("🚀 Starting bot polling...")
