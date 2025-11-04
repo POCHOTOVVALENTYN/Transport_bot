@@ -143,15 +143,34 @@ class TransportBot:
         museum_conv = ConversationHandler(
             entry_points=[CallbackQueryHandler(museum_register_start, pattern="^museum:register_start$", block=False)],
             states={
-                States.MUSEUM_DATE: [CallbackQueryHandler(museum_get_date, pattern="^museum_date:")],
-                States.MUSEUM_PEOPLE_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_people_count)],
-                States.MUSEUM_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_name)],
-                States.MUSEUM_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_phone_and_save)],
+                States.MUSEUM_DATE: [
+                    CallbackQueryHandler(museum_get_date, pattern="^museum_date:"),
+                    # Додаємо fallback прямо у стан
+                    CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.MUSEUM_PEOPLE_COUNT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_people_count),
+                    # КРИТИЧНО: Додаємо обробку кнопок!
+                    CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.MUSEUM_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_name),
+                    # КРИТИЧНО: Додаємо обробку кнопок!
+                    CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.MUSEUM_PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_phone_and_save),
+                    # КРИТИЧНО: Додаємо обробку кнопок!
+                    CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
             },
-            # 'fallbacks' повертає до меню музею АБО головного меню
             fallbacks=[
                 CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
-                CallbackQueryHandler(main_menu, pattern="^main_menu$")  # <-- ДОДАЙТЕ ЦЕЙ РЯДОК
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
             ]
         )
 

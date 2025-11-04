@@ -29,6 +29,14 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Could not delete message {msg_id} in show_museum_menu: {e}")
         del context.user_data['media_message_ids']
 
+        # Очищуємо всі дані реєстрації, якщо користувач скасував
+    if 'museum_date' in context.user_data:
+        del context.user_data['museum_date']
+    if 'museum_people_count' in context.user_data:
+        del context.user_data['museum_people_count']
+    if 'museum_name' in context.user_data:
+        del context.user_data['museum_name']
+
     keyboard = [
         [InlineKeyboardButton("🖼️ Інфо про музей", callback_data="museum:info")],
         [InlineKeyboardButton("📱 Соц. мережі музею", callback_data="museum:socials")],
@@ -140,6 +148,9 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
     """Початок реєстрації до музею (ДИНАМІЧНИЙ)."""
     query = update.callback_query
     await query.answer()
+
+    #Логування для діагностики
+    logger.info(f"User {update.effective_user.id} started museum registration. Context: {context.user_data}")
 
     try:
         sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
