@@ -3,7 +3,7 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler
 from config.messages import MESSAGES
-from handlers.common import get_back_keyboard
+from handlers.common import get_back_keyboard, get_cancel_keyboard
 from bot.states import States
 from utils.logger import logger
 from config.settings import MUSEUM_LOGO_IMAGE, GOOGLE_SHEETS_ID, MUSEUM_ADMIN_ID
@@ -12,12 +12,14 @@ from integrations.google_sheets.client import GoogleSheetsClient
 
 
 async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показує меню 'Музей'."""
+    """
+    Показує меню 'Музей'.
+    Завершує будь-який активний діалог (напр. реєстрацію).
+    """
     query = update.callback_query
     await query.answer()
 
-    # --- ПОЧАТОК ВИПРАВЛЕННЯ --- 03.11.2025
-    # 1. Блок видалення медіа (фото)
+    # Блок видалення медіа (фото), який у вас вже є
     if 'media_message_ids' in context.user_data:
         chat_id = update.effective_chat.id
         for msg_id in context.user_data['media_message_ids']:
@@ -25,10 +27,7 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
             except Exception as e:
                 logger.warning(f"Could not delete message {msg_id} in show_museum_menu: {e}")
-
-        # Очищуємо список
         del context.user_data['media_message_ids']
-    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     keyboard = [
         [InlineKeyboardButton("🖼️ Інфо про музей", callback_data="museum:info")],
@@ -38,11 +37,28 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
     ]
 
-    await query.edit_message_text(
-        text="🏛️ Розділ 'Музей КП 'ОМЕТ''. Оберіть опцію:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-# --- НОВА ФУНКЦІЇЯ (Надсилання зображення та інформації) --- 03.11.2025 р. 11:28
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = "🏛️ Розділ 'Музей КП 'ОМЕТ''. Оберіть опцію:"
+
+    # --- ПОЧАТОТОК ВИПРАВЛЕННЯ (ЛОГІКА ЯК В MAIN_MENU) ---
+    if query.message.text:
+        # Якщо це було текстове повідомлення, редагуємо
+        await query.edit_message_text(
+            text=text,
+            reply_markup=reply_markup
+        )
+    else:
+        # Якщо це було повідомлення з фото/документом, видаляємо та надсилаємо нове
+        await query.message.delete()
+        await query.message.reply_text(
+            text=text,
+            reply_markup=reply_markup
+        )
+
+    # --- ГОЛОВНЕ ВИПРАВЛЕННЯ ---
+    # Чітко завершуємо ConversationHandler
+    return ConversationHandler.END
+
 
 async def show_museum_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Надсилає фото логотип та інформацію про музей."""
@@ -178,7 +194,11 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_date = query.data.split(":")[1]
     context.user_data['museum_date'] = selected_date
 
-    await query.edit_message_text("Вкажіть кількість осіб у вашій групі (напишіть цифрою):")
+    keyboard = await get_cancel_keyboard("museum_menu")
+    await query.edit_message_text(
+        "Вкажіть кількість осіб у вашій групі (напишіть цифрою):",
+        reply_markup=keyboard
+    )
     return States.MUSEUM_PEOPLE_COUNT
 
 
@@ -209,13 +229,21 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
         return ConversationHandler.END
 
     context.user_data['museum_people_count'] = count
-    await update.message.reply_text("✅ Чудово! Тепер вкажіть Ваше ПІБ (наприклад: Писаренко Олег Анатолійович):")
+    keyboard = await get_cancel_keyboard("museum_menu")
+    await update.message.reply_text(
+        "✅ Чудово! Тепер вкажіть Ваше ПІБ (наприклад: Писаренко Олег Анатолійович):",
+        reply_markup=keyboard
+    )
     return States.MUSEUM_NAME
 
 async def museum_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримує ПІБ та запитує телефон."""
     context.user_data['museum_name'] = update.message.text
-    await update.message.reply_text("📞 Вкажіть контактний телефон для підтвердження (наприклад: 0994564778):")
+    keyboard = await get_cancel_keyboard("museum_menu")
+    await update.message.reply_text(
+        "📞 Вкажіть контактний телефон для підтвердження (наприклад: 0994564778):",
+        reply_markup=keyboard
+    )
     return States.MUSEUM_PHONE
 
 

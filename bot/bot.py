@@ -148,8 +148,11 @@ class TransportBot:
                 States.MUSEUM_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_name)],
                 States.MUSEUM_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_phone_and_save)],
             },
-            # 'fallbacks' повертає до меню музею, а не головного
-            fallbacks=[CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$")]
+            # 'fallbacks' повертає до меню музею АБО головного меню
+            fallbacks=[
+                CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")  # <-- ДОДАЙТЕ ЦЕЙ РЯДОК
+            ]
         )
 
         # Додавання всіх conversation handlers

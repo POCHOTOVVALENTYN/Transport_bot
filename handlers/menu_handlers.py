@@ -1,6 +1,6 @@
 import logging
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, ConversationHandler
 from utils.logger import logger
 # Імпортуємо нашу нову функцію клавіатури
 from handlers.command_handlers import get_main_menu_keyboard
@@ -47,3 +47,6 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=text,
             reply_markup=keyboard
         )
+
+        # Чітко завершуємо ConversationHandler
+    return ConversationHandler.END
