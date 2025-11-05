@@ -125,18 +125,29 @@ async def show_education_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def handle_company_static(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробляє статичні під-меню 'Про підприємство'."""
+    """Обробляє статичні під-меню 'Про підприємство' (зараз - лише 'Соц. мережі')."""
     query = update.callback_query
     await query.answer()
 
-    key = query.data.split(":")[1]
-    text = MESSAGES.get(f"company_{key}", "Інформація не знайдена.")
+    # Отримуємо текст
+    text = MESSAGES.get("company_socials", "Інформація не знайдена.")
 
-    keyboard = await get_back_keyboard("company_menu")
+    # Створюємо нову клавіатуру з вашими посиланнями
+    keyboard = [
+        [InlineKeyboardButton("🖥️ Офіційний сайт", url="https://oget.od.ua")],
+        [InlineKeyboardButton("📸 Instagram", url="https://www.instagram.com/kp_omet")],
+        [InlineKeyboardButton("📘 Facebook", url="https://www.facebook.com/kp.oget/?locale=uk_UA")],
+        # Додаємо стандартні кнопки навігації
+        [InlineKeyboardButton("⬅️ Назад", callback_data="company_menu")],
+        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await query.edit_message_text(
         text=text,
-        reply_markup=keyboard,
-        parse_mode=ParseMode.HTML  # <-- ДОДАЙТЕ ЦЕ
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True # Рекомендую, щоб уникнути 4 прев'ю в повідомленні
     )
 
 
