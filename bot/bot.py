@@ -27,7 +27,7 @@ from handlers.info_handlers import (
 )
 from handlers.company_handlers import (
     show_company_menu, handle_company_static, show_vacancies_menu,
-    show_vacancy_list, show_vacancy_details
+    show_vacancy_list, show_education_menu, show_services_menu
 )
 from handlers.museum_handlers import (
     show_museum_menu, handle_museum_static, museum_register_start,
@@ -263,6 +263,8 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(show_info_menu, pattern="^info_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_company_menu, pattern="^company_menu$"))
+        self.app.add_handler(CallbackQueryHandler(show_vacancies_menu, pattern="^vacancies_menu$"))
+        self.app.add_handler(CallbackQueryHandler(show_education_menu, pattern="^education_menu$"))
 
         # --- ОБРОБНИКИ 2-ГО+ РІВНЯ (РОУТЕРИ) ---
         self.app.add_handler(CallbackQueryHandler(show_passes_list, pattern="^tickets:passes$"))
@@ -281,11 +283,10 @@ class TransportBot:
         # --- КІНЕЦЬ ЗМІН ---
 
         # Обробники "Про підприємство" (складніші)
-        self.app.add_handler(
-            CallbackQueryHandler(handle_company_static, pattern="^company:(education|services|socials)$"))
-        self.app.add_handler(CallbackQueryHandler(show_vacancies_menu, pattern="^company:vacancies$"))
+        self.app.add_handler(CallbackQueryHandler(show_services_menu, pattern="^company:services$"))
+        self.app.add_handler(CallbackQueryHandler(handle_company_static, pattern="^company:socials$"))
         self.app.add_handler(CallbackQueryHandler(show_vacancy_list, pattern="^vacancy_type:"))
-        self.app.add_handler(CallbackQueryHandler(show_vacancy_details, pattern="^vacancy:"))
+
 
         # Обробник "Загублені речі"
         self.app.add_handler(CallbackQueryHandler(lost_items, pattern="^lost_items$"))

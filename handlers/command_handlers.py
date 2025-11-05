@@ -12,6 +12,8 @@ async def get_main_menu_keyboard():
         [InlineKeyboardButton("🎫 Квитки та тарифи", callback_data="tickets_menu")],
         [InlineKeyboardButton("✍️ Зворотній зв'язок", callback_data="feedback_menu")],
         [InlineKeyboardButton("ℹ️ Довідкова інформація", callback_data="info_menu")],
+        [InlineKeyboardButton("👔 Вакансії", callback_data="vacancies_menu")],
+        [InlineKeyboardButton("🎓 Навчально-курсовий комбінат", callback_data="education_menu")],
         [InlineKeyboardButton("🏛️ Музей КП 'ОМЕТ'", callback_data="museum_menu")],
         [InlineKeyboardButton("🏢 Про підприємство", callback_data="company_menu")],
     ]

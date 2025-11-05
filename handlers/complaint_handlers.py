@@ -136,12 +136,25 @@ async def complaint_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return States.COMPLAINT_DATETIME  # Повертаємо на той самий крок
 
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ: Блок "Успіх" ---
+    # Валідація пройдена:
+    context.user_data['complaint_datetime'] = datetime_text
+    logger.info(f"DateTime: {datetime_text}")
+
+    # Запитуємо ПІБ
+    await update.message.reply_text(
+        MESSAGES['complaint_name'],
+        reply_markup=keyboard
+    )
+    return States.COMPLAINT_NAME  # <-- Повертаємо НАСТУПНИЙ стан
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+
 async def complaint_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримання та ВАЛІДАЦІЯ ПІБ."""
     name_text = update.message.text.strip()
     keyboard = await get_cancel_keyboard("feedback_menu")
 
-    # ВАЛІДАЦІЯ: (тільки літери, пробіли, дефіси, апостроф, від 5 символів)
+    # ВАЛІДАЦІЯ ПІБ:
     if not re.match(r"^[А-Яа-яЇїІіЄєҐґA-Za-z\s'-]{5,}$", name_text):
         await update.message.reply_text(
             f"❌ Будь ласка, введіть коректне ПІБ (тільки літери, довжина від 5 символів).",
@@ -149,15 +162,18 @@ async def complaint_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return States.COMPLAINT_NAME # Повертаємо на той самий крок
 
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ: Блок "Успіх" ---
     # Валідація пройдена:
     context.user_data['complaint_name'] = name_text
     logger.info(f"Name: {name_text}")
 
+    # Запитуємо Телефон
     await update.message.reply_text(
         MESSAGES['complaint_phone'],
         reply_markup=keyboard
     )
-    return States.COMPLAINT_PHONE # <-- Новий стан
+    return States.COMPLAINT_PHONE # <-- Повертаємо НАСТУПНИЙ стан
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
 
 async def complaint_save(update: Update, context: ContextTypes.DEFAULT_TYPE):

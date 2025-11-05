@@ -42,3 +42,5 @@ DOCUMENTS_PATH = BASE_DIR / "documents"
 RULES_PDF_PATH = DOCUMENTS_PATH / "rules_of_use.pdf"
 
 MUSEUM_LOGO_IMAGE = IMAGES_PATH / "museum_logo.png"
+
+RENTAL_SERVICE_IMAGE = IMAGES_PATH / "rental_service.jpg"

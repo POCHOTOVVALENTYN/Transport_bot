@@ -1,4 +1,5 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 from utils.logger import logger
 from handlers.common import get_back_keyboard
@@ -33,9 +34,24 @@ async def lost_items(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     text = """
-🔍 Інформаційний центр знаходиться за адресою: [Адреса]. 
-Телефон: [Телефон]. 
-Години роботи: [Години].
+🔍 <b>Загубили речі в нашому транспорті?</b>
+
+Забрати загублені речі можна у <b>Інформаційному центрі</b> КП "ОМЕТ".
+
+📍 <b>Адреса:</b>
+м. Одеса, вул. Водопровідна, 1
+
+📞 <b>Телефон:</b>
+<code>048-717-54-54</code>
+
+🗓️ <b>Графік роботи:</b>
+Пн - Нд, з 8:00 до 20:00
     """
+
     keyboard = await get_back_keyboard("feedback_menu")
-    await query.edit_message_text(text=text, reply_markup=keyboard)
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=keyboard,
+        parse_mode=ParseMode.HTML # <-- Додаємо HTML для <b> та <code>
+    )
