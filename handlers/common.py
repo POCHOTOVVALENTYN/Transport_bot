@@ -26,3 +26,13 @@ async def get_cancel_keyboard(cancel_callback: str = "museum_menu") -> InlineKey
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(keyboard)
+
+async def get_feedback_cancel_keyboard(cancel_callback: str = "feedback_menu") -> InlineKeyboardMarkup:
+    """
+    Повертає клавіатуру для скасування діалогів зворотнього зв'язку.
+    """
+    keyboard = [
+        [InlineKeyboardButton("🚫 Скасувати", callback_data=cancel_callback)],
+        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
