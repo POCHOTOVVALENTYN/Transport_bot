@@ -4,9 +4,22 @@ from utils.logger import logger
 
 
 async def show_feedback_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показує меню 'Зворотній зв'язок'"""
+    """Показує меню 'Зворотній зв'язок' та очищує будь-який діалог."""
     query = update.callback_query
     await query.answer()
+
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ: Очищення ---
+    # Видаляємо останнє повідомлення-запитання з діалогу (якщо воно є)
+    if 'dialog_message_id' in context.user_data:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=context.user_data['dialog_message_id']
+            )
+        except Exception as e:
+            logger.warning(f"Could not delete dialog message on cancel: {e}")
+        del context.user_data['dialog_message_id']
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     keyboard = [
         [InlineKeyboardButton("😞 Залишити скаргу", callback_data="complaint")],
@@ -16,10 +29,24 @@ async def show_feedback_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")],
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = "✍️ Оберіть опцію зворотнього зв'язку:"
 
-    await query.edit_message_text(
-        text="✍️ Оберіть опцію зворотнього зв'язку:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ: Логіка Edit/Delete ---
+    # (Потрібно, бо ми можемо прийти сюди з текстового повідомлення)
+    try:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=reply_markup
+        )
+    except Exception:
+        # Повідомлення не було текстовим (напр., помилка) або було видалено
+        # Просто видаляємо поточне і надсилаємо нове
+        await query.message.delete()
+        await query.message.reply_text(
+            text=text,
+            reply_markup=reply_markup
+        )
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     return ConversationHandler.END

@@ -20,15 +20,17 @@ async def complaint_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Початок скарги"""
     logger.info(f"User {update.effective_user.id} started complaint")
     keyboard = await get_cancel_keyboard("feedback_menu") # <-- Додаємо клавіатуру
-    await update.callback_query.edit_message_text(
+    sent_message = await update.callback_query.edit_message_text(
         text=MESSAGES['complaint_start'],
-        reply_markup=keyboard # <-- Додаємо клавіатуру
+        reply_markup=keyboard
     )
+    context.user_data['dialog_message_id'] = sent_message.message_id  # Зберігаємо ID
     return States.COMPLAINT_PROBLEM
 
 
 async def complaint_get_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримання проблеми та запит маршруту."""
+    await update.message.delete()  # Видаляємо відповідь користувача
     context.user_data['complaint_problem'] = update.message.text
     logger.info(f"Problem: {update.message.text[:50]}")
 
@@ -43,6 +45,7 @@ async def complaint_get_route(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def complaint_get_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримання та ВАЛІДАЦІЯ маршруту."""
+    await update.message.delete()  # Видаляємо відповідь користувача
     route_text = update.message.text.strip()
     keyboard = await get_cancel_keyboard("feedback_menu")
 
@@ -69,6 +72,7 @@ async def complaint_get_board(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def complaint_get_datetime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримання та ВАЛІДАЦІЯ бортового номера."""
+    await update.message.delete()  # Видаляємо відповідь користувача
     board_text = update.message.text.strip()
     keyboard = await get_cancel_keyboard("feedback_menu")
 
@@ -96,6 +100,7 @@ async def complaint_get_datetime(update: Update, context: ContextTypes.DEFAULT_T
 
 async def complaint_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримання та ВАЛІДАЦІЯ дати/часу."""
+    await update.message.delete()  # Видаляємо відповідь користувача
     datetime_text = update.message.text.strip()
     keyboard = await get_cancel_keyboard("feedback_menu")
 
@@ -151,6 +156,7 @@ async def complaint_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def complaint_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримання та ВАЛІДАЦІЯ ПІБ."""
+    await update.message.delete()  # Видаляємо відповідь користувача
     name_text = update.message.text.strip()
     keyboard = await get_cancel_keyboard("feedback_menu")
 

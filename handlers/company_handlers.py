@@ -127,6 +127,27 @@ async def show_services_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=reply_markup
         )
 
+async def show_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує інформацію про Історію підприємства."""
+    query = update.callback_query
+    await query.answer()
+
+    text = MESSAGES.get("company_history")
+
+    # Створюємо клавіатуру з посиланням та кнопками навігації
+    keyboard = [
+        [InlineKeyboardButton("📖 Дізнатися більше на сайті", url="https://oget.od.ua/about")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="company_menu")],
+        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+
 async def show_education_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Показує інформацію про 'Навчально-курсовий комбінат'.
