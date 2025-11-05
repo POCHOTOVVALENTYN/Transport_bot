@@ -37,6 +37,7 @@ async def show_company_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         # Припускаю, що "Вакансії" та "Навчання" вже перенесені
+        [InlineKeyboardButton("🏛️ Історія та сучасність", callback_data="company:history")],
         [InlineKeyboardButton("🚌 Оренда та послуги", callback_data="company:services")],
         [InlineKeyboardButton("📰 Новини / Соц. мережі", callback_data="company:socials")],
         [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")],
@@ -60,6 +61,28 @@ async def show_company_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
     # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+
+    async def show_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показує інформацію про Історію підприємства."""
+        query = update.callback_query
+        await query.answer()
+
+        text = MESSAGES.get("company_history")
+
+        # Створюємо клавіатуру з посиланням та кнопками навігації
+        keyboard = [
+            [InlineKeyboardButton("📖 Дізнатися більше на сайті", url="https://oget.od.ua/about")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="company_menu")],
+            [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await query.edit_message_text(
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
+
 
 async def show_services_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Надсилає ОДНЕ фото з підписом та кнопками про Оренду."""
@@ -147,7 +170,7 @@ async def handle_company_static(update: Update, context: ContextTypes.DEFAULT_TY
         text=text,
         reply_markup=reply_markup,
         parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True # Рекомендую, щоб уникнути 4 прев'ю в повідомленні
+        disable_web_page_preview=True # Рекомендую, щоб уникнути 4 превʼю в повідомленні
     )
 
 

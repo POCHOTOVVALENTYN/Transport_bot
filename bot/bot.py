@@ -27,7 +27,8 @@ from handlers.info_handlers import (
 )
 from handlers.company_handlers import (
     show_company_menu, handle_company_static, show_vacancies_menu,
-    show_vacancy_list, show_education_menu, show_services_menu
+    show_vacancy_list, show_education_menu, show_services_menu,
+    show_history_menu
 )
 from handlers.museum_handlers import (
     show_museum_menu, handle_museum_static, museum_register_start,
@@ -283,6 +284,7 @@ class TransportBot:
         # --- КІНЕЦЬ ЗМІН ---
 
         # Обробники "Про підприємство" (складніші)
+        self.app.add_handler(CallbackQueryHandler(show_history_menu, pattern="^company:history$"))
         self.app.add_handler(CallbackQueryHandler(show_services_menu, pattern="^company:services$"))
         self.app.add_handler(CallbackQueryHandler(handle_company_static, pattern="^company:socials$"))
         self.app.add_handler(CallbackQueryHandler(show_vacancy_list, pattern="^vacancy_type:"))
