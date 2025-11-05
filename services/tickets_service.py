@@ -79,25 +79,29 @@ class TicketsService:
     async def create_suggestion_ticket(
             self,
             telegram_id: int,
-            text: str,
-            contact_info: str = "N/A"
+            suggestion_data: dict
     ) -> dict:
-        """Створення тікету пропозиції"""
+        """Створення тікету пропозиції (Оновлено)"""
         try:
             ticket_id = format_ticket_id()
 
+            # Дані, які ми отримуємо
+            text = suggestion_data.get("text", "")
+            user_name = suggestion_data.get("user_name", "Анонімно")
+            user_phone = suggestion_data.get("user_phone", "N/A")
+
+            # Формування рядка згідно 9 колонок:
+            # Дата | Номер | Тип | Пріоритет | Маршрут | Опис | Борт | ПІБ | Телефон
             row_data = [
-                datetime.now().strftime("%d.%m.%Y %H:%M"),
-                ticket_id,
-                "💡 Пропозиція",
-                "🟢 Низька",
-                "N/A",  # Маршрут
-                text[:100],
-                "N/A",  # Борт
-                contact_info.split(',')[0].strip() if contact_info != "N/A" else "Анонімно",  # Імя
-                contact_info if contact_info != "N/A" else "N/A",  # Телефон/Контакт
-                "",
-                ""
+                datetime.now().strftime("%d.%m.%Y %H:%M"),  # Дата реєстрації
+                ticket_id,  # Номер пропозиції
+                "💡 Пропозиція",  # Тип
+                "🟢 Низька",  # Пріоритет
+                "N/A",  # № Маршруту
+                text[:100],  # Опис
+                "N/A",  # Бортовий №
+                user_name,  # П.І.Б.
+                user_phone  # Телефон
             ]
 
             success = self.sheets.append_row(
@@ -122,27 +126,26 @@ class TicketsService:
             logger.error(f"❌ Error creating suggestion: {e}")
             return {"success": False, "message": "❌ Сталася помилка"}
 
+
     async def create_thanks_ticket(
             self,
             telegram_id: int,
-            text: str,
-            route: str = None,
-            board_number: str = None
+            thanks_data: dict
     ) -> dict:
         """Створення тікету подяки"""
         try:
             ticket_id = format_ticket_id()
 
             row_data = [
-                datetime.now().strftime("%d.%m.%Y %H:%M"),
-                ticket_id,
-                "✅ Подяка",
-                "🟢 Низька",
-                route or "N/A",
-                text[:100],
-                board_number or "N/A",
-                "Користувач",
-                "N/A",
+                datetime.now().strftime("%d.%m.%Y %H:%M"),  # Дата
+                ticket_id,  # ID
+                "✅ Подяка",  # Статус
+                "🟢 Низька",  # Пріоритет
+                thanks_data.get("route") or "N/A",  # Маршрут
+                thanks_data.get("text", "")[:100],  # Текст
+                thanks_data.get("board_number") or "N/A",  # Борт
+                thanks_data.get("user_name", "Анонім"),  # ІМ'Я
+                "N/A",  # Телефон (не збираємо)
                 "",
                 ""
             ]
@@ -156,7 +159,7 @@ class TicketsService:
                 return {
                     "success": True,
                     "ticket_id": ticket_id,
-                    "message": f"❤️ Дякуємо за зворотний зв'язок!\nНомер: {ticket_id}"
+                    "message": f"❤️ Дякуємо! Вашу подяку зареєстровано.\nНомер: {ticket_id}"
                 }
             else:
                 return {"success": False, "message": "❌ Помилка"}

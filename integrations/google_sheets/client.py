@@ -33,7 +33,7 @@ class GoogleSheetsClient:
             self,
             sheet_name: str,
             values: List,
-            value_input_option: str = 'USER_ENTERED'
+            value_input_option: str = 'RAW'
     ) -> bool:
         """Додавання рядка в таблицю"""
         try:

@@ -9,8 +9,7 @@ from telegram.ext import (
 from handlers.command_handlers import cmd_start, cmd_help
 from handlers.complaint_handlers import (
     complaint_start, complaint_get_route, complaint_get_board,
-    complaint_get_datetime, complaint_get_contact, complaint_save,
-    thanks_start, thanks_get_route, thanks_get_board, thanks_save,
+    complaint_get_datetime, complaint_get_name, complaint_get_phone, complaint_save,
 )
 from handlers.menu_handlers import main_menu
 
@@ -35,11 +34,22 @@ from handlers.museum_handlers import (
     museum_get_date, museum_get_people_count, museum_get_name,
     museum_get_phone_and_save, show_museum_info
 )
-from handlers.suggestion_handlers import (
-    suggestion_start, suggestion_get_text, suggestion_save, suggestion_skip_contact
+from handlers.thanks_handlers import (
+    thanks_start, thanks_ask_specific, thanks_get_route,
+    thanks_get_board, thanks_ask_name, thanks_get_name, thanks_save
 )
 
-# --- КІНЕЦЬ НОВИХ ІМПОРТІВ ---
+from handlers.suggestion_handlers import (
+    suggestion_start, suggestion_ask_contact, suggestion_get_name,
+    suggestion_get_phone, suggestion_save_with_contacts, suggestion_save_anonymously
+)
+
+
+from handlers.admin_handlers import (
+    admin_menu, admin_add_date_start, admin_add_date_save,
+    admin_del_date_menu, admin_del_date_confirm, admin_menu_show,
+    admin_show_bookings # Нова функція зі списком
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,42 +75,119 @@ class TransportBot:
 
         # CONVERSATION: СКАРГИ (існуючий)
         complaint_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(complaint_start, pattern="^complaint$")],
-            # <-- ДОДАНО block=False
+            entry_points=[CallbackQueryHandler(complaint_start, pattern="^complaint$", block=False)],
             states={
-                States.COMPLAINT_PROBLEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_route)],
-                States.COMPLAINT_ROUTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_board)],
-                States.COMPLAINT_BOARD: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_datetime)],
-                States.COMPLAINT_DATETIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_contact)],
-                States.COMPLAINT_CONTACT: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_save)],
-            },
-            fallbacks=[CallbackQueryHandler(main_menu, pattern="^main_menu$")]
-        )
-
-        # CONVERSATION: ПОДЯКИ (існуючий)
-        thanks_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(thanks_start, pattern="^thanks$")],
-            # <-- ДОДАНО block=False
-            states={
-                States.THANKS_PROBLEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_get_route)],
-                States.THANKS_ROUTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_get_board)],
-                States.THANKS_BOARD: [MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_save)],
-            },
-            fallbacks=[CallbackQueryHandler(main_menu, pattern="^main_menu$")]
-        )
-
-        # NEW CONVERSATION: ПРОПОЗИЦІЇ
-        suggestion_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(suggestion_start, pattern="^suggestion$")],
-            # <-- ДОДАНО block=False
-            states={
-                States.SUGGESTION_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_get_text)],
-                States.SUGGESTION_CONTACT: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_save),
-                    CommandHandler("skip", suggestion_skip_contact)
+                States.COMPLAINT_PROBLEM: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_route),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.COMPLAINT_ROUTE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_board),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.COMPLAINT_BOARD: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_datetime),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.COMPLAINT_DATETIME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_name),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.COMPLAINT_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_phone),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.COMPLAINT_PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_save),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
             },
-            fallbacks=[CallbackQueryHandler(main_menu, pattern="^main_menu$")]
+            fallbacks=[
+                CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+            ]
+        )
+
+
+        # CONVERSATION: ПОДЯКИ (ОНОВЛЕНО)
+        thanks_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(thanks_start, pattern="^thanks$", block=False)],
+            states={
+                States.THANKS_PROBLEM: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_ask_specific),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.THANKS_ASK_SPECIFIC: [
+                    CallbackQueryHandler(thanks_get_route, pattern="^thanks_specific:yes$"),
+                    CallbackQueryHandler(thanks_ask_name, pattern="^thanks_specific:no$"),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.THANKS_ROUTE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_get_board),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.THANKS_BOARD: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_ask_name),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.THANKS_ASK_NAME: [
+                    CallbackQueryHandler(thanks_get_name, pattern="^thanks_name:yes$"),
+                    CallbackQueryHandler(thanks_save, pattern="^thanks_name:no$"),  # Зберегти анонімно
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.THANKS_GET_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_save),  # Зберегти з ім'ям
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+            },
+            fallbacks=[
+                CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+            ]
+        )
+
+        # NEW CONVERSATION: ПРОПОЗИЦІЇ (Оновлено)
+        suggestion_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(suggestion_start, pattern="^suggestion$", block=False)],
+            states={
+                States.SUGGESTION_TEXT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_ask_contact),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.SUGGESTION_ASK_CONTACT: [
+                    CallbackQueryHandler(suggestion_get_name, pattern="^suggestion_contact:yes$"),
+                    CallbackQueryHandler(suggestion_save_anonymously, pattern="^suggestion_contact:no$"),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.SUGGESTION_GET_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_get_phone),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.SUGGESTION_GET_PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_save_with_contacts),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+            },
+            fallbacks=[
+                CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+            ]
         )
 
         # NEW CONVERSATION: РЕЄСТРАЦІЯ В МУЗЕЙ
@@ -137,12 +224,32 @@ class TransportBot:
                 CallbackQueryHandler(main_menu, pattern="^main_menu$")
             ]
         )
+        # NEW CONVERSATION: АДМІН-ПАНЕЛЬ МУЗЕЮ
+        admin_conv = ConversationHandler(
+            entry_points=[
+                CommandHandler("admin_museum", admin_menu),  # Додаткова команда
+                CallbackQueryHandler(admin_add_date_start, pattern="^admin_add_date$"),
+                CallbackQueryHandler(admin_del_date_menu, pattern="^admin_del_date_menu$"),
+                CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$")
+            ],
+            states={
+                States.ADMIN_STATE_ADD_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_date_save)],
+                States.ADMIN_STATE_DEL_DATE_CONFIRM: [
+                    CallbackQueryHandler(admin_del_date_confirm, pattern="^admin_del_confirm:")]
+            },
+            fallbacks=[
+                CommandHandler("admin_museum", admin_menu),
+                CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$")
+            ],
+            block=False
+        )
 
         # Додавання всіх conversation handlers
         self.app.add_handler(complaint_conv)
         self.app.add_handler(thanks_conv)
         self.app.add_handler(suggestion_conv)
         self.app.add_handler(museum_conv)
+        self.app.add_handler(admin_conv)
 
         logger.info("✅ All handlers configured")
 
@@ -162,6 +269,7 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(handle_ticket_static, pattern="^tickets:"))
         self.app.add_handler(CallbackQueryHandler(send_rules_pdf, pattern="^info:rules$"))
         self.app.add_handler(CallbackQueryHandler(handle_info_static, pattern="^info:"))
+        self.app.add_handler(CallbackQueryHandler(admin_show_bookings, pattern="^admin_show_bookings$"))
         # --- ПОЧАТОК ЗМІН (Музей) --- 03/11/2025
         # 1. Новий обробник для "Інфо" (фото + текст)
         self.app.add_handler(CallbackQueryHandler(show_museum_info, pattern="^museum:info$"))

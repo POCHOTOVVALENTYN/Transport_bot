@@ -1,10 +1,10 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+from telegram.ext import ContextTypes, ConversationHandler
 from utils.logger import logger
 
 
 async def show_feedback_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показує меню 'Зворотний зв'язок'"""
+    """Показує меню 'Зворотній зв'язок'"""
     query = update.callback_query
     await query.answer()
 
@@ -18,6 +18,8 @@ async def show_feedback_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
 
     await query.edit_message_text(
-        text="✍️ Оберіть опцію зворотного зв'язку:",
+        text="✍️ Оберіть опцію зворотнього зв'язку:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+    return ConversationHandler.END
