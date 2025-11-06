@@ -30,15 +30,6 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Очищуємо список
         del context.user_data['media_message_ids']
 
-    if 'dialog_message_id' in context.user_data:
-        try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=context.user_data['dialog_message_id']
-            )
-        except Exception as e:
-            logger.warning(f"Could not delete dialog message on main_menu: {e}")
-        del context.user_data['dialog_message_id']
 
     keyboard = await get_main_menu_keyboard()
     text = "🚊 Оберіть потрібну опцію:"
