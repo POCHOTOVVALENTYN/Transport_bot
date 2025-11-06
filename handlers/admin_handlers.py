@@ -26,15 +26,16 @@ async def is_admin(update: Update) -> bool:
 
 # Головне меню адміна
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Вхідна точка для команди /admin_museum.
+    Перевіряє права та перенаправляє на показ повного меню.
+    """
     if not await is_admin(update):
         return ConversationHandler.END
 
-    keyboard = [
-        [InlineKeyboardButton("➕ Додати дату екскурсії", callback_data="admin_add_date")],
-        [InlineKeyboardButton("➖ Видалити дату екскурсії", callback_data="admin_del_date_menu")],
-    ]
-    await update.message.reply_text("Вітаю в адмін-панелі Музею!", reply_markup=InlineKeyboardMarkup(keyboard))
-    return ConversationHandler.END  # Просто показуємо меню
+    # Просто викликаємо нашу "правильну" функцію показу меню
+    # Вона покаже 4 кнопки і завершить будь-який діалог
+    return await admin_menu_show(update, context)
 
 
 # --- Потік додавання дати ---
@@ -90,7 +91,7 @@ async def admin_add_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"✅ Дату '<b>{date_text}</b>' успішно додано.", parse_mode=ParseMode.HTML)
 
         # Повертаємося до головного адмін-меню
-        await admin_menu(update, context) # Показуємо меню
+        await admin_menu_show(update, context) # Показуємо повне меню
         return ConversationHandler.END # Завершуємо діалог
 
     except ValueError as e:
@@ -109,7 +110,7 @@ async def admin_add_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Failed to add date by admin: {e}")
         await update.message.reply_text(f"❌ Сталася системна помилка при додаванні дати: {e}")
 
-        await admin_menu(update, context) # Показуємо меню
+        await admin_menu_show(update, context) # Показуємо ПОВНЕ меню
         return ConversationHandler.END
 
 
@@ -217,17 +218,34 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # Обробник для повернення в адмін-меню
-# Обробник для повернення в адмін-меню
 async def admin_menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Повертає адміна до ПОВНОГО головного меню адмін-панелі."""
-    query = update.callback_query
-    await query.answer()
-
-    # Отримуємо повну клавіатуру з 4 кнопками
+    """
+    Повертає адміна до ПОВНОГО головного меню адмін-панелі.
+    Працює і з командами (/admin_museum), і з кнопками (Назад).
+    """
     keyboard = await get_admin_main_menu_keyboard()
+    text = "👋 Вітаю, Максиме! Ви в адмін-панелі Музею."
 
-    await query.edit_message_text(
-        "👋 Вітаю, Максиме! Ви в адмін-панелі Музею.", # Використовуємо той самий текст, що й у /start
-        reply_markup=keyboard
-    )
+    if update.callback_query:
+        # Якщо це натискання кнопки
+        await update.callback_query.answer()
+        try:
+            await update.callback_query.edit_message_text(
+                text=text,
+                reply_markup=keyboard
+            )
+        except Exception as e:
+            # Помилка (напр., повідомлення те саме) - просто видаляємо та надсилаємо нове
+            await update.callback_query.message.delete()
+            await update.effective_chat.send_message(
+                text=text,
+                reply_markup=keyboard
+            )
+    else:
+        # Якщо це команда /admin_museum
+        await update.effective_chat.send_message(
+            text=text,
+            reply_markup=keyboard
+        )
+
     return ConversationHandler.END
