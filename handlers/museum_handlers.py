@@ -41,6 +41,17 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Could not delete message {msg_id}: {e}")
         del context.user_data['media_message_ids']
 
+    # Видаляємо останнє повідомлення-запитання з діалогу (якщо воно є)
+    if 'dialog_message_id' in context.user_data:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=context.user_data['dialog_message_id']
+            )
+        except Exception as e:
+            logger.warning(f"Could not delete dialog message on cancel (museum): {e}")
+        del context.user_data['dialog_message_id']
+
     # --- ВИДАЛЯЄМО ПОВІДОМЛЕННЯ З ДАТАМИ ---
     if 'dates_message_id' in context.user_data:
         try:
@@ -222,7 +233,7 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         # Зберігаємо ID нового повідомлення
-        context.user_data['dates_message_id'] = sent_message.message_id
+        context.user_data['dialog_message_id'] = sent_message.message_id
         # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
         return States.MUSEUM_DATE
 
@@ -254,92 +265,121 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- ВИПРАВЛЕННЯ: Видаляємо повідомлення з датами ---
     if 'dates_message_id' in context.user_data:
         try:
+            # 1. Видаляємо список дат
             await context.bot.delete_message(
                 chat_id=update.effective_chat.id,
-                message_id=context.user_data['dates_message_id']
+                message_id=context.user_data['dialog_message_id']  # <-- Використовуємо новий ключ
             )
-            logger.info(f"✅ Deleted dates message: {context.user_data['dates_message_id']}")
         except Exception as e:
-            logger.warning(f"Could not delete dates message: {e}")
-        del context.user_data['dates_message_id']
-    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+            logger.warning(f"Could not delete dates message in museum_get_date: {e}")
+        keyboard = await get_cancel_keyboard("museum_menu")  # <-- Кнопка "Скасувати реєстрацію"
 
-    # Надсилаємо НОВЕ повідомлення (не редагуємо!)
-    sent_message = await query.message.reply_text(
-        "Вкажіть кількість осіб у вашій групі (напишіть цифрою):",
-        reply_markup=keyboard
-    )
-    context.user_data['cancel_message_id'] = sent_message.message_id
+        # 2. Надсилаємо нове запитання
+        sent_message = await query.message.reply_text(
+            "Вкажіть кількість осіб у вашій групі (напишіть цифрою):",
+            reply_markup=keyboard
+        )
+        # 3. Зберігаємо ID нового запитання
+        context.user_data['dialog_message_id'] = sent_message.message_id
 
-    return States.MUSEUM_PEOPLE_COUNT
+        return States.MUSEUM_PEOPLE_COUNT
 
 
 async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отримує кількість осіб."""
-
-    # --- ДОДАНО: Видаляємо повідомлення користувача ---
-    try:
-        await update.message.delete()
-    except Exception as e:
-        logger.warning(f"Could not delete user message: {e}")
-    # --- КІНЕЦЬ ДОДАВАННЯ ---
+    """Отримує кількість осіб та запитує ПІБ."""
+    await update.message.delete() # 1. Видаляємо відповідь користувача
 
     try:
-        count = int(update.message.text)
+        count_text = update.message.text
+        count = int(count_text)
     except ValueError:
-        await update.message.reply_text("❌ Будь ласка, введіть число. Скільки осіб?")
-        return States.MUSEUM_PEOPLE_COUNT
+        count = 0 # Якщо ввели не число
 
-    if count == 1:
-        keyboard = await get_back_keyboard("museum_menu")
-        await update.message.reply_text(
-            "😢 На жаль, екскурсії проводяться для груп від 2-х осіб. "
-            "Будь ласка, зателефонуйте 050-399-42-11, можливо, ми зможемо додати вас до вже існуючої групи.",
+    keyboard = await get_cancel_keyboard("museum_menu")
+
+    # 2. Видаляємо попереднє запитання бота
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete people count message: {e}")
+
+    # ВАЛІДАЦІЯ (як у вас і було)
+    if count <= 0:
+        sent_message = await update.message.reply_text(
+            "❌ Введіть коректну кількість осіб (цифрою, більше 0).",
             reply_markup=keyboard
         )
-        return ConversationHandler.END
+        context.user_data['dialog_message_id'] = sent_message.message_id
+        return States.MUSEUM_PEOPLE_COUNT # Повертаємо на той самий крок
 
     if count > 10:
-        keyboard = await get_back_keyboard("museum_menu")
+        # Це кінець діалогу, просто надсилаємо повідомлення (ID не зберігаємо)
         await update.message.reply_text(
-            "📞 Для груп понад 10 осіб потрібна індивідуальна домовленість. "
-            "Будь ласка, зателефонуйте організатору за номером 050-399-42-11.",
-            reply_markup=keyboard
+            "Для груп понад 10 осіб потрібна індивідуальна домовленість.\n"
+            "Будь ласка, зателефонуйте організатору за номером <code>050-399-42-11</code>.",
+            reply_markup=await get_back_keyboard("museum_menu"), # Кнопка "Назад"
+            parse_mode=ParseMode.HTML
         )
-        return ConversationHandler.END
+        context.user_data.clear()
+        return ConversationHandler.END # Завершуємо
 
+    # Валідація пройдена:
     context.user_data['museum_people_count'] = count
-    keyboard = await get_cancel_keyboard("museum_menu")
+    logger.info(f"People count: {count}")
+
+    # 3. Надсилаємо нове запитання
     sent_message = await update.message.reply_text(
         "✅ Чудово! Тепер вкажіть Ваше ПІБ (наприклад: Писаренко Олег Анатолійович):",
         reply_markup=keyboard
     )
-    context.user_data['cancel_message_id'] = sent_message.message_id
+    # 4. Зберігаємо ID нового запитання
+    context.user_data['dialog_message_id'] = sent_message.message_id
+
     return States.MUSEUM_NAME
 
 async def museum_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримує ПІБ та запитує телефон."""
-
-    # --- ДОДАНО: Видаляємо повідомлення користувача ---
-    try:
-        await update.message.delete()
-    except Exception as e:
-        logger.warning(f"Could not delete user message: {e}")
-    # --- КІНЕЦЬ ДОДАВАННЯ ---
-
+    await update.message.delete() # 1. Видаляємо відповідь користувача
     context.user_data['museum_name'] = update.message.text
     keyboard = await get_cancel_keyboard("museum_menu")
-    # --- ЗМІНА: Зберігаємо ID повідомлення ---
+
+    # 2. Видаляємо попереднє запитання бота
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete name message: {e}")
+
+    # 3. Надсилаємо нове запитання
     sent_message = await update.message.reply_text(
         "📞 Вкажіть контактний телефон для підтвердження (наприклад: 0994564778):",
         reply_markup=keyboard
     )
-    context.user_data['cancel_message_id'] = sent_message.message_id
+    # 4. Зберігаємо ID нового запитання
+    context.user_data['dialog_message_id'] = sent_message.message_id
+
     return States.MUSEUM_PHONE
 
 
 async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Зберігає реєстрацію, пише в Sheet ТА надсилає адміну."""
+
+    await update.message.delete()  # 1. Видаляємо відповідь користувача (телефон)
+
+    # 2. Видаляємо попереднє запитання бота
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete final museum message: {e}")
+
     # Отримуємо дані з context та останнього повідомлення
     date = context.user_data.get('museum_date', 'НЕ ВКАЗАНО')
     count = context.user_data.get('museum_people_count', 'НЕ ВКАЗАНО')
