@@ -102,7 +102,7 @@ async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYP
     return States.SUGGESTION_GET_PHONE
 
 
-async def suggestion_save_with_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def suggestion_get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримання та ВАЛІДАЦІЯ телефону. Збереження з контактами."""
     await update.message.delete()
     phone_text = update.message.text.strip()
@@ -127,17 +127,29 @@ async def suggestion_save_with_contacts(update: Update, context: ContextTypes.DE
         context.user_data['dialog_message_id'] = sent_message.message_id
         return States.SUGGESTION_GET_PHONE
 
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+    # Валідація пройдена:
     context.user_data['suggestion_phone'] = phone_text
     logger.info(f"Suggestion Phone: {phone_text}")
 
-    suggestion_data = {
-        "text": context.user_data.get('suggestion_text'),
-        "user_name": context.user_data.get('suggestion_name'),
-        "user_phone": context.user_data.get('suggestion_phone')
-    }
+    # 1. Видаляємо попереднє запитання бота
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete final suggestion message: {e}")
 
-    await _save_suggestion(update, context, suggestion_data)
-    return ConversationHandler.END
+    # 2. Надсилаємо нове запитання (про Email) та зберігаємо його ID
+    sent_message = await update.message.reply_text(
+        MESSAGES['suggestion_email'],
+        reply_markup=keyboard
+    )
+    context.user_data['dialog_message_id'] = sent_message.message_id
+
+    return States.SUGGESTION_EMAIL  # <-- Повертаємо новий стан
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
 
 async def suggestion_save_anonymously(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -192,3 +204,44 @@ async def _save_suggestion(update, context: ContextTypes.DEFAULT_TYPE, suggestio
         await reply_func("❌ Сталася помилка при збереженні пропозиції.")
 
     context.user_data.clear()
+
+
+async def suggestion_save_with_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отримання та ВАЛІДАЦІЯ email. Збереження з контактами."""
+    await update.message.delete()  # 1. Видаляємо відповідь користувача (email)
+    email_text = update.message.text.strip()
+    keyboard = await get_feedback_cancel_keyboard("feedback_menu")
+
+    # 2. Видаляємо попереднє запитання бота
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete final suggestion message: {e}")
+
+    # ВАЛІДАЦІЯ EMAIL (проста):
+    if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email_text):
+        sent_message = await update.message.reply_text(
+            f"❌ Не схоже на email адресу.\n\n"
+            f"Будь ласка, введіть коректний email (наприклад: <code>example@gmail.com</code>).",
+            reply_markup=keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        context.user_data['dialog_message_id'] = sent_message.message_id
+        return States.SUGGESTION_EMAIL # Повертаємо на той самий крок
+
+    # Валідація пройдена, збираємо дані
+    context.user_data['suggestion_email'] = email_text
+    logger.info(f"Suggestion Email: {email_text}")
+
+    suggestion_data = {
+        "text": context.user_data.get('suggestion_text'),
+        "user_name": context.user_data.get('suggestion_name'),
+        "user_phone": context.user_data.get('suggestion_phone'),
+        "user_email": context.user_data.get('suggestion_email') # <-- Нове поле
+    }
+
+    await _save_suggestion(update, context, suggestion_data)
+    return ConversationHandler.END

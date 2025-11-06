@@ -46,6 +46,7 @@ class TicketsService:
                 complaint_data.get("board_number", "N/A"),  # Борт
                 complaint_data.get("user_name", ""),  # Імя
                 complaint_data.get("user_phone", ""),  # Телефон
+                complaint_data.get("user_email", "N/A"), # J
                 "",  # Примітки (порожньо)
                 ""  # Адмін (порожньо)
             ]
@@ -101,7 +102,8 @@ class TicketsService:
                 text[:100],  # Опис
                 "N/A",  # Бортовий №
                 user_name,  # П.І.Б.
-                user_phone  # Телефон
+                user_phone,  # Телефон
+                suggestion_data.get("user_email", "N/A")  # J
             ]
 
             success = self.sheets.append_row(

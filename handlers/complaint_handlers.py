@@ -236,7 +236,7 @@ async def complaint_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE
     return States.COMPLAINT_PHONE
 
 
-async def complaint_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def complaint_get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримання та ВАЛІДАЦІЯ телефону. Збереження скарги."""
     await update.message.delete()  # 1. Видаляємо відповідь користувача
     phone_text = update.message.text.strip()
@@ -263,8 +263,58 @@ async def complaint_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return States.COMPLAINT_PHONE # Повертаємо на той самий крок
 
     # Валідація пройдена, збираємо дані (решта функції як у вас)
+    # Валідація пройдена:
     context.user_data['complaint_phone'] = phone_text
     logger.info(f"Phone: {phone_text}")
+
+    # 1. Видаляємо попереднє запитання бота
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete final complaint message: {e}")
+
+    # 2. Надсилаємо нове запитання (про Email) та зберігаємо його ID
+    sent_message = await update.message.reply_text(
+        MESSAGES['complaint_email'],
+        reply_markup=keyboard
+    )
+    context.user_data['dialog_message_id'] = sent_message.message_id
+
+    return States.COMPLAINT_EMAIL  # <-- Повертаємо новий стан
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+
+async def complaint_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отримання та ВАЛІДАЦІЯ email. Фінальне збереження скарги."""
+    await update.message.delete()  # 1. Видаляємо відповідь користувача (email)
+    email_text = update.message.text.strip()
+    keyboard = await get_feedback_cancel_keyboard("feedback_menu")
+
+    # 2. Видаляємо попереднє запитання бота
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete final complaint message: {e}")
+
+    # ВАЛІДАЦІЯ EMAIL (проста):
+    if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email_text):
+        sent_message = await update.message.reply_text(
+            f"❌ Не схоже на email адресу.\n\n"
+            f"Будь ласка, введіть коректний email (наприклад: <code>example@gmail.com</code>).",
+            reply_markup=keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        context.user_data['dialog_message_id'] = sent_message.message_id
+        return States.COMPLAINT_EMAIL # Повертаємо на той самий крок
+
+    # Валідація пройдена, збираємо всі дані
+    context.user_data['complaint_email'] = email_text
+    logger.info(f"Email: {email_text}")
 
     complaint_data = {
         "problem": context.user_data.get('complaint_problem'),
@@ -272,7 +322,8 @@ async def complaint_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "board_number": context.user_data.get('complaint_board'),
         "incident_datetime": context.user_data.get('complaint_datetime'),
         "user_name": context.user_data.get('complaint_name'),
-        "user_phone": context.user_data.get('complaint_phone')
+        "user_phone": context.user_data.get('complaint_phone'),
+        "user_email": context.user_data.get('complaint_email') # <-- Нове поле
     }
 
     try:

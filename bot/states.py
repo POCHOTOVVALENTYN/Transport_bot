@@ -24,6 +24,8 @@ class States:
     SUGGESTION_ASK_CONTACT = 21  # <-- НОВИЙ: Запитати "Так/Ні"
     SUGGESTION_GET_NAME = 22  # <-- НОВИЙ: Отримати ПІБ
     SUGGESTION_GET_PHONE = 23
+    COMPLAINT_EMAIL = 24
+    SUGGESTION_EMAIL = 25
 
     # Нові стани для реєстрації в музей
     MUSEUM_DATE = 11

@@ -9,7 +9,8 @@ from telegram.ext import (
 from handlers.command_handlers import cmd_start, cmd_help
 from handlers.complaint_handlers import (
     complaint_start, complaint_get_route, complaint_get_board,
-    complaint_get_datetime, complaint_get_name, complaint_get_phone, complaint_save,
+    complaint_get_datetime, complaint_get_name, complaint_get_phone,complaint_get_email,
+    complaint_save,
 )
 from handlers.menu_handlers import main_menu
 
@@ -42,7 +43,8 @@ from handlers.thanks_handlers import (
 
 from handlers.suggestion_handlers import (
     suggestion_start, suggestion_ask_contact, suggestion_get_name,
-    suggestion_get_phone, suggestion_save_with_contacts, suggestion_save_anonymously
+    suggestion_get_phone, suggestion_get_email, suggestion_save_with_email,
+    suggestion_save_anonymously
 )
 
 
@@ -104,10 +106,17 @@ class TransportBot:
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
                 States.COMPLAINT_PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_email),  # <-- ЗМІНЕНО
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                # --- ДОДАЙТЕ ЦЕЙ БЛОК ---
+                States.COMPLAINT_EMAIL: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_save),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
+                # --- КІНЕЦЬ ДОДАВАННЯ ---
             },
             fallbacks=[
                 CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
@@ -180,10 +189,17 @@ class TransportBot:
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
                 States.SUGGESTION_GET_PHONE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_save_with_contacts),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_get_email),  # <-- ЗМІНЕНО
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
+                # --- ДОДАЙТЕ ЦЕЙ БЛОК ---
+                States.SUGGESTION_EMAIL: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_save_with_email),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                # --- КІНЕЦЬ ДОДАВАННЯ ---
             },
             fallbacks=[
                 CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
