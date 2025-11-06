@@ -1,13 +1,15 @@
 import logging
 import re
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, \
     filters
 from config.settings import MUSEUM_ADMIN_ID, GOOGLE_SHEETS_ID
 from integrations.google_sheets.client import GoogleSheetsClient
 from utils.logger import logger
 from bot.states import States
+from handlers.command_handlers import get_admin_main_menu_keyboard
 
 # Стани для адміна
 (ADMIN_STATE_ADD_DATE, ADMIN_STATE_DEL_DATE_CONFIRM) = range(16, 18)  # Використовуємо нові стани
@@ -215,12 +217,17 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # Обробник для повернення в адмін-меню
+# Обробник для повернення в адмін-меню
 async def admin_menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Повертає адміна до ПОВНОГО головного меню адмін-панелі."""
     query = update.callback_query
     await query.answer()
-    keyboard = [
-        [InlineKeyboardButton("➕ Додати дату екскурсії", callback_data="admin_add_date")],
-        [InlineKeyboardButton("➖ Видалити дату екскурсії", callback_data="admin_del_date_menu")],
-    ]
-    await query.edit_message_text("Адмін-панель Музею:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    # Отримуємо повну клавіатуру з 4 кнопками
+    keyboard = await get_admin_main_menu_keyboard()
+
+    await query.edit_message_text(
+        "👋 Вітаю, Максиме! Ви в адмін-панелі Музею.", # Використовуємо той самий текст, що й у /start
+        reply_markup=keyboard
+    )
     return ConversationHandler.END
