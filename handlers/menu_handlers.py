@@ -31,7 +31,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del context.user_data['media_message_ids']
 
 
-    keyboard = await get_main_menu_keyboard()
+    keyboard = await get_main_menu_keyboard(update.effective_user.id)
     text = "🚊 Оберіть потрібну опцію:"
 
     if query.message.text:

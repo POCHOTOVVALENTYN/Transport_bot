@@ -5,8 +5,8 @@ from utils.logger import logger
 from config.settings import MUSEUM_ADMIN_ID
 
 
-async def get_main_menu_keyboard():
-    """Повертає клавіатуру головного меню"""
+async def get_main_menu_keyboard(user_id: int):
+    """Повертає клавіатуру головного меню (з адмін-кнопкою, якщо потрібно)"""
     keyboard = [
         [InlineKeyboardButton("📍 Де мій транспорт? (Real-time)", callback_data="realtime_transport")],
         [InlineKeyboardButton("🎫 Квитки та тарифи", callback_data="tickets_menu")],
@@ -17,6 +17,12 @@ async def get_main_menu_keyboard():
         [InlineKeyboardButton("🏛️ Музей КП 'ОМЕТ'", callback_data="museum_menu")],
         [InlineKeyboardButton("🏢 Про підприємство", callback_data="company_menu")],
     ]
+    # Якщо це адмін музею, додаємо йому кнопку "Повернутися в адмінку"
+    if user_id == MUSEUM_ADMIN_ID:
+        keyboard.append(
+            [InlineKeyboardButton("⚙️ Адмін-панель", callback_data="admin_menu_show")]
+        )
+
     return InlineKeyboardMarkup(keyboard)
 
 async def get_admin_main_menu_keyboard():
@@ -44,7 +50,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         # --- Меню для Звичайного Користувача ---
-        keyboard = await get_main_menu_keyboard()
+        keyboard = await get_main_menu_keyboard(user_id)
         await update.message.reply_text(
             MESSAGES['welcome'],  # Ваш WELCOME_MESSAGE
             reply_markup=keyboard
