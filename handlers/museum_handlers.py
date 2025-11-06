@@ -374,10 +374,17 @@ async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAUL
             f"👤 <b>ПІБ:</b> {name}\n"
             f"📞 <b>Телефон:</b> {phone}"
         )
+
+        keyboard = [
+            [InlineKeyboardButton("⚙️ Адмін-панель", callback_data="admin_menu_show")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
         await context.bot.send_message(
             chat_id=MUSEUM_ADMIN_ID,
             text=admin_message,
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup
         )
         logger.info(f"✅ Museum booking notification sent to MUSEUM_ADMIN_ID {MUSEUM_ADMIN_ID}")
 
