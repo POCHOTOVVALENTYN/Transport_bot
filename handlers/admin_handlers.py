@@ -152,15 +152,47 @@ async def admin_del_date_confirm(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
     if query.from_user.id != MUSEUM_ADMIN_ID: return ConversationHandler.END
 
-    cell_to_delete = query.data.split(":")[1]  # "A5"
+    cell_to_delete = query.data.split(":")[1] # "A5"
+
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+
+    # 1. Створюємо клавіатуру "Назад" ЗАЗДАЛЕГІДЬ
+    keyboard_back = [
+        [InlineKeyboardButton("⬅️ Назад до адмін-панелі", callback_data="admin_menu_show")]
+    ]
+    reply_markup_back = InlineKeyboardMarkup(keyboard_back)
+
+    # 2. (Покращення) Отримуємо текст кнопки, яку натиснули
+    #    (Ваш старий код [0][0] працював би, лише якщо натиснути першу кнопку)
+    date_str = ""
+    for row in query.message.reply_markup.inline_keyboard:
+        if row[0].callback_data == query.data:
+            date_str = row[0].text.replace("❌ ", "")
+            break
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     try:
         sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
         sheets.clear_cell(sheet_name="MuseumDates", cell=cell_to_delete)
-        await query.edit_message_text(f"✅ Дату в комірці {cell_to_delete} видалено. Оновіть меню.")
+
+        # --- ПОЧАТОК ВИПРАВЛЕННЯ 2 ---
+        # Додаємо reply_markup до повідомлення
+        await query.edit_message_text(
+            text=f"✅ Дату '{date_str}' (комірка {cell_to_delete}) видалено.",
+            reply_markup=reply_markup_back
+        )
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ 2 ---
+
     except Exception as e:
         logger.error(f"Failed to delete date: {e}")
-        await query.edit_message_text(f"❌ Помилка при видаленні: {e}")
+
+        # --- ПОЧАТОК ВИПРАВЛЕННЯ 3 ---
+        # Додаємо reply_markup до повідомлення про помилку
+        await query.edit_message_text(
+            text=f"❌ Помилка при видаленні: {e}",
+            reply_markup=reply_markup_back
+        )
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ 3 ---
 
     return ConversationHandler.END
 
