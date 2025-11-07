@@ -8,9 +8,7 @@ from telegram.ext import (
 # --- Старі імпорти ---
 from handlers.command_handlers import cmd_start, cmd_help
 from handlers.complaint_handlers import (
-    complaint_start, complaint_get_route, complaint_get_board,
-    complaint_get_datetime, complaint_get_name, complaint_get_phone,complaint_get_email,
-    complaint_save,
+    complaint_start_simplified, complaint_save_simplified
 )
 from handlers.menu_handlers import main_menu
 
@@ -44,7 +42,7 @@ from handlers.thanks_handlers import (
 from handlers.suggestion_handlers import (
     suggestion_start, suggestion_ask_contact, suggestion_get_name,
     suggestion_get_phone, suggestion_get_email, suggestion_save_with_email,
-    suggestion_save_anonymously
+    suggestion_save_anonymously,  suggestion_save_skip_email
 )
 
 
@@ -78,45 +76,14 @@ class TransportBot:
 
         # CONVERSATION: СКАРГИ (існуючий)
         complaint_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(complaint_start, pattern="^complaint$", block=False)],
+            entry_points=[CallbackQueryHandler(complaint_start_simplified, pattern="^complaint$", block=False)],
             states={
-                States.COMPLAINT_PROBLEM: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_route),
+                States.COMPLAINT_AWAIT_TEXT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_save_simplified),
+                    # Обробка кнопок "Скасувати" та "Головне меню"
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
-                States.COMPLAINT_ROUTE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_board),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                States.COMPLAINT_BOARD: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_datetime),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                States.COMPLAINT_DATETIME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_name),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                States.COMPLAINT_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_phone),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                States.COMPLAINT_PHONE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_get_email),  # <-- ЗМІНЕНО
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                # --- ДОДАЙТЕ ЦЕЙ БЛОК ---
-                States.COMPLAINT_EMAIL: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_save),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                # --- КІНЕЦЬ ДОДАВАННЯ ---
             },
             fallbacks=[
                 CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
@@ -152,7 +119,6 @@ class TransportBot:
                 ],
                 States.THANKS_ASK_NAME: [
                     CallbackQueryHandler(thanks_get_name, pattern="^thanks_name:yes$"),
-                    CallbackQueryHandler(thanks_save, pattern="^thanks_name:no$"),  # Зберегти анонімно
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
@@ -196,6 +162,8 @@ class TransportBot:
                 # --- ДОДАЙТЕ ЦЕЙ БЛОК ---
                 States.SUGGESTION_EMAIL: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_save_with_email),
+                    # Додаємо обробник для кнопки "Пропустити"
+                    CallbackQueryHandler(suggestion_save_skip_email, pattern="^suggestion_skip_email$"),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],

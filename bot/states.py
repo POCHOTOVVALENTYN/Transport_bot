@@ -4,12 +4,7 @@ class States:
     """Стани для ConversationHandlers"""
 
     # Стани для скарг (оновлені, 1, 2, 3, 4, 5 + 15)
-    COMPLAINT_PROBLEM = 1
-    COMPLAINT_ROUTE = 2
-    COMPLAINT_BOARD = 3
-    COMPLAINT_DATETIME = 4
-    COMPLAINT_NAME = 5  # Замість COMPLAINT_CONTACT
-    COMPLAINT_PHONE = 15  # <--- Новий стан
+    COMPLAINT_AWAIT_TEXT = 1
 
     # Стани для подяк (існуючі)
     THANKS_PROBLEM = 6

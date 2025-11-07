@@ -3,7 +3,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from config.messages import MESSAGES
 from config.settings import (
-    TICKET_PASSES_IMAGE_1, TICKET_PASSES_IMAGE_2
+    TICKET_PASSES_FILE_ID_1, TICKET_PASSES_FILE_ID_2
 )
 from handlers.common import get_back_keyboard # <-- Використовуємо get_back_keyboard
 from telegram.constants import ParseMode
@@ -62,37 +62,34 @@ async def show_tickets_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def show_passes_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Надсилає 2 зображення з видами проїзних, а потім текстове повідомлення."""
+    """Надсилає 2 зображення за file_id, а потім текстове повідомлення."""
     query = update.callback_query
+
+    # --- ПОКРАЩЕННЯ: Миттєво відповідаємо на запит ---
+    # Це прибере "помилку" (тайм-аут) на кнопці у користувача
     await query.answer()
 
-    # Отримуємо клавіатуру "Назад", яку прикріпимо до ОСТАННЬОГО повідомлення
     keyboard = await get_back_keyboard("tickets_menu")
-
-    # Отримуємо текст для ОСТАННЬОГО повідомлення
     purchase_info_text = MESSAGES.get("tickets_purchase_info")
 
     try:
         # 1. Видаляємо поточне повідомлення (меню "Квитки та тарифи")
         await query.delete_message()
 
-        # 2. Надсилаємо перше зображення (без кнопок)
-        with open(TICKET_PASSES_IMAGE_1, 'rb') as photo_1:
-            sent_photo_1 = await query.message.reply_photo(
-                photo=photo_1,
-                caption="Види проїзних (Частина 1)"
-            )
+        # 2. Надсилаємо перше зображення (миттєво, за file_id)
+        sent_photo_1 = await query.message.reply_photo(
+            photo=TICKET_PASSES_FILE_ID_1,
+            caption="Види проїзних (Частина 1)"
+        )
 
-        # 3. Надсилаємо друге зображення (без кнопок)
-        with open(TICKET_PASSES_IMAGE_2, 'rb') as photo_2:
-            sent_photo_2 = await query.message.reply_photo(
-                photo=photo_2,
-                caption="Види проїзних (Частина 2)"
-            )
-        # 4. Зберігаємо ID надісланих фото у context.user_data
-        #    Ми будемо використовувати цей список для їх видалення пізніше
+        # 3. Надсилаємо друге зображення (миттєво, за file_id)
+        sent_photo_2 = await query.message.reply_photo(
+            photo=TICKET_PASSES_FILE_ID_2,
+            caption="Види проїзних (Частина 2)"
+        )
+
+        # 4. Зберігаємо ID надісланих фото для подальшого видалення
         context.user_data['media_message_ids'] = [sent_photo_1.message_id, sent_photo_2.message_id]
-
 
         # 5. Надсилаємо текстове повідомлення (з кнопками "Назад")
         await query.message.reply_text(
@@ -101,20 +98,13 @@ async def show_passes_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML
         )
 
-        logger.info("✅ Passes images and info text sent successfully")
+        logger.info("✅ Passes images (from file_id) sent successfully")
 
-    except FileNotFoundError as e:
-        logger.error(f"❌ Image file not found: {e.filename}")
-        # Відправляємо повідомлення про помилку з кнопками
-        await query.message.reply_text(
-            "❌ Зображення не знайдено. Спробуйте пізніше.",
-            reply_markup=keyboard
-        )
     except Exception as e:
-        logger.error(f"❌ Error sending passes images: {e}")
-        # Відправляємо повідомлення про помилку з кнопками
+        # Ця помилка може виникнути, якщо file_id стане недійсним
+        logger.error(f"❌ Error sending passes images by file_id: {e}")
         await query.message.reply_text(
-            "❌ Сталася помилка при завантаженні зображення.",
+            "❌ Сталася помилка при завантаженні зображення (file_id invalid?).",
             reply_markup=keyboard
         )
 

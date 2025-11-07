@@ -42,7 +42,7 @@ class TicketsService:
                 get_status_emoji(TicketStatus.NEW),  # Статус
                 "🟡 Середня",  # Пріоритет
                 complaint_data.get("route", "N/A"),  # Маршрут
-                complaint_data.get("problem", "")[:100],  # Перші 100 символів
+                complaint_data.get("problem", ""),  # повний опис
                 complaint_data.get("board_number", "N/A"),  # Борт
                 complaint_data.get("user_name", ""),  # Імя
                 complaint_data.get("user_phone", ""),  # Телефон

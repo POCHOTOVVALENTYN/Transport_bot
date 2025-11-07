@@ -103,10 +103,18 @@ async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def suggestion_get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отримання та ВАЛІДАЦІЯ телефону. Збереження з контактами."""
+    """Отримання та ВАЛІДАЦІЯ телефону. Запит Email."""
     await update.message.delete()
     phone_text = update.message.text.strip()
-    keyboard = await get_feedback_cancel_keyboard("feedback_menu")
+
+    # 1. Створюємо список кнопок (це звичайний Python list)
+    keyboard_markup = [
+        [InlineKeyboardButton("➡️ Пропустити", callback_data="suggestion_skip_email")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")],
+        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+    ]
+    # 2. Створюємо об'єкт клавіатури (це об'єкт InlineKeyboardMarkup)
+    keyboard = InlineKeyboardMarkup(keyboard_markup)
 
     try:
         await context.bot.delete_message(
@@ -114,42 +122,47 @@ async def suggestion_get_email(update: Update, context: ContextTypes.DEFAULT_TYP
             message_id=context.user_data['dialog_message_id']
         )
     except Exception as e:
-        logger.warning(f"Could not delete final suggestion message: {e}")
+        logger.warning(f"Could not delete previous suggestion message: {e}")
 
-    # ВАЛІДАЦІЯ ТЕЛЕФОНУ (як у скаргах)
+    # ВАЛІДАЦІЯ ТЕЛЕФОНУ
     if not re.match(r"^(\+?38)?0\d{9}$", phone_text.replace(" ", "").replace("-", "")):
         sent_message = await update.message.reply_text(
             f"❌ Не схоже на український номер телефону.\n\n"
             f"Введіть номер у форматі <code>0991234567</code>.",
+
+            # --- ВИПРАВЛЕННЯ ЙМОВІРНО ТУТ ---
+            # Переконайтеся, що тут 'keyboard', а НЕ 'keyboard_markup'
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML
         )
         context.user_data['dialog_message_id'] = sent_message.message_id
         return States.SUGGESTION_GET_PHONE
 
-    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
     # Валідація пройдена:
     context.user_data['suggestion_phone'] = phone_text
     logger.info(f"Suggestion Phone: {phone_text}")
 
-    # 1. Видаляємо попереднє запитання бота
+    # (Цей блок try/except був у вашому коді, я його залишив, хоча він може бути зайвим,
+    # оскільки ми вже видалили повідомлення вище)
     try:
         await context.bot.delete_message(
             chat_id=update.effective_chat.id,
             message_id=context.user_data['dialog_message_id']
         )
     except Exception as e:
-        logger.warning(f"Could not delete final suggestion message: {e}")
+        logger.warning(f"Could not delete final suggestion message: {e}")  # Це 'Message not found' з вашого логу
 
     # 2. Надсилаємо нове запитання (про Email) та зберігаємо його ID
     sent_message = await update.message.reply_text(
         MESSAGES['suggestion_email'],
+
+        # --- АБО ВИПРАВЛЕННЯ ЙМОВІРНО ТУТ ---
+        # Переконайтеся, що тут 'keyboard', а НЕ 'keyboard_markup'
         reply_markup=keyboard
     )
     context.user_data['dialog_message_id'] = sent_message.message_id
 
-    return States.SUGGESTION_EMAIL  # <-- Повертаємо новий стан
-    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+    return States.SUGGESTION_EMAIL
 
 
 async def suggestion_save_anonymously(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -176,19 +189,35 @@ async def suggestion_save_anonymously(update: Update, context: ContextTypes.DEFA
     return ConversationHandler.END
 
 
+# handlers/suggestion_handlers.py
+
+# ... (переконайтеся, що 'Update' імпортовано з 'telegram' у верхній частині файлу)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+# ... (інші імпорти)
+
+
 async def _save_suggestion(update, context: ContextTypes.DEFAULT_TYPE, suggestion_data: dict):
     """Внутрішня функція збереження пропозиції."""
 
-    if hasattr(update, 'message') and update.message is not None:
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+    # Ми очікуємо 'update' різного типу:
+    # 1. Update (якщо викликано з ...with_email)
+    # 2. CallbackQuery (якщо викликано з ...anonymously)
+
+    if isinstance(update, Update):
+        # Випадок 1: Це повний об'єкт Update (з MessageHandler)
         reply_func = update.message.reply_text
+        user_id = update.effective_user.id
     else:
-        # Це CallbackQuery, але ми не можемо .edit_message_text(), бо ми видалили повідомлення
+        # Випадок 2: Це об'єкт CallbackQuery (з CallbackQueryHandler)
         reply_func = update.message.reply_text
+        user_id = update.from_user.id
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     try:
         service = TicketsService()
         result = await service.create_suggestion_ticket(
-            telegram_id=update.effective_user.id,
+            telegram_id=user_id,  # <-- Тепер тут правильний ID
             suggestion_data=suggestion_data
         )
 
@@ -201,9 +230,39 @@ async def _save_suggestion(update, context: ContextTypes.DEFAULT_TYPE, suggestio
 
     except Exception as e:
         logger.error(f"Error saving suggestion: {e}")
+        # Ця функція тепер також гарантовано спрацює
         await reply_func("❌ Сталася помилка при збереженні пропозиції.")
 
     context.user_data.clear()
+
+
+async def suggestion_save_skip_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Натиснуто 'Пропустити' на етапі Email) Збереження без email."""
+    query = update.callback_query
+    await query.answer()
+
+    # 1. Видаляємо запитання про Email
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete suggestion email message: {e}")
+
+    # 2. Збираємо дані (email буде відсутній)
+    suggestion_data = {
+        "text": context.user_data.get('suggestion_text'),
+        "user_name": context.user_data.get('suggestion_name'),
+        "user_phone": context.user_data.get('suggestion_phone'),
+        "user_email": "N/A"  # Вказуємо, що email пропущено
+    }
+
+    logger.info("Suggestion saving (Email skipped)")
+
+    # 3. Викликаємо ту саму функцію збереження, яку ми виправили минулого разу
+    await _save_suggestion(query, context, suggestion_data)
+    return ConversationHandler.END
 
 
 async def suggestion_save_with_email(update: Update, context: ContextTypes.DEFAULT_TYPE):

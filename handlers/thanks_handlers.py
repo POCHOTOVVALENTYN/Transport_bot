@@ -149,13 +149,12 @@ async def thanks_ask_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Ми не будемо його видаляти, а відредагуємо
 
     keyboard_ask_name = [
-        [InlineKeyboardButton("🔘 Так, вказати ім'я", callback_data="thanks_name:yes")],
-        [InlineKeyboardButton("🔘 Залишитися анонімним", callback_data="thanks_name:no")],
+        [InlineKeyboardButton("🔘 Вказати своє П.І.Б.", callback_data="thanks_name:yes")],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")],
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
     ]
 
-    text = "Дякуємо! Бажаєте вказати своє ім'я (щоб ми знали, хто дякує)?"
+    text = "Дякуємо! Вкажіть також Ваші ідентифікаційні дані."
 
     if update.callback_query:
         sent_message = await update.callback_query.edit_message_text(
@@ -187,23 +186,14 @@ async def thanks_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def thanks_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Зберігає подяку (анонімно або з ім'ям)."""
-    user_name = "Анонім"
+    """Зберігає подяку (тільки з ім'ям)."""
+
+    await update.message.delete()
+    name_text = update.message.text.strip()
+    keyboard = await get_feedback_cancel_keyboard("feedback_menu")  # Для помилки валідації
 
     try:
-        # Видаляємо останнє повідомлення (або відповідь, або запитання)
-        if update.message:
-            await update.message.delete()
-            name_text = update.message.text.strip()
-            if re.match(r"^[А-Яа-яЇїІіЄєҐґA-Za-z\s'-]{5,}$", name_text):
-                user_name = name_text
-            else:
-                user_name = "Анонім (ввід не розпізнано)"
-
-        elif update.callback_query:  # Користувач натиснув "Залишитися анонімним"
-            await update.callback_query.answer()
-
-        # Видаляємо останнє запитання бота
+        # Видаляємо останнє запитання бота (про ПІБ)
         await context.bot.delete_message(
             chat_id=update.effective_chat.id,
             message_id=context.user_data['dialog_message_id']
@@ -211,16 +201,31 @@ async def thanks_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.warning(f"Could not delete final thanks messages: {e}")
 
+    # --- ПОКРАЩЕННЯ: Додаємо валідацію ПІБ ---
+    # (Раніше тут була логіка для "Анонім")
+    if not re.match(r"^[А-Яа-яЇїІіЄєҐґA-Za-z\s'-]{5,}$", name_text):
+        sent_message = await update.message.reply_text(
+            f"❌ Будь ласка, введіть коректне ПІБ (тільки літери, довжина від 5 символів).",
+            reply_markup=keyboard
+        )
+        context.user_data['dialog_message_id'] = sent_message.message_id
+        return States.THANKS_GET_NAME  # Повертаємо на крок введення імені
+
+    # Валідація пройдена
+    user_name = name_text
+    logger.info(f"Thanks Name: {user_name}")
+    # --- КІНЕЦЬ ПОКРАЩЕННЯ ---
+
     # Збираємо дані
     thanks_data = {
         "text": context.user_data.get('thanks_text'),
         "route": context.user_data.get('thanks_route'),
         "board_number": context.user_data.get('thanks_board'),
-        "user_name": user_name
+        "user_name": user_name  # Тепер тут завжди буде ім'я
     }
 
-    # Визначаємо, як відповідати
-    reply_func = update.message.reply_text if update.message else update.callback_query.message.reply_text
+    # Відповідь (тепер тільки від MessageHandler, 'elif update.callback_query' видалено)
+    reply_func = update.message.reply_text
 
     try:
         service = TicketsService()
@@ -228,10 +233,10 @@ async def thanks_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
             telegram_id=update.effective_user.id,
             thanks_data=thanks_data
         )
-        keyboard = [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
+        keyboard_final = [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
         await reply_func(
             text=result['message'],
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(keyboard_final)
         )
         logger.info(f"Thanks saved: {result.get('ticket_id')}")
 
