@@ -26,19 +26,15 @@ async def suggestion_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def suggestion_ask_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отримання тексту пропозиції та запит про контакти."""
+    """Отримання тексту пропозиції та ЗАПИТ ПРО ПІБ (анонімність видалено)."""
     await update.message.delete()
     context.user_data['suggestion_text'] = update.message.text
     logger.info(f"Suggestion text: {update.message.text[:50]}")
 
-    keyboard = [
-        [InlineKeyboardButton("🔘 Залишити контакти", callback_data="suggestion_contact:yes")],
-        [InlineKeyboardButton("🔘 Відправити анонімно", callback_data="suggestion_contact:no")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")],
-        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
-    ]
+    keyboard = await get_feedback_cancel_keyboard("feedback_menu")
 
     try:
+        # Видаляємо повідомлення "Опишіть вашу пропозицію"
         await context.bot.delete_message(
             chat_id=update.effective_chat.id,
             message_id=context.user_data['dialog_message_id']
@@ -46,60 +42,15 @@ async def suggestion_ask_contact(update: Update, context: ContextTypes.DEFAULT_T
     except Exception as e:
         logger.warning(f"Could not delete previous suggestion message: {e}")
 
+    # Одразу запитуємо ПІБ
     sent_message = await update.message.reply_text(
-        text=MESSAGES['suggestion_ask_contact'],
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-    context.user_data['dialog_message_id'] = sent_message.message_id
-    return States.SUGGESTION_ASK_CONTACT
-
-
-async def suggestion_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """(Натиснуто 'Залишити контакти') Запитує ПІБ."""
-    query = update.callback_query
-    await query.answer()
-
-    keyboard = await get_feedback_cancel_keyboard("feedback_menu")
-    sent_message = await query.edit_message_text(
-        text=MESSAGES['suggestion_name'],
+        text=MESSAGES['suggestion_name'], # Використовуємо текст із config/messages.py
         reply_markup=keyboard
     )
     context.user_data['dialog_message_id'] = sent_message.message_id
+
+    # Одразу переходимо до стану отримання імені
     return States.SUGGESTION_GET_NAME
-
-
-async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отримання та ВАЛІДАЦІЯ ПІБ."""
-    await update.message.delete()
-    name_text = update.message.text.strip()
-    keyboard = await get_feedback_cancel_keyboard("feedback_menu")
-
-    try:
-        await context.bot.delete_message(
-            chat_id=update.effective_chat.id,
-            message_id=context.user_data['dialog_message_id']
-        )
-    except Exception as e:
-        logger.warning(f"Could not delete previous suggestion message: {e}")
-
-    # ВАЛІДАЦІЯ ПІБ (як у скаргах)
-    if not re.match(r"^[А-Яа-яЇїІіЄєҐґA-Za-z\s'-]{5,}$", name_text):
-        sent_message = await update.message.reply_text(
-            f"❌ Будь ласка, введіть коректне ПІБ (тільки літери, довжина від 5 символів).",
-            reply_markup=keyboard
-        )
-        context.user_data['dialog_message_id'] = sent_message.message_id
-        return States.SUGGESTION_GET_NAME
-
-    context.user_data['suggestion_name'] = name_text
-    logger.info(f"Suggestion Name: {name_text}")
-
-    sent_message = await update.message.reply_text(
-        text=MESSAGES['suggestion_phone'],
-        reply_markup=keyboard
-    )
-    context.user_data['dialog_message_id'] = sent_message.message_id
-    return States.SUGGESTION_GET_PHONE
 
 
 async def suggestion_get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -163,37 +114,6 @@ async def suggestion_get_email(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['dialog_message_id'] = sent_message.message_id
 
     return States.SUGGESTION_EMAIL
-
-
-async def suggestion_save_anonymously(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """(Натиснуто 'Відправити анонімно') Збереження без контактів."""
-    query = update.callback_query
-    await query.answer()
-
-    suggestion_data = {
-        "text": context.user_data.get('suggestion_text'),
-        "user_name": "Анонімно",
-        "user_phone": "N/A"
-    }
-
-    # Видаляємо останнє запитання ("Залишити контакти?")
-    try:
-        await context.bot.delete_message(
-            chat_id=update.effective_chat.id,
-            message_id=context.user_data['dialog_message_id']
-        )
-    except Exception as e:
-        logger.warning(f"Could not delete suggestion ask message: {e}")
-
-    await _save_suggestion(query, context, suggestion_data)
-    return ConversationHandler.END
-
-
-# handlers/suggestion_handlers.py
-
-# ... (переконайтеся, що 'Update' імпортовано з 'telegram' у верхній частині файлу)
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-# ... (інші імпорти)
 
 
 async def _save_suggestion(update, context: ContextTypes.DEFAULT_TYPE, suggestion_data: dict):

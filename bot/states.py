@@ -16,7 +16,6 @@ class States:
 
     # Нові стани для пропозицій
     SUGGESTION_TEXT = 9
-    SUGGESTION_ASK_CONTACT = 21  # <-- НОВИЙ: Запитати "Так/Ні"
     SUGGESTION_GET_NAME = 22  # <-- НОВИЙ: Отримати ПІБ
     SUGGESTION_GET_PHONE = 23
     COMPLAINT_EMAIL = 24

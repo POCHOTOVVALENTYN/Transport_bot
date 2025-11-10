@@ -42,7 +42,7 @@ from handlers.thanks_handlers import (
 from handlers.suggestion_handlers import (
     suggestion_start, suggestion_ask_contact, suggestion_get_name,
     suggestion_get_phone, suggestion_get_email, suggestion_save_with_email,
-    suggestion_save_anonymously,  suggestion_save_skip_email
+    suggestion_save_skip_email # <-- 'suggestion_save_anonymously' видалено
 )
 
 
@@ -140,12 +140,6 @@ class TransportBot:
             states={
                 States.SUGGESTION_TEXT: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_ask_contact),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                States.SUGGESTION_ASK_CONTACT: [
-                    CallbackQueryHandler(suggestion_get_name, pattern="^suggestion_contact:yes$"),
-                    CallbackQueryHandler(suggestion_save_anonymously, pattern="^suggestion_contact:no$"),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
