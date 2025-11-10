@@ -331,7 +331,7 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
 
     # 3. Надсилаємо нове запитання
     sent_message = await update.message.reply_text(
-        "✅ Чудово! Тепер вкажіть Ваше ПІБ (наприклад: Писаренко Олег Анатолійович):",
+        "✅ Чудово! Тепер вкажіть Ваше П.І.Б. (наприклад: Писаренко Олег Анатолійович):",
         reply_markup=keyboard
     )
     # 4. Зберігаємо ID нового запитання
@@ -357,7 +357,7 @@ async def museum_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- ПОЧАТОК БЛОКУ ВАЛІДАЦІЇ ПІБ ---
     if not re.match(r"^[А-Яа-яЇїІіЄєҐґA-Za-z\s'-]{5,}$", name_text):
         sent_message = await update.message.reply_text(
-            f"❌ Будь ласка, введіть коректне ПІБ (тільки літери, довжина від 5 символів).",
+            f"❌ Будь ласка, введіть коректне П.І.Б. (тільки літери, довжина від 5 символів).",
             reply_markup=keyboard
         )
         context.user_data['dialog_message_id'] = sent_message.message_id
