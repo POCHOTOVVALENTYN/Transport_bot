@@ -7,6 +7,7 @@ from bot.states import States
 from handlers.command_handlers import get_main_menu_keyboard
 from handlers.menu_handlers import main_menu
 from config.settings import ROUTES  # Використовуємо ваші маршрути
+from telegram.constants import ChatAction
 
 logger = logging.getLogger(__name__)
 
@@ -215,12 +216,19 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("Дякую! Оброблюю вашу геолокацію...", reply_markup=ReplyKeyboardRemove())
         user_location = update.message.location
         logger.info(f"User location received: {user_location.latitude}, {user_location.longitude}")
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id,
+            action=ChatAction.FIND_LOCATION  # "шукає локацію"
+        )
         context.user_data['stop_name'] = "ТОСТОВЕ ПОВІДОМЛЕННЯ!!!\n\nЗупинка 'Проспект Шевченка' (знайдено по гео)"
 
     elif update.callback_query:
         await update.callback_query.answer()
         stop_id = update.callback_query.data.split(":")[-1]
         logger.info(f"User selected stop from list: {stop_id}")
+        await update.callback_query.edit_message_text(
+            text=f"Дякую! Шукаю інформацію для зупинки '{stop_id}'..."
+        )
         context.user_data['stop_name'] = f"Зупинка '{stop_id}' (обрано зі списку)"
         await update.callback_query.message.delete()
     else:
@@ -246,9 +254,12 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
     ]
 
-    if update.message:
+    # Надсилаємо фінальну відповідь
+    if update.message:  # Якщо прийшла локація
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-    else:
+    else:  # Якщо прийшов callback (зі списку)
+        # Якщо ми прийшли зі списку, ми НЕ МОЖЕМО редагувати
+        # (бо ми вже відредагували на "Дякую! Шукаю..."), тому надсилаємо нове
         await update.callback_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard),
                                                        parse_mode="HTML")
 
