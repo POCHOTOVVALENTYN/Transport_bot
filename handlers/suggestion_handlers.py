@@ -52,6 +52,75 @@ async def suggestion_ask_contact(update: Update, context: ContextTypes.DEFAULT_T
     # Одразу переходимо до стану отримання імені
     return States.SUGGESTION_GET_NAME
 
+async def suggestion_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Натиснуто 'Залишити контакти') Запитує ПІБ."""
+    # Ця функція викликається з suggestion_ask_contact
+    await update.message.delete()
+    name_text = update.message.text.strip()
+    keyboard = await get_feedback_cancel_keyboard("feedback_menu")
+
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete previous suggestion message: {e}")
+
+    # ВАЛІДАЦІЯ ПІБ (як у скаргах)
+    if not re.match(r"^[А-Яа-яЇїІіЄєҐґA-Za-z\s'-]{5,}$", name_text):
+        sent_message = await update.message.reply_text(
+            f"❌ Будь ласка, введіть коректне ПІБ (тільки літери, довжина від 5 символів).",
+            reply_markup=keyboard
+        )
+        context.user_data['dialog_message_id'] = sent_message.message_id
+        return States.SUGGESTION_GET_NAME # Повертаємо на той самий крок
+
+    context.user_data['suggestion_name'] = name_text
+    logger.info(f"Suggestion Name: {name_text}")
+
+    sent_message = await update.message.reply_text(
+        text=MESSAGES['suggestion_phone'],
+        reply_markup=keyboard
+    )
+    context.user_data['dialog_message_id'] = sent_message.message_id
+    return States.SUGGESTION_GET_PHONE
+
+async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отримання та ВАЛІДАЦІЯ ПІБ."""
+    await update.message.delete()
+    name_text = update.message.text.strip()
+    keyboard = await get_feedback_cancel_keyboard("feedback_menu")
+
+    try:
+        await context.bot.delete_message(
+            chat_id=update.effective_chat.id,
+            message_id=context.user_data['dialog_message_id']
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete previous suggestion message: {e}")
+
+    # ВАЛІДАЦІЯ ПІБ (як у скаргах)
+    if not re.match(r"^[А-Яа-яЇїІіЄєҐґA-Za-z\s'-]{5,}$", name_text):
+        sent_message = await update.message.reply_text(
+            f"❌ Будь ласка, введіть коректне ПІБ (тільки літери, довжина від 5 символів).",
+            reply_markup=keyboard
+        )
+        context.user_data['dialog_message_id'] = sent_message.message_id
+        return States.SUGGESTION_GET_NAME
+
+    context.user_data['suggestion_name'] = name_text
+    logger.info(f"Suggestion Name: {name_text}")
+
+    sent_message = await update.message.reply_text(
+        text=MESSAGES['suggestion_phone'],
+        reply_markup=keyboard
+    )
+    context.user_data['dialog_message_id'] = sent_message.message_id
+    return States.SUGGESTION_GET_PHONE
+
+
+
 
 async def suggestion_get_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отримання та ВАЛІДАЦІЯ телефону. Запит Email."""
