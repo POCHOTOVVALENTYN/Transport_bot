@@ -58,17 +58,11 @@ logger = logging.getLogger(__name__)
 class TransportBot:
     """Головний клас бота"""
 
-    def __init__(self, token: str,  stops_cache: dict):
+    def __init__(self, token: str):
         self.token = token
         self.app = Application.builder().token(token).build()
-        # --- 2. ЗБЕРІГАЄМО КЕШ В bot_data ---
-        # context.bot_data доступний у всіх обробниках
-        self.app.bot_data['stops_cache'] = stops_cache
-        if stops_cache and stops_cache.get("routes"):
-            logger.info(f"Кеш збережено в bot_data. Доступно {len(stops_cache['routes'])} маршрутів.")
-        else:
-            logger.warning("Кеш зупинок не завантажено або порожній.")
         self._setup_handlers()
+
 
     def _setup_handlers(self):
         """Налаштування всіх обробників"""

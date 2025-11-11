@@ -4,9 +4,10 @@ import io
 import csv
 import json
 from utils.logger import logger
+from config.settings import GTFS_API_KEY
 
 # --- 1. Налаштування API ---
-API_KEY = "a8c6d35e-f2c1-4f72-b902-831fa9215009"
+API_KEY = GTFS_API_KEY # <-- ВИПРАВЛЕНО
 STATIC_URL = "https://gw.x24.digital/api/od/gtfs/v1/download/static"
 headers = {'ApiKey': API_KEY}
 
