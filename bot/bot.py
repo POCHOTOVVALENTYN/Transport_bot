@@ -14,6 +14,19 @@ from handlers.menu_handlers import main_menu
 
 # --- НОВІ ІМПОРТИ ---
 from bot.states import States
+
+from handlers.accessible_transport_handlers import (
+    accessible_start,
+    accessible_show_routes,
+    accessible_choose_direction,
+    accessible_choose_stop_method,
+    accessible_request_location,
+    accessible_choose_from_list,
+    accessible_process_stub,
+    accessible_notify_me_stub,
+    accessible_text_cancel
+)
+
 from handlers.static_handlers import (
     realtime_transport, lost_items
 )
@@ -223,6 +236,51 @@ class TransportBot:
             ],
             block=False
         )
+        # --- 3. ДОДАЄМО НАШ НОВИЙ CONVERSATION HANDLER ---
+        accessible_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
+            ],
+            states={
+                States.ACCESSIBLE_CHOOSE_ROUTE: [
+                    CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:"),
+                    # Дозволяємо повернутися на старт, якщо натиснути "Назад"
+                    CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
+                ],
+                States.ACCESSIBLE_CHOOSE_DIRECTION: [
+                    CallbackQueryHandler(accessible_choose_direction, pattern="^acc_route:"),
+                    # Дозволяємо повернутися до вибору типу
+                    CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")
+                ],
+                States.ACCESSIBLE_CHOOSE_STOP_METHOD: [
+                    CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:"),
+                    # Дозволяємо повернутися до вибору напрямку
+                    CallbackQueryHandler(accessible_choose_direction, pattern="^acc_route:")
+                ],
+                States.ACCESSIBLE_GET_LOCATION: [
+                    # Обробники для кнопок "Гео" та "Список"
+                    CallbackQueryHandler(accessible_request_location, pattern="^acc_stop:geo$"),
+                    CallbackQueryHandler(accessible_choose_from_list, pattern="^acc_stop:list$"),
+                    # Обробник самої геолокації
+                    MessageHandler(filters.LOCATION, accessible_process_stub),
+                    # Дозволяємо повернутися до вибору методу
+                    CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:")
+                ],
+                States.ACCESSIBLE_CHOOSE_FROM_LIST: [
+                    CallbackQueryHandler(accessible_process_stub, pattern="^acc_stop_select:"),
+                    # Дозволяємо повернутися до вибору методу
+                    CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:")
+                ],
+                States.ACCESSIBLE_AWAIT_NOTIFY: [
+                    CallbackQueryHandler(accessible_notify_me_stub, pattern="^acc_notify_me$")
+                ],
+            },
+            fallbacks=[
+                CallbackQueryHandler(main_menu, pattern="^main_menu$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, accessible_text_cancel)
+            ],
+            block=False
+        )
 
         # Додавання всіх conversation handlers
         self.app.add_handler(complaint_conv)
@@ -230,6 +288,7 @@ class TransportBot:
         self.app.add_handler(suggestion_conv)
         self.app.add_handler(museum_conv)
         self.app.add_handler(admin_conv)
+        self.app.add_handler(accessible_conv)
 
         logger.info("✅ All handlers configured")
 
