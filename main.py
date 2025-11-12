@@ -1,11 +1,11 @@
 # main.py
-import logging
 import asyncio
-from config.settings import TELEGRAM_BOT_TOKEN, LOG_LEVEL
+from config.settings import TELEGRAM_BOT_TOKEN #LOG_LEVEL
 from bot.bot import TransportBot
+from utils.logger import logger
 
-logging.basicConfig(level=getattr(logging, LOG_LEVEL))
-logger = logging.getLogger(__name__)
+
+
 
 async def main():
     """Головна функція запуску бота"""

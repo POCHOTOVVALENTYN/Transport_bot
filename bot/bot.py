@@ -1,5 +1,5 @@
 # bot/bot.py
-import logging
+
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ConversationHandler
@@ -67,7 +67,7 @@ from handlers.admin_handlers import (
     admin_show_bookings # Нова функція зі списком
 )
 
-logger = logging.getLogger(__name__)
+from utils.logger import logger
 
 
 class TransportBot:

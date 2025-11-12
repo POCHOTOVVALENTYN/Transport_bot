@@ -1,10 +1,9 @@
-# handlers/accessible_transport_handlers.py
-import logging
+from utils.logger import logger
 import re  # <--- ДОДАЙТЕ ЦЕЙ РЯДОК
 import math # <--- ДОДАЙТЕ ЦЕЙ РЯДОК
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, \
     ReplyKeyboardRemove
-from telegram.ext import ContextTypes, ConversationHandler
+from telegram.ext import ContextTypes, ConversationHandler, Application
 from bot.states import States
 from handlers.command_handlers import get_main_menu_keyboard
 from handlers.menu_handlers import main_menu
@@ -14,9 +13,6 @@ from telegram.constants import ChatAction
 from services.easyway_service import easyway_service
 import asyncio  # Для Job Queue
 
-# ---
-
-logger = logging.getLogger(__name__)
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -43,43 +39,65 @@ def haversine(lat1, lon1, lat2, lon2):
 # === КРОК 0: Завантаження та кешування ID маршрутів ===
 # Ми зробимо це один раз при старті (в bot/bot.py),
 # щоб зіставити "Трамвай 5" з його EasyWay ID
-async def load_easyway_route_ids(context: ContextTypes.DEFAULT_TYPE):
+async def load_easyway_route_ids(application: Application):
     logger.info("Завантажую EasyWay Route ID...")
     data = await easyway_service.get_routes_list()
     if data.get("error"):
         logger.error(f"Не вдалося завантажити EasyWay Route IDs: {data['error']}")
-        # --- ВИПРАВЛЕННЯ ---
-        context.bot_data['easyway_structured_map'] = {"tram": [], "trolley": []} # Використовуємо "trolley"
+        # 2. Використовуємо 'application.bot_data'
+        application.bot_data['easyway_structured_map'] = {"tram": [], "trolley": []}
         return
 
-    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
-    structured_route_map = {"tram": [], "trolley": []} # <-- Ключ "trolley"
-    for route in data.get("list", []):
-        # 1. Використовуємо "transportKey" згідно з вашим JSON-прикладом
+    # --- ПОЧАТОК ПОКРАЩЕННЯ (ЛОГУВАННЯ) ---
+    route_list_from_api = data.get("list", [])
+    if not route_list_from_api:
+        logger.warning("EasyWay API: Запит успішний, але 'list' (список маршрутів) порожній.")
+    else:
+        # Логуємо перші 2 маршрути, щоб побачити структуру ключів
+        logger.info(f"EasyWay API: Отримано {len(route_list_from_api)} маршрутів. Приклад перших двох:")
+        try:
+            logger.info(f"[Маршрут 1]: {route_list_from_api[0]}")
+            logger.info(f"[Маршрут 2]: {route_list_from_api[1]}")
+        except IndexError:
+            pass  # Не страшно, якщо маршрут лише один
+        # --- КІНЕЦЬ ПОКРАЩЕННЯ (ЛОГУВАННЯ) ---
+
+    structured_route_map = {"tram": [], "trolley": []}
+
+    # Використовуємо нову змінну
+    for route in route_list_from_api:
         route_key = route.get("transportKey")
         route_id = route.get("id")
-        route_name = route.get("name")  # "5", "7", "10A" etc.
+        route_name = route.get("name")
 
         if not route_id or not route_name or not route_key:
-            continue  # Пропускаємо неповні дані
+            # --- ПОКРАЩЕННЯ (ЛОГУВАННЯ) ---
+            logger.warning(f"Пропускаємо маршрут з неповними даними: {route}")
+            # --- КІНЕЦЬ ПОКРАЩЕННЯ ---
+            continue
 
         if route_key == "tram":
             structured_route_map["tram"].append({"id": route_id, "name": route_name})
-        # 2. Використовуємо ключ "trol" згідно з вашим JSON-прикладом
         elif route_key == "trol":
-            structured_route_map["trolley"].append({"id": route_id, "name": route_name}) # <-- Додаємо до списку "trolley"
+            structured_route_map["trolley"].append({"id": route_id, "name": route_name})
 
-    # Сортуємо списки
     try:
         structured_route_map["tram"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0')))
-        structured_route_map["trolley"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0'))) # <-- Сортуємо "trolley"
+        structured_route_map["trolley"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0')))
     except Exception as e:
         logger.warning(f"Не вдалося відсортувати списки маршрутів: {e}")
         pass
 
-    context.bot_data['easyway_structured_map'] = structured_route_map
+        # --- ПОЧАТОК ПОКРАЩЕННЯ (ЛОГУВАННЯ) ---
+        if not structured_route_map["tram"] and not structured_route_map["trolley"]:
+            logger.warning("Парсинг EasyWay: Не знайдено ЖОДНОГО маршруту 'tram' або 'trol'.")
+            logger.warning("Перевірте, чи ключ 'transportKey' та значення 'trol' актуальні.")
+        # --- КІНЕЦЬ ПОКРАЩЕННЯ ---
+
+    # 3. Використовуємо 'application.bot_data'
+    application.bot_data['easyway_structured_map'] = structured_route_map
     logger.info(f"✅ EasyWay Route ID завантажено. {len(structured_route_map['tram'])} трамваїв, {len(structured_route_map['trolley'])} тролейбусів.")
-    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+# --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
 
 # === КРОК 1: Початок -> Вибір Типу (Без змін) ===

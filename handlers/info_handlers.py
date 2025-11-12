@@ -3,10 +3,10 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 from config.messages import MESSAGES
 from handlers.common import get_back_keyboard
-import logging
+from utils.logger import logger
 from config.settings import RULES_PDF_PATH
 
-logger = logging.getLogger(__name__)
+
 
 
 async def show_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):

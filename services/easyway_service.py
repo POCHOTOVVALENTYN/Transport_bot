@@ -1,11 +1,10 @@
-# services/easyway_service.py
+from utils.logger import logger
 import aiohttp
 import logging
 from config.settings import (
     EASYWAY_API_URL, EASYWAY_LOGIN, EASYWAY_PASSWORD, EASYWAY_CITY
 )
 
-logger = logging.getLogger(__name__)
 
 class EasyWayService:
     def __init__(self):

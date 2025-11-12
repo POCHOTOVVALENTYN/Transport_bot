@@ -1,4 +1,3 @@
-import logging
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from config.messages import MESSAGES
@@ -7,8 +6,8 @@ from config.settings import (
 )
 from handlers.common import get_back_keyboard # <-- Використовуємо get_back_keyboard
 from telegram.constants import ParseMode
+from utils.logger import logger
 
-logger = logging.getLogger(__name__)
 
 
 async def show_tickets_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):

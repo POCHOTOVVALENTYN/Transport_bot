@@ -3,12 +3,10 @@ from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from config.messages import MESSAGES
 from handlers.common import get_back_keyboard
-import logging
+from utils.logger import logger
 from telegram.constants import ParseMode
 from config.settings import RENTAL_SERVICE_IMAGE
 
-
-logger = logging.getLogger(__name__)
 
 # База даних вакансій (з досвідом)
 EXPERIENCED_VACANCIES = {
