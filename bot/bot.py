@@ -23,7 +23,7 @@ from handlers.accessible_transport_handlers import (
     accessible_request_location,
     accessible_choose_from_list,
     accessible_process_stub,
-    accessible_notify_me_stub,
+    #accessible_notify_me_stub,
     accessible_text_cancel
 )
 

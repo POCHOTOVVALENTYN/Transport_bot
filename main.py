@@ -1,7 +1,10 @@
 import logging
 from config.settings import TELEGRAM_BOT_TOKEN, LOG_LEVEL
 from bot.bot import TransportBot
-#from services.cache_service import load_stops_cache
+# --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+# 1. Імпортуємо наш новий кеш
+from services.gtfs_cache_service import gtfs_cache
+# --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
 logging.basicConfig(level=getattr(logging, LOG_LEVEL))
 logger = logging.getLogger(__name__)
@@ -14,14 +17,19 @@ async def main():
         logger.error("❌ TELEGRAM_BOT_TOKEN не встановлено в .env")
         return
 
-    # Це синхронна функція, вона виконається до запуску бота
-    #try:
-    #    stops_cache = load_stops_cache()
-    #    if not stops_cache["routes"]:
-    #        logger.warning("⚠️ Увага: Кеш зупинок порожній. Функція пошуку не буде працювати.")
-    #except Exception as e:
-    #    logger.error(f"❌ Не вдалося завантажити кеш зупинок. Помилка: {e}")
-    #    stops_cache = {"routes": {}}  # Створюємо порожній кеш, щоб бот не впав
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+    # 2. Викликаємо завантаження кешу (це синхронна функція)
+    try:
+        logger.info("ℹ️ Завантаження GTFS-кешу...")
+        gtfs_cache.load_all_data()
+        logger.info("✅ GTFS-кеш успішно завантажено.")
+    except Exception as e:
+        logger.error(f"❌ КРИТИЧНА ПОМИЛКА: Не вдалося завантажити GTFS-кеш. {e}", exc_info=True)
+        # УВАГА: В робочому режимі тут можна зупинити бота,
+        # оскільки пошук інклюзивного транспорту не буде працювати.
+        # return
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+
 
     logger.info("🚀 Запуск Telegram бота...")
 
@@ -30,5 +38,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    bot = TransportBot(TELEGRAM_BOT_TOKEN)
-    bot.start()
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+    # 3. Використовуємо async-версію запуску
+    import asyncio
+    asyncio.run(main())
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
