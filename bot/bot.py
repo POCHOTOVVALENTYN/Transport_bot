@@ -77,14 +77,15 @@ class TransportBot:
         self.token = token
         # Додаємо post_init для завантаження кешу EasyWay
         self.app = Application.builder().token(token).post_init(self.post_init).build()
-        self.app = Application.builder().token(token).build()
+
         self._setup_handlers()
 
-        # --- ДОДАЙТЕ ЦЮ НОВУ ФУНКЦІЮ ---
     async def post_init(self, application: Application):
         """Виконується 1 раз ПІСЛЯ запуску, але ДО polling."""
+        # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+        # 2. Видалено зайвий 'await' (синтаксична помилка) з-за меж функції
         await load_easyway_route_ids(application)
-    # --- КІНЕЦЬ НОВОЇ ФУНКЦІЇ ---    await load_easyway_route_ids(application)
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
 
     def _setup_handlers(self):
