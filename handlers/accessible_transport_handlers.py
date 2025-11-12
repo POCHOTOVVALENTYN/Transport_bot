@@ -68,12 +68,17 @@ async def load_easyway_route_ids(application: Application):
 
     # Використовуємо нову змінну
     for route in route_list_from_api:
-        route_key = route.get("transportKey")
+        route_key = route.get("transport")
         route_id = route.get("id")
         # --- 2. ВИПРАВЛЕННЯ КЛЮЧА НАЗВИ ---
         # API повертає "title", а не "name"
         route_name = route.get("title")
         # --- КІНЕЦЬ 2 ---
+
+        if route_name and "Фунікулер" in route_name:
+            logger.info(f"Пропускаємо маршрут 'Фунікулер': {route}")
+            continue  # Не додаємо його до списку
+        # --- КІНЕЦЬ ВИДАЛЕННЯ ФУНІКУЛЕРА ---
 
         if not route_id or not route_name or not route_key:
             # --- ПОКРАЩЕННЯ (ЛОГУВАННЯ) ---
@@ -92,8 +97,8 @@ async def load_easyway_route_ids(application: Application):
             structured_route_map["trolley"].append({"id": route_id, "name": route_name})
 
     try:
-        structured_route_map["tram"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0')))
-        structured_route_map["trolley"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0')))
+        structured_route_map["tram"].sort(key=lambda x: int(re.sub(r'\D', '', x['name']) or '0'))
+        structured_route_map["trolley"].sort(key=lambda x: int(re.sub(r'\D', '', x['name']) or '0'))
     except Exception as e:
         logger.warning(f"Не вдалося відсортувати списки маршрутів: {e}")
         pass
@@ -225,12 +230,24 @@ async def accessible_choose_direction(update: Update, context: ContextTypes.DEFA
         )
         return States.ACCESSIBLE_CHOOSE_DIRECTION
 
-    # 3. Зберегти дані про маршрут для наступних кроків
-    context.user_data['easyway_route_info'] = route_info
+    # handlers/accessible_transport_handlers.py (НОВА ВЕРСІЯ)
 
-    # 4. Створити кнопки напрямків
+    # 3. Отримати ГОЛОВНИЙ ОБ'ЄКТ 'route' з відповіді
+    route_data = route_info.get("route")
+
+    # 3a. Додамо перевірку, що об'єкт 'route' взагалі існує
+    if not route_data:
+        await query.edit_message_text(f"❌ Помилка API: відповідь не містить очікуваного об'єкту 'route'.",
+                                       reply_markup=InlineKeyboardMarkup(
+                                           [[InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]]))
+        return States.ACCESSIBLE_CHOOSE_DIRECTION
+
+    # 3b. Зберігаємо в кеш ТІЛЬКИ 'route_data', а не всю відповідь
+    context.user_data['easyway_route_info'] = route_data
+
+    # 4. Створити кнопки напрямків (тепер шукаємо в 'route_data')
     keyboard = []
-    directions = route_info.get("directions", [])
+    directions = route_data.get("directions", [])  # <-- ВИПРАВЛЕНО
     if not directions:
         await query.edit_message_text(
             f"❌ Не знайдено напрямків для {context.user_data['accessible_route_name']}.",

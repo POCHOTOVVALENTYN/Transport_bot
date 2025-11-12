@@ -44,7 +44,7 @@ async def main():
     except Exception as e:
         logger.error(f"❌ Критична помилка в main (після запуску): {e}", exc_info=True)
     finally:
-        if bot.app.updater and bot.app.updater.is_running:
+        if bot.app.updater and bot.app.updater.running:  # <--- ВИПРАВЛЕНО
             await bot.app.updater.stop()
         if bot.app.running:
             await bot.app.stop()
