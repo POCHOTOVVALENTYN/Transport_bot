@@ -106,7 +106,7 @@ async def thanks_get_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif route_text not in all_route_names:
         sent_message = await update.message.reply_text(
             f"❌ Маршруту '<b>{route_text}</b>' не знайдено в базі EasyWay.\n\n"
-            f"Будь ласка, введіть коректний номер (тільки цифри).",
+            f"Будь ласка, введіть коректний номер (наприклад: 5, 7, 10А).",
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML
         )

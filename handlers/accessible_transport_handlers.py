@@ -262,6 +262,7 @@ async def accessible_request_location(update: Update, context: ContextTypes.DEFA
 
 # === КРОК 5 (Варіант Б): Вибір зі Списку (Повністю нове, з API) ===
 async def accessible_choose_from_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 5Б: Показує список зупинок з API (з пагінацією)."""
     query = update.callback_query
     await query.answer()
 
@@ -279,15 +280,18 @@ async def accessible_choose_from_list(update: Update, context: ContextTypes.DEFA
         await query.edit_message_text(f"❌ Помилка: Не можу знайти зупинки для цього напрямку.")
         return States.ACCESSIBLE_CHOOSE_STOP_METHOD
 
-    # 2. Перетворити ID на імена (вони є в тому ж `route_info`)
-    all_stops_map = {stop['id']: stop['name'] for stop in route_info.get("stops", [])}
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+    # 2. Перетворити ID на повні об'єкти (включно з lat/lon)
+    all_stops_full_map = {stop['id']: stop for stop in route_info.get("stops", [])}
 
-    stops_data = []  # Список (stop_id, stop_name)
+    stops_data = []  # Список (stop_id, stop_name, lat, lon)
     for stop_id in stops_for_direction:
-        stop_name = all_stops_map.get(stop_id, f"Невідома зупинка {stop_id}")
-        stops_data.append((stop_id, stop_name))
+        stop_obj = all_stops_full_map.get(stop_id)
+        if stop_obj:
+            stops_data.append((stop_obj['id'], stop_obj['name'], stop_obj['lat'], stop_obj['lon']))
 
     context.user_data['route_stops_data'] = stops_data  # Зберігаємо повний список
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     # 3. Пагінація
     page = 0
@@ -301,10 +305,12 @@ async def accessible_choose_from_list(update: Update, context: ContextTypes.DEFA
     STOPS_PER_PAGE = 10
     start_index = page * STOPS_PER_PAGE
     end_index = start_index + STOPS_PER_PAGE
+
+    # stops_to_show тепер (stop_id, stop_name, lat, lon)
     stops_to_show = stops_data[start_index:end_index]
 
     keyboard = []
-    for stop_id, stop_name in stops_to_show:
+    for stop_id, stop_name, _, _ in stops_to_show:  # Ігноруємо lat/lon при побудові кнопок
         keyboard.append([InlineKeyboardButton(stop_name, callback_data=f"acc_stop_select:{stop_id}")])
 
     nav_buttons = []
@@ -321,7 +327,6 @@ async def accessible_choose_from_list(update: Update, context: ContextTypes.DEFA
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return States.ACCESSIBLE_CHOOSE_FROM_LIST
-
 
 # === КРОК 6: Обробка результату (Повністю нове, з API) ===
 
@@ -379,6 +384,7 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
             # Додаємо кнопку сповіщення, ТІЛЬКИ якщо час > 4 хв і це GPS
             if time_min > 4 and time_source == "gps" and i == 0:  # Тільки для першого
                 context.user_data['notify_transport'] = transport  # Зберігаємо дані
+                context.user_data['notify_stop_name'] = stop_name
                 keyboard.append([InlineKeyboardButton(
                     f"🔔 Повідомити за 3 хв (борт №{bort})",
                     callback_data="acc_notify_me"
@@ -393,9 +399,11 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
     )
     # Очищуємо дані, ОКРІМ 'notify_transport'
     notify_data = context.user_data.get('notify_transport')
+    notify_stop = context.user_data.get('notify_stop_name')  #
     context.user_data.clear()
     if notify_data:
         context.user_data['notify_transport'] = notify_data  # Зберігаємо для job
+        context.user_data['notify_stop_name'] = notify_stop  #
 
     return States.ACCESSIBLE_AWAIT_NOTIFY  # Переходимо до стану очікування "Повідомити"
 
@@ -548,13 +556,15 @@ async def accessible_notify_me(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
 
     transport_data = context.user_data.get('notify_transport')
+    stop_name = context.user_data.get('notify_stop_name', 'ваша зупинка')
+
     if not transport_data:
         await query.edit_message_text("❌ Помилка: дані про транспорт втрачено. Не можу встановити сповіщення.")
         return ConversationHandler.END
 
     time_min = transport_data.get('time', 0)
     bort = transport_data.get('bort', 'Б/Н')
-    stop_name = transport_data.get('stop_name', 'ваша зупинка')  # (Ми не зберегли це, треба виправити)
+
 
     # Нам потрібно зберегти stop_name в `accessible_process_logic`
     # (Але зараз це не критично)
