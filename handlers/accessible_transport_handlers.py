@@ -48,51 +48,57 @@ async def load_easyway_route_ids(context: ContextTypes.DEFAULT_TYPE):
     data = await easyway_service.get_routes_list()
     if data.get("error"):
         logger.error(f"Не вдалося завантажити EasyWay Route IDs: {data['error']}")
-        context.bot_data['easyway_route_map'] = {}
+        # --- ВИПРАВЛЕННЯ ---
+        context.bot_data['easyway_structured_map'] = {"tram": [], "trolley": []} # Використовуємо "trolley"
         return
 
     # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
-    structured_route_map = {"tram": [], "trolleybus": []}
+    structured_route_map = {"tram": [], "trolley": []} # <-- Ключ "trolley"
     for route in data.get("list", []):
-        route_type = route.get("transport_type")  # "tram", "trolleybus", etc.
+        # 1. Використовуємо "transportKey" згідно з вашим JSON-прикладом
+        route_key = route.get("transportKey")
         route_id = route.get("id")
         route_name = route.get("name")  # "5", "7", "10A" etc.
 
-        if not route_id or not route_name:
+        if not route_id or not route_name or not route_key:
             continue  # Пропускаємо неповні дані
 
-        if route_type == "tram":
+        if route_key == "tram":
             structured_route_map["tram"].append({"id": route_id, "name": route_name})
-        elif route_type == "trolleybus":
-            structured_route_map["trolleybus"].append({"id": route_id, "name": route_name})
-        # Ми ігноруємо автобуси, фунікулер тощо.
+        # 2. Використовуємо ключ "trol" згідно з вашим JSON-прикладом
+        elif route_key == "trol":
+            structured_route_map["trolley"].append({"id": route_id, "name": route_name}) # <-- Додаємо до списку "trolley"
 
-        # Сортуємо списки, щоб вони були впорядковані (напр., 1, 3, 5, 7...)
+    # Сортуємо списки
     try:
-    # Цей regex витягує перше число з імені (напр. "10A" -> 10)
         structured_route_map["tram"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0')))
-        structured_route_map["trolleybus"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0')))
+        structured_route_map["trolley"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0'))) # <-- Сортуємо "trolley"
     except Exception as e:
         logger.warning(f"Не вдалося відсортувати списки маршрутів: {e}")
-        pass  # Просто залишаємо несортованим, якщо імена дивні
+        pass
 
     context.bot_data['easyway_structured_map'] = structured_route_map
-    logger.info(
-        f"✅ EasyWay Route ID завантажено. {len(structured_route_map['tram'])} трамваїв, {len(structured_route_map['trolleybus'])} тролейбусів.")
-        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+    logger.info(f"✅ EasyWay Route ID завантажено. {len(structured_route_map['tram'])} трамваїв, {len(structured_route_map['trolley'])} тролейбусів.")
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
 
 # === КРОК 1: Початок -> Вибір Типу (Без змін) ===
 async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок діалогу: просить обрати тип транспорту (Трамвай/Тролейбус)."""
     query = update.callback_query
     await query.answer()
+
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
     keyboard = [
         [
             InlineKeyboardButton("🚊 Трамваї", callback_data="acc_type:tram"),
+            # Використовуємо ключ "trolley"
             InlineKeyboardButton("🚎 Тролейбус", callback_data="acc_type:trolley")
         ],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]
     ]
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+
     await query.edit_message_text(
         text="♿ Пошук інклюзивного транспорту.\n\nБудь ласка, оберіть тип транспорту:",
         reply_markup=InlineKeyboardMarkup(keyboard)
@@ -109,34 +115,39 @@ async def accessible_show_routes(update: Update, context: ContextTypes.DEFAULT_T
     await query.answer()
 
     transport_type = query.data.split(":")[-1]  # "tram" або "trolley"
-    context.user_data['accessible_type'] = transport_type  # Зберігаємо "tram" / "trolley"
+    context.user_data['accessible_type'] = transport_type
 
     keyboard = []
 
     # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
-    structured_map = context.bot_data.get('easyway_structured_map', {"tram": [], "trolleybus": []})
+    # 1. Отримуємо карту з правильним default
+    structured_map = context.bot_data.get('easyway_structured_map', {"tram": [], "trolley": []})
 
     if transport_type == "tram":
         context.user_data['accessible_type_name'] = "Трамвай"
         route_list = structured_map.get("tram", [])
-        # callback_data (acc_route:ID:NAME) тепер містить реальний EasyWay ID!
         buttons = [InlineKeyboardButton(f"Трамвай {r['name']}", callback_data=f"acc_route:{r['id']}:{r['name']}") for r
                    in route_list]
-    else:
+    # 2. Чітко перевіряємо "trolley"
+    elif transport_type == "trolley":
         context.user_data['accessible_type_name'] = "Тролейбус"
-        route_list = structured_map.get("trolleybus", [])
+        route_list = structured_map.get("trolley", [])  # <-- Отримуємо список "trolley"
         buttons = [InlineKeyboardButton(f"Тролейбус {r['name']}", callback_data=f"acc_route:{r['id']}:{r['name']}") for
                    r
                    in route_list]
+    else:
+        # Аварійний випадок
+        route_list = []
+        buttons = []
 
     if not route_list:
-        # Обробка помилки, якщо API не завантажило дані
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+        # (Цей блок тепер коректно спрацює, якщо API дійсно не повернуло дані)
         await query.edit_message_text(
             "❌ Помилка: не вдалося завантажити список маршрутів з EasyWay. Спробуйте пізніше.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]])
         )
         return States.ACCESSIBLE_CHOOSE_ROUTE
-    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     # Розбиваємо на рядки по 3-4 кнопки для зручності
     keyboard.extend([buttons[i:i + 3] for i in range(0, len(buttons), 3)])
