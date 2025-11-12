@@ -8,9 +8,9 @@ from services.tickets_service import TicketsService
 from bot.states import States
 from utils.logger import logger
 from handlers.common import get_feedback_cancel_keyboard  # <-- Використовуємо нову кнопку
-from config.settings import ROUTES
+#from config.settings import ROUTES
 
-ALL_ROUTES = set(str(r) for r in ROUTES["tram"] + ROUTES["trolleybus"])
+#ALL_ROUTES = set(str(r) for r in ROUTES["tram"] + ROUTES["trolleybus"])
 
 
 async def thanks_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -75,7 +75,7 @@ async def thanks_get_route(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def thanks_get_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отримання та ВАЛІДАЦІЯ маршруту."""
+    """Отримання та ВАЛІДАЦІЯ маршруту (з кешу EasyWay)."""
     await update.message.delete()
     route_text = update.message.text.strip()
     keyboard = await get_feedback_cancel_keyboard("feedback_menu")
@@ -88,15 +88,31 @@ async def thanks_get_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.warning(f"Could not delete previous thanks message: {e}")
 
-    if route_text not in ALL_ROUTES:
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+    # 1. Отримуємо динамічну мапу маршрутів з кешу (який завантажується при старті)
+    structured_map = context.bot_data.get('easyway_structured_map', {"tram": [], "trolleybus": []})
+
+    # 2. Створюємо сет ІМЕН маршрутів (напр. "5", "7", "10A")
+    tram_names = {r['name'] for r in structured_map.get("tram", [])}
+    trolley_names = {r['name'] for r in structured_map.get("trolleybus", [])}
+    all_route_names = tram_names.union(trolley_names)
+
+    if not all_route_names:
+        # Аварійний випадок, якщо EasyWay не завантажився
+        logger.error("THANKS: 'easyway_structured_map' порожній. Валідація маршруту неможлива.")
+        # Ми пропустимо валідацію, щоб не блокувати користувача
+
+    # 3. Валідуємо по динамічному сету
+    elif route_text not in all_route_names:
         sent_message = await update.message.reply_text(
-            f"❌ Маршруту '<b>{route_text}</b>' не знайдено.\n\n"
+            f"❌ Маршруту '<b>{route_text}</b>' не знайдено в базі EasyWay.\n\n"
             f"Будь ласка, введіть коректний номер (тільки цифри).",
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML
         )
         context.user_data['dialog_message_id'] = sent_message.message_id
         return States.THANKS_ROUTE
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     context.user_data['thanks_route'] = route_text
     logger.info(f"Thanks Route: {route_text}")

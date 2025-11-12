@@ -25,10 +25,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = BASE_DIR / "logs" / "bot.log"
 
 # Trapport routes
-ROUTES = {
-    "tram": [1, 3, 5, 7, 9, 10, 12, 14, 16],
-    "trolleybus": [2, 4, 6, 8, 11, 13, 15],
-}
+
 
 # ===== IMAGES PATH =====
 IMAGES_PATH = BASE_DIR / "assets" / "images"

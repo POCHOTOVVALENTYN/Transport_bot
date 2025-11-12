@@ -1,12 +1,14 @@
 # handlers/accessible_transport_handlers.py
 import logging
+import re  # <--- ДОДАЙТЕ ЦЕЙ РЯДОК
+import math # <--- ДОДАЙТЕ ЦЕЙ РЯДОК
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, \
     ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
 from bot.states import States
 from handlers.command_handlers import get_main_menu_keyboard
 from handlers.menu_handlers import main_menu
-from config.settings import ROUTES  # Використовуємо ваші маршрути
+#from config.settings import ROUTES  # Використовуємо ваші маршрути
 from telegram.constants import ChatAction
 # --- НАШІ НОВІ ІМПОРТИ ---
 from services.easyway_service import easyway_service
@@ -15,6 +17,27 @@ import asyncio  # Для Job Queue
 # ---
 
 logger = logging.getLogger(__name__)
+
+
+def haversine(lat1, lon1, lat2, lon2):
+    """Розрахунок відстані між двома точками на сфері (в кілометрах)"""
+    R = 6371.0  # Радіус Землі в км
+
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+
+    dlon = lon2_rad - lon1_rad
+    dlat = lat2_rad - lat1_rad
+
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    return R * c
+
+
+# --- КІНЕЦЬ ДОДАВАННЯ ---
 
 
 # === КРОК 0: Завантаження та кешування ID маршрутів ===
@@ -28,15 +51,35 @@ async def load_easyway_route_ids(context: ContextTypes.DEFAULT_TYPE):
         context.bot_data['easyway_route_map'] = {}
         return
 
-    route_map = {}
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+    structured_route_map = {"tram": [], "trolleybus": []}
     for route in data.get("list", []):
-        # route['name'] = "5", route['transport_type'] = "tram"
-        # route['id'] = "12345"
-        key = f"{route['transport_type']}_{route['name']}"
-        route_map[key] = route['id']
+        route_type = route.get("transport_type")  # "tram", "trolleybus", etc.
+        route_id = route.get("id")
+        route_name = route.get("name")  # "5", "7", "10A" etc.
 
-    context.bot_data['easyway_route_map'] = route_map
-    logger.info(f"✅ EasyWay Route ID завантажено. Знайдено {len(route_map)} маршрутів.")
+        if not route_id or not route_name:
+            continue  # Пропускаємо неповні дані
+
+        if route_type == "tram":
+            structured_route_map["tram"].append({"id": route_id, "name": route_name})
+        elif route_type == "trolleybus":
+            structured_route_map["trolleybus"].append({"id": route_id, "name": route_name})
+        # Ми ігноруємо автобуси, фунікулер тощо.
+
+        # Сортуємо списки, щоб вони були впорядковані (напр., 1, 3, 5, 7...)
+    try:
+    # Цей regex витягує перше число з імені (напр. "10A" -> 10)
+        structured_route_map["tram"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0')))
+        structured_route_map["trolleybus"].sort(key=lambda x: int(re.sub(r'\D', '', x['name'] or '0')))
+    except Exception as e:
+        logger.warning(f"Не вдалося відсортувати списки маршрутів: {e}")
+        pass  # Просто залишаємо несортованим, якщо імена дивні
+
+    context.bot_data['easyway_structured_map'] = structured_route_map
+    logger.info(
+        f"✅ EasyWay Route ID завантажено. {len(structured_route_map['tram'])} трамваїв, {len(structured_route_map['trolleybus'])} тролейбусів.")
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
 
 # === КРОК 1: Початок -> Вибір Типу (Без змін) ===
@@ -58,7 +101,10 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # === КРОК 2: Вибір Маршруту (Майже без змін) ===
+# handlers/accessible_transport_handlers.py
+
 async def accessible_show_routes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 2: Показує список маршрутів для обраного типу."""
     query = update.callback_query
     await query.answer()
 
@@ -67,15 +113,32 @@ async def accessible_show_routes(update: Update, context: ContextTypes.DEFAULT_T
 
     keyboard = []
 
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+    structured_map = context.bot_data.get('easyway_structured_map', {"tram": [], "trolleybus": []})
+
     if transport_type == "tram":
         context.user_data['accessible_type_name'] = "Трамвай"
-        route_list = ROUTES["tram"]
-        buttons = [InlineKeyboardButton(f"Трамвай {r}", callback_data=f"acc_route:{r}") for r in route_list]
+        route_list = structured_map.get("tram", [])
+        # callback_data (acc_route:ID:NAME) тепер містить реальний EasyWay ID!
+        buttons = [InlineKeyboardButton(f"Трамвай {r['name']}", callback_data=f"acc_route:{r['id']}:{r['name']}") for r
+                   in route_list]
     else:
         context.user_data['accessible_type_name'] = "Тролейбус"
-        route_list = ROUTES["trolleybus"]
-        buttons = [InlineKeyboardButton(f"Тролейбус {r}", callback_data=f"acc_route:{r}") for r in route_list]
+        route_list = structured_map.get("trolleybus", [])
+        buttons = [InlineKeyboardButton(f"Тролейбус {r['name']}", callback_data=f"acc_route:{r['id']}:{r['name']}") for
+                   r
+                   in route_list]
 
+    if not route_list:
+        # Обробка помилки, якщо API не завантажило дані
+        await query.edit_message_text(
+            "❌ Помилка: не вдалося завантажити список маршрутів з EasyWay. Спробуйте пізніше.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]])
+        )
+        return States.ACCESSIBLE_CHOOSE_ROUTE
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+
+    # Розбиваємо на рядки по 3-4 кнопки для зручності
     keyboard.extend([buttons[i:i + 3] for i in range(0, len(buttons), 3)])
     keyboard.append([InlineKeyboardButton("⬅️ Назад (до типів)", callback_data="accessible_start")])
     keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")])
@@ -93,24 +156,26 @@ async def accessible_choose_direction(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
 
-    route_num = query.data.split(":")[-1]  # "5", "7"
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+    # query.data тепер "acc_route:EASYWAY_ID:NUMBER" (напр. "acc_route:123:5")
+    try:
+        _, easyway_route_id, route_num = query.data.split(":")
+    except ValueError:
+        logger.error(f"Неправильний callback_data у accessible_choose_direction: {query.data}")
+        await query.edit_message_text("❌ Сталася внутрішня помилка. Спробуйте знову.")
+        return States.ACCESSIBLE_CHOOSE_ROUTE
+
     transport_type = context.user_data['accessible_type']  # "tram"
 
     context.user_data['accessible_route_name'] = f"{context.user_data['accessible_type_name']} {route_num}"
     context.user_data['accessible_route_num'] = route_num  # "5"
+    context.user_data['easyway_route_id'] = easyway_route_id  # <-- ЗБЕРІГАЄМО ID
 
     # --- ЛОГІКА API ---
-    # 1. Знайти EasyWay ID для цього маршруту
-    route_map = context.bot_data.get('easyway_route_map', {})
-    route_key = f"{transport_type}_{route_num}"
-    easyway_route_id = route_map.get(route_key)
+    # 1. ID вже отримано!
+    logger.info(f"User selected route_id: {easyway_route_id}, name: {route_num}")
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
-    if not easyway_route_id:
-        await query.edit_message_text(
-            f"❌ Вибачте, сталася помилка. Не можу знайти ID для маршруту '{route_key}' в EasyWay.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]])
-        )
-        return States.ACCESSIBLE_CHOOSE_DIRECTION
 
     # 2. Отримати інформацію про маршрут (напрямки та зупинки)
     route_info = await easyway_service.get_route_info(easyway_route_id)
@@ -165,8 +230,12 @@ async def accessible_choose_stop_method(update: Update, context: ContextTypes.DE
         [InlineKeyboardButton("🚏 Обрати зі списку (планую поїздку)", callback_data="acc_stop:list")],
     ]
 
+    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
     route_num = context.user_data['accessible_route_num']
-    route_callback = f"acc_route:{route_num}"
+    easyway_route_id = context.user_data['easyway_route_id']  # Отримуємо ID
+    # Створюємо callback "acc_route:123:5"
+    route_callback = f"acc_route:{easyway_route_id}:{route_num}"
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     keyboard.append([InlineKeyboardButton("⬅️ Назад (до напрямків)", callback_data=route_callback)])
     keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")])
@@ -360,34 +429,74 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text("❌ Поруч (в радіусі 500м) не знайдено жодної зупинки.")
             return ConversationHandler.END
 
+        # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
         # 2. Знайти *НАЙБЛИЖЧУ* зупинку з тих, що *належать нашому маршруту*
 
         # 2a. Отримуємо список ID зупинок *нашого* маршруту
         route_stops_data = context.user_data.get('route_stops_data')
+
+        # 2b. Якщо користувач не натискав "Список", кешу 'route_stops_data' немає.
+        #    Нам потрібно його створити вручну.
         if not route_stops_data:
-            # (Якщо користувач пішов по гілці Гео, а не Списку, кешу немає)
-            # (Ми не будемо зараз реалізовувати це - це надто ускладнить логіку)
-            await update.message.reply_text("❌ Помилка: функція 'По геолокації' ще не реалізована.\n"
-                                            "Будь ласка, почніть знову та оберіть 'Зі списку'.")
-            logger.error("Критична помилка логіки: 'route_stops_data' відсутній у 'accessible_process_stub' (GEO)")
-            return ConversationHandler.END
+            logger.info("GEO: 'route_stops_data' not in cache. Fetching from 'easyway_route_info'.")
+            route_info = context.user_data.get('easyway_route_info')
+            direction_id = context.user_data.get('accessible_direction_id')
 
-        our_stop_ids = {stop[0] for stop in route_stops_data}  # {stop_id_1, stop_id_2, ...}
+            if not route_info or not direction_id:
+                await update.message.reply_text(
+                    "❌ Критична помилка: дані про маршрут втрачено. Будь ласка, почніть знову.")
+                return ConversationHandler.END
 
-        # 2b. Знаходимо найближчу з "наших" зупинок
-        closest_stop = None
-        for stop in nearby_stops:
-            if stop['id'] in our_stop_ids:
-                closest_stop = stop
-                break  # EasyWay повертає їх вже відсортованими по відстані
+            # Відтворюємо логіку з `accessible_choose_from_list`
+            stops_for_direction = []
+            for direction in route_info.get("directions", []):
+                if direction['id'] == direction_id:
+                    stops_for_direction = direction.get("stops", [])
+                    break
 
-        if not closest_stop:
+            # Нам потрібні координати, тому беремо їх з `route_info.stops`
+            all_stops_full_map = {stop['id']: stop for stop in route_info.get("stops", [])}
+            stops_data = []  # Список (stop_id, stop_name, lat, lon)
+
+            for stop_id in stops_for_direction:
+                stop_obj = all_stops_full_map.get(stop_id)
+                if stop_obj:
+                    # Додаємо координати, яких не було в гілці "Список"
+                    stops_data.append((stop_obj['id'], stop_obj['name'], stop_obj['lat'], stop_obj['lon']))
+
+            context.user_data['route_stops_data'] = stops_data  # Зберігаємо повний список
+
+        # 2c. Тепер `route_stops_data` гарантовано існує. Шукаємо найближчу.
+        our_stops_with_coords = context.user_data['route_stops_data']
+        our_stop_ids = {stop[0] for stop in our_stops_with_coords}  # {stop_id_1, stop_id_2, ...}
+
+        closest_stop = None  # (stop_id, stop_name)
+        min_dist = float('inf')
+
+        for stop in nearby_stops:  # (Зупинки, які поруч з користувачем)
+            if stop['id'] in our_stop_ids:  # Якщо ця зупинка є на нашому маршруті
+                # Ми не можемо просто взяти першу, бо API `GetStopsNearPoint`
+                # повертає ВСІ зупинки в радіусі, а не тільки нашого маршруту.
+                # Нам треба знайти найближчу саме *з нашого маршруту*.
+
+                # Шукаємо координати цієї зупинки в нашому списку
+                current_stop_data = next((s for s in our_stops_with_coords if s[0] == stop['id']), None)
+                if not current_stop_data: continue  # Такого не має бути, але про всяк випадок
+
+                dist = haversine(user_lat, user_lon, float(current_stop_data[2]), float(current_stop_data[3]))
+
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_stop = (current_stop_data[0], current_stop_data[1])
+
+        if not closest_stop or min_dist > 1.0:  # (1 км - максимальна відстань)
             await update.message.reply_text(
-                "❌ Поруч є зупинки, але жодна з них не належить до вашого маршруту/напрямку.")
-            return ConversationHandler.END
+                "❌ Вибачте, я не можу знайти зупинку вашого маршруту (в радіусі 1 км) поруч з вами.")
+            return States.ACCESSIBLE_CHOOSE_STOP_METHOD
 
-        target_stop_id = closest_stop['id']
-        target_stop_name = closest_stop['name']
+        target_stop_id, target_stop_name = closest_stop
+        logger.info(f"Знайдено найближчу зупинку по гео: {target_stop_name} (dist: {min_dist:.2f} km)")
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     elif update.callback_query:
         await update.callback_query.answer()
