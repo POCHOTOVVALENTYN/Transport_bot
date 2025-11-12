@@ -46,21 +46,23 @@ async def load_easyway_route_ids(application: Application):
         logger.error(f"Не вдалося завантажити EasyWay Route IDs: {data['error']}")
         # 2. Використовуємо 'application.bot_data'
         application.bot_data['easyway_structured_map'] = {"tram": [], "trolley": []}
-        return
+        return False
+    # --- 1. ВИПРАВЛЕННЯ КЛЮЧА СПИСКУ ---
+    # API повертає {"routesList": {"route": [...]}}
+    route_list_from_api = data.get("routesList", {}).get("route", [])
+    # --- КІНЕЦЬ 1 ---
 
-    # --- ПОЧАТОК ПОКРАЩЕННЯ (ЛОГУВАННЯ) ---
-    route_list_from_api = data.get("list", [])
     if not route_list_from_api:
-        logger.warning("EasyWay API: Запит успішний, але 'list' (список маршрутів) порожній.")
+        logger.warning("EasyWay API: Запит успішний, але 'routesList'/'route' (список маршрутів) порожній.")
+        application.bot_data['easyway_structured_map'] = {"tram": [], "trolley": []}  # Додано
+        return False
     else:
-        # Логуємо перші 2 маршрути, щоб побачити структуру ключів
-        logger.info(f"EasyWay API: Отримано {len(route_list_from_api)} маршрутів. Приклад перших двох:")
+        # Логуємо КЛЮЧІ, щоб побачити, чи є 'transportKey'
+        logger.info(f"EasyWay API: Отримано {len(route_list_from_api)} маршрутів. Ключі першого маршруту:")
         try:
-            logger.info(f"[Маршрут 1]: {route_list_from_api[0]}")
-            logger.info(f"[Маршрут 2]: {route_list_from_api[1]}")
-        except IndexError:
-            pass  # Не страшно, якщо маршрут лише один
-        # --- КІНЕЦЬ ПОКРАЩЕННЯ (ЛОГУВАННЯ) ---
+            logger.info(f"[Маршрут 1 Kлючі]: {route_list_from_api[0].keys()}")
+        except Exception as e:
+            logger.warning(f"Не вдалося залогувати ключі: {e}")
 
     structured_route_map = {"tram": [], "trolley": []}
 
@@ -68,13 +70,21 @@ async def load_easyway_route_ids(application: Application):
     for route in route_list_from_api:
         route_key = route.get("transportKey")
         route_id = route.get("id")
-        route_name = route.get("name")
+        # --- 2. ВИПРАВЛЕННЯ КЛЮЧА НАЗВИ ---
+        # API повертає "title", а не "name"
+        route_name = route.get("title")
+        # --- КІНЕЦЬ 2 ---
 
         if not route_id or not route_name or not route_key:
             # --- ПОКРАЩЕННЯ (ЛОГУВАННЯ) ---
-            logger.warning(f"Пропускаємо маршрут з неповними даними: {route}")
+            logger.warning(f"Пропускаємо маршрут з неповними даними (id, title або transportKey): {route}")
             # --- КІНЕЦЬ ПОКРАЩЕННЯ ---
             continue
+        # --- 3. ПОКРАЩЕННЯ: Очищуємо назву ---
+        # "1(\u042e\u0436\u043d\u0435)" (1(Южне)) -> "1"
+        if "(" in route_name:
+            route_name = route_name.split("(")[0].strip()
+        # --- КІНЕЦЬ 3 ---
 
         if route_key == "tram":
             structured_route_map["tram"].append({"id": route_id, "name": route_name})

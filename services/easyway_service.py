@@ -1,5 +1,6 @@
 from utils.logger import logger
 import aiohttp
+import json
 import logging
 from config.settings import (
     EASYWAY_API_URL, EASYWAY_LOGIN, EASYWAY_PASSWORD, EASYWAY_CITY
@@ -22,11 +23,43 @@ class EasyWayService:
         full_params = self.base_params.copy()
         full_params.update(params)
 
-        async with aiohttp.ClientSession() as session:
+        # --- ПОЧАТОК ВИПРАВЛЕННЯ SSL ---
+        # Створюємо конектор, який НЕ перевіряє SSL-сертифікат
+        # (Тимчасове рішення для діагностики проблеми)
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # --- КІНЕЦЬ ВИПРАВЛЕННЯ SSL ---
             try:
                 async with session.get(self.base_url, params=full_params) as response:
                     if response.status == 200:
-                        data = await response.json()
+                        # --- ПОЧАТОК ВИПРАВЛЕННЯ JSONP ---
+
+                        # 1. Отримуємо відповідь як ТЕКСТ
+                        raw_text = await response.text()
+
+                        if not raw_text:
+                            logger.error("EasyWay API Error: Отримано порожню відповідь")
+                            return {"error": "Empty response from API"}
+
+                        # 2. Логуємо початок, щоб побачити, що це
+                        logger.info(f"EasyWay API Raw Response (first 100 chars): {raw_text[:100]}")
+
+                        # 3. Видаляємо обгортку JSONP (напр., "callback({...})")
+                        json_part = raw_text
+                        if "(" in raw_text and raw_text.endswith(")"):
+                            start_brace = raw_text.find("(")
+                            if start_brace != -1:
+                                json_part = raw_text[start_brace + 1: -1]  # Вирізаємо вміст дужок
+
+                        # 4. Парсимо JSON вручну
+                        try:
+                            data = json.loads(json_part)
+                        except json.JSONDecodeError as e:
+                            logger.error(f"EasyWay API Error: Не вдалося розпарсити JSON: {e}")
+                            logger.error(f"Проблемний JSON (перші 200 символів): {json_part[:200]}")
+                            return {"error": f"JSON Decode Error: {e}"}
+
+                        # --- КІНЕЦЬ ВИПРАВЛЕННЯ JSONP ---
                         if data.get("error"):
                             logger.error(f"EasyWay API Error: {data['error']}")
                             return {"error": data.get("errorText", "Unknown API error")}

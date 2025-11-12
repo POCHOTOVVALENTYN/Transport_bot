@@ -41,7 +41,7 @@ TICKET_PASSES_FILE_ID_2 = "AgACAgIAAxkBAAIEMWkMn4t4dEJ9rOyVA-95XzsgsewJAAKSDWsbL
 EASYWAY_API_URL = "https://api.easyway.info/"
 EASYWAY_LOGIN = "odesainclusive"
 EASYWAY_PASSWORD = "ndHdy2Ytw2Ois"
-EASYWAY_CITY = "5"
+EASYWAY_CITY = "odesa"
 
 # ===== DOCUMENTS PATH =====
 DOCUMENTS_PATH = BASE_DIR / "documents"

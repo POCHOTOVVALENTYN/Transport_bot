@@ -78,16 +78,12 @@ class TransportBot:
 
         # 1. ЗАЛИШАЄМО ТІЛЬКИ ОДИН РЯДОК Application.builder
         #    з реєстрацією `post_init`.
-        self.app = Application.builder().token(token).post_init(self.post_init).build()
+        self.app = Application.builder().token(token).build()
 
         # Рядок (self.app = Application.builder().token(token).build()) ВИДАЛЕНО
 
         self._setup_handlers()
 
-    # 2. Функція post_init (БЕЗ ДУБЛІКАТІВ)
-    async def post_init(self, application: Application):
-        """Виконується 1 раз ПІСЛЯ запуску, але ДО polling."""
-        await load_easyway_route_ids(application)
 
     def _setup_handlers(self):
         """Налаштування всіх обробників"""
