@@ -23,8 +23,10 @@ from handlers.accessible_transport_handlers import (
     accessible_request_location,
     accessible_choose_from_list,
     accessible_process_stub,
+    accessible_notify_me,
     #accessible_notify_me_stub,
-    accessible_text_cancel
+    accessible_text_cancel,
+    load_easyway_route_ids # <-- НОВИЙ ВАЖЛИВИЙ ІМПОРТ
 )
 
 from handlers.static_handlers import (
@@ -73,8 +75,16 @@ class TransportBot:
 
     def __init__(self, token: str):
         self.token = token
+        # Додаємо post_init для завантаження кешу EasyWay
+        self.app = Application.builder().token(token).post_init(self.post_init).build()
         self.app = Application.builder().token(token).build()
         self._setup_handlers()
+
+        # --- ДОДАЙТЕ ЦЮ НОВУ ФУНКЦІЮ ---
+    async def post_init(self, application: Application):
+        """Виконується 1 раз ПІСЛЯ запуску, але ДО polling."""
+        await load_easyway_route_ids(application)
+    # --- КІНЕЦЬ НОВОЇ ФУНКЦІЇ ---    await load_easyway_route_ids(application)
 
 
     def _setup_handlers(self):
@@ -244,36 +254,34 @@ class TransportBot:
             states={
                 States.ACCESSIBLE_CHOOSE_ROUTE: [
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:"),
-                    # Дозволяємо повернутися на старт, якщо натиснути "Назад"
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
                 ],
                 States.ACCESSIBLE_CHOOSE_DIRECTION: [
                     CallbackQueryHandler(accessible_choose_direction, pattern="^acc_route:"),
-                    # Дозволяємо повернутися до вибору типу
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")
                 ],
                 States.ACCESSIBLE_CHOOSE_STOP_METHOD: [
                     CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:"),
-                    # Дозволяємо повернутися до вибору напрямку
                     CallbackQueryHandler(accessible_choose_direction, pattern="^acc_route:")
                 ],
                 States.ACCESSIBLE_GET_LOCATION: [
-                    # Обробники для кнопок "Гео" та "Список"
                     CallbackQueryHandler(accessible_request_location, pattern="^acc_stop:geo$"),
+                    CallbackQueryHandler(accessible_choose_from_list, pattern="^acc_stop:list:"),  # Додано :
                     CallbackQueryHandler(accessible_choose_from_list, pattern="^acc_stop:list$"),
-                    # Обробник самої геолокації
                     MessageHandler(filters.LOCATION, accessible_process_stub),
-                    # Дозволяємо повернутися до вибору методу
                     CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:")
                 ],
                 States.ACCESSIBLE_CHOOSE_FROM_LIST: [
                     CallbackQueryHandler(accessible_process_stub, pattern="^acc_stop_select:"),
-                    # Дозволяємо повернутися до вибору методу
                     CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:")
                 ],
-                #States.ACCESSIBLE_AWAIT_NOTIFY: [
-                    #CallbackQueryHandler(accessible_notify_me_stub, pattern="^acc_notify_me$")
-                #],
+                # --- ПОВЕРТАЄМО ОБРОБНИК СПОВІЩЕНЬ ---
+                States.ACCESSIBLE_AWAIT_NOTIFY: [
+                    CallbackQueryHandler(accessible_notify_me, pattern="^acc_notify_me$"),
+                    # Якщо користувач нічого не натиснув, а пішов далі,
+                    # ми маємо обробити і вихід
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$"),
+                ],
             },
             fallbacks=[
                 CallbackQueryHandler(main_menu, pattern="^main_menu$"),
@@ -281,6 +289,7 @@ class TransportBot:
             ],
             block=False
         )
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
         # Додавання всіх conversation handlers
         self.app.add_handler(complaint_conv)

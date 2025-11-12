@@ -9,4 +9,3 @@ aiohttp==3.9.1
 python-dateutil==2.8.2
 Pillow>=10.2.0
 gtfs-realtime-bindings==1.0.0
-protobuf==4.25.0

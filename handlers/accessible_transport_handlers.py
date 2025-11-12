@@ -1,122 +1,55 @@
 # handlers/accessible_transport_handlers.py
 import logging
-import math
-import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, \
     ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
 from bot.states import States
 from handlers.command_handlers import get_main_menu_keyboard
 from handlers.menu_handlers import main_menu
-from config.settings import ROUTES, GTFS_API_KEY
+from config.settings import ROUTES  # Використовуємо ваші маршрути
 from telegram.constants import ChatAction
-# --- НОВІ ІМПОРТИ ---
-from services.gtfs_cache_service import gtfs_cache
-from google.transit import gtfs_realtime_pb2
+# --- НАШІ НОВІ ІМПОРТИ ---
+from services.easyway_service import easyway_service
+import asyncio  # Для Job Queue
 
 # ---
 
 logger = logging.getLogger(__name__)
 
-# --- URL-и та заголовки для API ---
-REALTIME_URL = "https://gw.x24.digital/api/od/gtfs/v1/download/gtfs-rt-vehicles-pr.pb"
-API_HEADERS = {'ApiKey': GTFS_API_KEY}
+
+# === КРОК 0: Завантаження та кешування ID маршрутів ===
+# Ми зробимо це один раз при старті (в bot/bot.py),
+# щоб зіставити "Трамвай 5" з його EasyWay ID
+async def load_easyway_route_ids(context: ContextTypes.DEFAULT_TYPE):
+    logger.info("Завантажую EasyWay Route ID...")
+    data = await easyway_service.get_routes_list()
+    if data.get("error"):
+        logger.error(f"Не вдалося завантажити EasyWay Route IDs: {data['error']}")
+        context.bot_data['easyway_route_map'] = {}
+        return
+
+    route_map = {}
+    for route in data.get("list", []):
+        # route['name'] = "5", route['transport_type'] = "tram"
+        # route['id'] = "12345"
+        key = f"{route['transport_type']}_{route['name']}"
+        route_map[key] = route['id']
+
+    context.bot_data['easyway_route_map'] = route_map
+    logger.info(f"✅ EasyWay Route ID завантажено. Знайдено {len(route_map)} маршрутів.")
 
 
-# === ДОПОМІЖНІ ФУНКЦІЇ ===
-
-def haversine(lat1, lon1, lat2, lon2):
-    """Розрахунок відстані між двома точками на сфері (в кілометрах)"""
-    R = 6371.0  # Радіус Землі в км
-
-    lat1_rad = math.radians(lat1)
-    lon1_rad = math.radians(lon1)
-    lat2_rad = math.radians(lat2)
-    lon2_rad = math.radians(lon2)
-
-    dlon = lon2_rad - lon1_rad
-    dlat = lat2_rad - lat1_rad
-
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    return R * c
-
-
-def get_realtime_vehicles():
-    """
-    Робить запит до GTFS Realtime API та повертає дані.
-    Повертає FeedMessage або None у разі помилки.
-    """
-    try:
-        response = requests.get(REALTIME_URL, headers=API_HEADERS, timeout=5)
-        if response.status_code != 200:
-            logger.error(f"❌ Помилка API GTFS Realtime: Статус {response.status_code}")
-            return None
-
-        feed = gtfs_realtime_pb2.FeedMessage()
-        feed.ParseFromString(response.content)
-        return feed
-    except Exception as e:
-        logger.error(f"❌ Помилка парсингу GTFS Realtime: {e}", exc_info=True)
-        return None
-
-
-def get_accessible_vehicles_on_route(feed, route_id, direction_headsign):
-    """
-    Фільтрує потік Realtime, повертаючи СЛОВНИК доступних ТЗ на КОНКРЕТНОМУ маршруті.
-    Повертає: {trip_id: (vehicle_id, current_stop_sequence)}
-    """
-    accessible_vehicles = {}
-    accessible_map = gtfs_cache.accessibility_map  # Наш JSON {vehicle_id: true/false}
-
-    if not feed:
-        return {}
-
-    for entity in feed.entity:
-        if not entity.HasField('vehicle'):
-            continue
-
-        vehicle = entity.vehicle
-        vehicle_id = vehicle.vehicle.id
-        trip_id = vehicle.trip.trip_id
-
-        # 1. Перевірка на інклюзивність (ПЛАН D)
-        if not accessible_map.get(vehicle_id, False):
-            continue  # Цей ТЗ не в нашому реєстрі
-
-        # 2. Перевірка, чи цей ТЗ на нашому маршруті
-        try:
-            trip_info = gtfs_cache.trips.get(trip_id)
-            if not trip_info:
-                continue  # Немає інформації про цю поїздку в кеші
-
-            # 3. Перевірка маршруту ТА напрямку
-            if (trip_info['route_id'] == route_id and
-                    trip_info['headsign'] == direction_headsign):
-                accessible_vehicles[trip_id] = (vehicle_id, vehicle.current_stop_sequence)
-
-        except Exception as e:
-            logger.warning(f"Помилка обробки trip_id {trip_id} з Realtime: {e}")
-
-    return accessible_vehicles
-
-
-# === КРОК 1: Початок -> Вибір Типу ===
-
+# === КРОК 1: Початок -> Вибір Типу (Без змін) ===
 async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Початок діалогу: просить обрати тип транспорту (Трамвай/Тролейбус)."""
     query = update.callback_query
-    # await query.answer() # Прибрано, щоб уникнути подвійної відповіді
-
+    await query.answer()
     keyboard = [
         [
-            InlineKeyboardButton("🚊 Трамваї", callback_data="acc_type:TRAM"),
-            InlineKeyboardButton("🚎 Тролейбус", callback_data="acc_type:TROLLEY")
+            InlineKeyboardButton("🚊 Трамваї", callback_data="acc_type:tram"),
+            InlineKeyboardButton("🚎 Тролейбус", callback_data="acc_type:trolley")
         ],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]
     ]
-
     await query.edit_message_text(
         text="♿ Пошук інклюзивного транспорту.\n\nБудь ласка, оберіть тип транспорту:",
         reply_markup=InlineKeyboardMarkup(keyboard)
@@ -124,26 +57,24 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return States.ACCESSIBLE_CHOOSE_ROUTE
 
 
-# === КРОК 2: Вибір Маршруту ===
-
+# === КРОК 2: Вибір Маршруту (Майже без змін) ===
 async def accessible_show_routes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 2: Показує список маршрутів для обраного типу."""
     query = update.callback_query
-    # await query.answer() # Прибрано
+    await query.answer()
 
-    transport_type = query.data.split(":")[-1]  # "TRAM" або "TROLLEY"
+    transport_type = query.data.split(":")[-1]  # "tram" або "trolley"
+    context.user_data['accessible_type'] = transport_type  # Зберігаємо "tram" / "trolley"
+
     keyboard = []
 
-    if transport_type == "TRAM":
+    if transport_type == "tram":
         context.user_data['accessible_type_name'] = "Трамвай"
-        gtfs_type = '2'  # GTFS route_type для трамваїв
-        buttons = [InlineKeyboardButton(f"Трамвай {r}", callback_data=f"acc_route:{gtfs_type}:{r}") for r in
-                   ROUTES["tram"]]
+        route_list = ROUTES["tram"]
+        buttons = [InlineKeyboardButton(f"Трамвай {r}", callback_data=f"acc_route:{r}") for r in route_list]
     else:
         context.user_data['accessible_type_name'] = "Тролейбус"
-        gtfs_type = '3'  # GTFS route_type для тролейбусів
-        buttons = [InlineKeyboardButton(f"Тролейбус {r}", callback_data=f"acc_route:{gtfs_type}:{r}") for r in
-                   ROUTES["trolleybus"]]
+        route_list = ROUTES["trolleybus"]
+        buttons = [InlineKeyboardButton(f"Тролейбус {r}", callback_data=f"acc_route:{r}") for r in route_list]
 
     keyboard.extend([buttons[i:i + 3] for i in range(0, len(buttons), 3)])
     keyboard.append([InlineKeyboardButton("⬅️ Назад (до типів)", callback_data="accessible_start")])
@@ -157,82 +88,85 @@ async def accessible_show_routes(update: Update, context: ContextTypes.DEFAULT_T
     return States.ACCESSIBLE_CHOOSE_DIRECTION
 
 
-# === КРОК 3: Вибір Напрямку (РЕАЛІЗОВАНО) ===
-
+# === КРОК 3: Вибір Напрямку (Повністю нове, з API) ===
 async def accessible_choose_direction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 3: Просить обрати напрямок. (Бере дані з gtfs_cache)."""
     query = update.callback_query
-    # await query.answer() # Прибрано
+    await query.answer()
 
-    gtfs_type, route_num = query.data.split(":")[1:]
-    route_name = f"Трамвай {route_num}" if gtfs_type == '2' else f"Тролейбус {route_num}"
+    route_num = query.data.split(":")[-1]  # "5", "7"
+    transport_type = context.user_data['accessible_type']  # "tram"
 
-    context.user_data['accessible_route_name'] = route_name
-    context.user_data['accessible_route_num'] = route_num
+    context.user_data['accessible_route_name'] = f"{context.user_data['accessible_type_name']} {route_num}"
+    context.user_data['accessible_route_num'] = route_num  # "5"
 
     # --- ЛОГІКА API ---
-    # 1. Знайти route_id в кеші
-    route_id = None
-    for r_id, r_data in gtfs_cache.routes.items():
-        if r_data['name'] == route_num and r_data['type'] == gtfs_type:
-            route_id = r_id
-            break
+    # 1. Знайти EasyWay ID для цього маршруту
+    route_map = context.bot_data.get('easyway_route_map', {})
+    route_key = f"{transport_type}_{route_num}"
+    easyway_route_id = route_map.get(route_key)
 
-    if not route_id:
+    if not easyway_route_id:
         await query.edit_message_text(
-            f"❌ Вибачте, сталася помилка. Не можу знайти {route_name} в GTFS-кеші.",
+            f"❌ Вибачте, сталася помилка. Не можу знайти ID для маршруту '{route_key}' в EasyWay.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]])
         )
         return States.ACCESSIBLE_CHOOSE_DIRECTION
 
-    context.user_data['accessible_route_id'] = route_id
+    # 2. Отримати інформацію про маршрут (напрямки та зупинки)
+    route_info = await easyway_service.get_route_info(easyway_route_id)
+    if route_info.get("error"):
+        await query.edit_message_text(
+            f"❌ Помилка API EasyWay: {route_info['error']}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]])
+        )
+        return States.ACCESSIBLE_CHOOSE_DIRECTION
 
-    # 2. Знайти всі унікальні напрямки (headsigns) для цього route_id
-    directions = set()
-    for trip_data in gtfs_cache.trips.values():
-        if trip_data['route_id'] == route_id and trip_data['headsign']:
-            directions.add(trip_data['headsign'])
+    # 3. Зберегти дані про маршрут для наступних кроків
+    context.user_data['easyway_route_info'] = route_info
 
+    # 4. Створити кнопки напрямків
+    keyboard = []
+    directions = route_info.get("directions", [])
     if not directions:
         await query.edit_message_text(
-            f"❌ Вибачте, сталася помилка. Не можу знайти напрямки руху для {route_name}.",
+            f"❌ Не знайдено напрямків для {context.user_data['accessible_route_name']}.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]])
         )
         return States.ACCESSIBLE_CHOOSE_DIRECTION
 
-    # 3. Створити кнопки
-    keyboard = []
-    for headsign in directions:
-        keyboard.append([InlineKeyboardButton(f"➡️ {headsign}", callback_data=f"acc_dir:{headsign}")])
+    for direction in directions:
+        # direction['id'] = "A", "B" (умовні)
+        # direction['name'] = "В бік Аркадії"
+        keyboard.append([InlineKeyboardButton(f"➡️ {direction['name']}", callback_data=f"acc_dir:{direction['id']}")])
 
-    type_callback = "acc_type:TRAM" if gtfs_type == '2' else "acc_type:TROLLEY"
+    type_callback = f"acc_type:{transport_type}"
     keyboard.append([InlineKeyboardButton("⬅️ Назад (до маршрутів)", callback_data=type_callback)])
     keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")])
 
     await query.edit_message_text(
-        text=f"Ви обрали: <b>{route_name}</b>.\n\nТепер оберіть напрямок руху:",
+        text=f"Ви обрали: <b>{context.user_data['accessible_route_name']}</b>.\n\nТепер оберіть напрямок руху:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="HTML"
     )
     return States.ACCESSIBLE_CHOOSE_STOP_METHOD
 
 
-# === КРОК 4: Вибір Методу Пошуку Зупинки ===
-# (Ця функція залишається без змін, вона коректна)
+# === КРОК 4: Вибір Методу Пошуку Зупинки (Без змін) ===
 async def accessible_choose_stop_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    # await query.answer() # Прибрано
+    await query.answer()
 
-    direction = query.data.split(":")[-1]
-    context.user_data['accessible_direction'] = direction
-    logger.info(f"User selected direction: {direction}")
+    direction_id = query.data.split(":")[-1]  # "A" або "B"
+    context.user_data['accessible_direction_id'] = direction_id
+    logger.info(f"User selected direction_id: {direction_id}")
 
     keyboard = [
         [InlineKeyboardButton("📍 Надати геолокацію (я на зупинці)", callback_data="acc_stop:geo")],
         [InlineKeyboardButton("🚏 Обрати зі списку (планую поїздку)", callback_data="acc_stop:list")],
     ]
 
-    route_callback = f"acc_route:{gtfs_cache.routes[context.user_data['accessible_route_id']]['type']}:{context.user_data['accessible_route_num']}"
+    route_num = context.user_data['accessible_route_num']
+    route_callback = f"acc_route:{route_num}"
 
     keyboard.append([InlineKeyboardButton("⬅️ Назад (до напрямків)", callback_data=route_callback)])
     keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")])
@@ -244,59 +178,49 @@ async def accessible_choose_stop_method(update: Update, context: ContextTypes.DE
     return States.ACCESSIBLE_GET_LOCATION
 
 
-# === КРОК 5 (Варіант А): Запит Геолокації ===
-# (Ця функція залишається без змін, вона коректна)
+# === КРОК 5 (Варіант А): Запит Геолокації (Без змін) ===
 async def accessible_request_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.message.delete()
-
     location_keyboard = [[KeyboardButton("📍 Надати мою геолокацію", request_location=True)]]
-
     await query.message.reply_text(
-        "Будь ласка, натисніть кнопку нижче (АЛЕ ПЕРЕД ЦИМ УВІМКНІТЬ БУДЬ ЛАСКА ФУНКЦІЮ (ОПЦІЮ) ГЕОЛОКАЦІЇ "
-        "НА СМАРТФОНІ),\n щоб надати вашу геолокацію. Я знайду найближчу зупинку.",
+        "Будь ласка, натисніть кнопку нижче, щоб надати вашу геолокацію. Я знайду найближчу зупинку.",
         reply_markup=ReplyKeyboardMarkup(location_keyboard, resize_keyboard=True, one_time_keyboard=True)
     )
     return States.ACCESSIBLE_GET_LOCATION
 
 
-# === КРОК 5 (Варіант Б): Вибір зі Списку (РЕАЛІЗОВАНО) ===
-
+# === КРОК 5 (Варіант Б): Вибір зі Списку (Повністю нове, з API) ===
 async def accessible_choose_from_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 5Б: Показує список зупинок з кешу (з пагінацією)."""
     query = update.callback_query
-    # await query.answer() # Прибрано
+    await query.answer()
 
-    route_id = context.user_data['accessible_route_id']
-    direction = context.user_data['accessible_direction']
+    direction_id = context.user_data['accessible_direction_id']  # "A"
+    route_info = context.user_data['easyway_route_info']  # {..., "directions": [...], "stops": [...]}
 
-    # 1. Знайти типову поїздку (trip_id) для цього маршруту і напрямку
-    sample_trip_id = None
-    for trip_id, trip_data in gtfs_cache.trips.items():
-        if trip_data['route_id'] == route_id and trip_data['headsign'] == direction:
-            sample_trip_id = trip_id
+    # 1. Знайти наш напрямок в даних
+    stops_for_direction = []
+    for direction in route_info.get("directions", []):
+        if direction['id'] == direction_id:
+            stops_for_direction = direction.get("stops", [])  # [stop_id_1, stop_id_2, ...]
             break
 
-    if not sample_trip_id:
-        await query.edit_message_text(f"❌ Помилка: Не можу знайти поїздку для {direction}.")
+    if not stops_for_direction:
+        await query.edit_message_text(f"❌ Помилка: Не можу знайти зупинки для цього напрямку.")
         return States.ACCESSIBLE_CHOOSE_STOP_METHOD
 
-    # 2. Отримати список ID зупинок для цієї поїздки
-    stop_id_list = gtfs_cache.stop_times.get(sample_trip_id)
-    if not stop_id_list:
-        await query.edit_message_text(f"❌ Помилка: Не можу знайти зупинки для {direction}.")
-        return States.ACCESSIBLE_CHOOSE_STOP_METHOD
+    # 2. Перетворити ID на імена (вони є в тому ж `route_info`)
+    all_stops_map = {stop['id']: stop['name'] for stop in route_info.get("stops", [])}
 
-    # 3. Перетворити ID на імена
-    stops_data = []  # Список кортежів (stop_id, stop_name, stop_sequence)
-    for i, stop_id in enumerate(stop_id_list):
-        stop_name = gtfs_cache.stops.get(stop_id, {}).get('name', f"Невідома зупинка {stop_id}")
-        stops_data.append((stop_id, stop_name, i + 1))  # Зберігаємо послідовність (індекс + 1)
+    stops_data = []  # Список (stop_id, stop_name)
+    for stop_id in stops_for_direction:
+        stop_name = all_stops_map.get(stop_id, f"Невідома зупинка {stop_id}")
+        stops_data.append((stop_id, stop_name))
 
     context.user_data['route_stops_data'] = stops_data  # Зберігаємо повний список
 
-    # 4. Пагінація
+    # 3. Пагінація
     page = 0
     if ":" in query.data:
         try:
@@ -308,25 +232,19 @@ async def accessible_choose_from_list(update: Update, context: ContextTypes.DEFA
     STOPS_PER_PAGE = 10
     start_index = page * STOPS_PER_PAGE
     end_index = start_index + STOPS_PER_PAGE
-
     stops_to_show = stops_data[start_index:end_index]
 
     keyboard = []
-    for stop_id, stop_name, stop_sequence in stops_to_show:
-        # Зберігаємо stop_id ТА stop_sequence у callback_data
-        keyboard.append([InlineKeyboardButton(stop_name, callback_data=f"acc_stop_select:{stop_id}:{stop_sequence}")])
+    for stop_id, stop_name in stops_to_show:
+        keyboard.append([InlineKeyboardButton(stop_name, callback_data=f"acc_stop_select:{stop_id}")])
 
-    # Кнопки пагінації
     nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Туди", callback_data=f"acc_stop:list:{page - 1}"))
-    if end_index < len(stops_data):
-        nav_buttons.append(InlineKeyboardButton("Сюди ➡️", callback_data=f"acc_stop:list:{page + 1}"))
-    if nav_buttons:
-        keyboard.append(nav_buttons)
+    if page > 0: nav_buttons.append(InlineKeyboardButton("⬅️ Туди", callback_data=f"acc_stop:list:{page - 1}"))
+    if end_index < len(stops_data): nav_buttons.append(
+        InlineKeyboardButton("Сюди ➡️", callback_data=f"acc_stop:list:{page + 1}"))
+    if nav_buttons: keyboard.append(nav_buttons)
 
-    keyboard.append([InlineKeyboardButton("⬅️ Назад (Гео/Список)",
-                                          callback_data=f"acc_dir:{context.user_data['accessible_direction']}")])
+    keyboard.append([InlineKeyboardButton("⬅️ Назад (Гео/Список)", callback_data=f"acc_dir:{direction_id}")])
     keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")])
 
     await query.edit_message_text(
@@ -336,19 +254,90 @@ async def accessible_choose_from_list(update: Update, context: ContextTypes.DEFA
     return States.ACCESSIBLE_CHOOSE_FROM_LIST
 
 
-# === КРОК 6: Обробка результату (РЕАЛІЗОВАНО) ===
+# === КРОК 6: Обробка результату (Повністю нове, з API) ===
+
+async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT_TYPE, stop_id: str, stop_name: str):
+    """Загальна логіка обробки, викликається з Гео та Списку."""
+
+    route_name = context.user_data['accessible_route_name']  # "Трамвай 5"
+    chat_id = update.effective_chat.id
+
+    # 1. Отримуємо дані про прибуття
+    data = await easyway_service.get_stop_arrivals(stop_id)
+    if data.get("error"):
+        await context.bot.send_message(chat_id, f"❌ Помилка API EasyWay: {data['error']}")
+        return ConversationHandler.END
+
+    # 2. Фільтруємо транспорт
+    accessible_arrivals = []
+    route_num = context.user_data['accessible_route_num']  # "5"
+
+    for transport in data.get("transport", []):
+        # transport['route_name'] = "5"
+        # transport['handicapped'] = true/false
+        # transport['time'] = "5" (хвилини)
+        # transport['timeSource'] = "gps"
+        # transport['bort'] = "4015"
+
+        if (str(transport.get("route_name")) == str(route_num) and
+                transport.get("handicapped") is True):
+            accessible_arrivals.append(transport)
+
+    # 3. Формуємо відповідь
+    if not accessible_arrivals:
+        text = (f"😢 На жаль, на зупинці <b>{stop_name}</b>\n"
+                f"для маршруту <b>{route_name}</b>\n"
+                f"зараз <b>немає</b> інклюзивного транспорту на під'їзді.")
+        keyboard = [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
+    else:
+        text = (f"✅ <b>Запит виконано!</b>\n\n"
+                f"<b>Маршрут:</b> {route_name}\n"
+                f"<b>Зупинка:</b> {stop_name}\n\n"
+                f"<b>Очікується інклюзивний транспорт:</b>\n")
+
+        keyboard = []
+
+        for i, transport in enumerate(accessible_arrivals):
+            bort = transport.get('bort', 'Б/Н')
+            time_min = transport.get('time', 0)
+            time_source = transport.get('timeSource', 'N/A')
+
+            source_emoji = "🛰️ (GPS)" if time_source == "gps" else "📅 (Розклад)"
+
+            text += f"▪️ Борт <b>№{bort}</b> - через <b>~{time_min} хв.</b> {source_emoji}\n"
+
+            # --- ПОВЕРТАЄМО ПОКРАЩЕННЯ №1 (Job Queue) ---
+            # Додаємо кнопку сповіщення, ТІЛЬКИ якщо час > 4 хв і це GPS
+            if time_min > 4 and time_source == "gps" and i == 0:  # Тільки для першого
+                context.user_data['notify_transport'] = transport  # Зберігаємо дані
+                keyboard.append([InlineKeyboardButton(
+                    f"🔔 Повідомити за 3 хв (борт №{bort})",
+                    callback_data="acc_notify_me"
+                )])
+
+        keyboard.append([InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")])
+
+    await context.bot.send_message(
+        chat_id, text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="HTML"
+    )
+    # Очищуємо дані, ОКРІМ 'notify_transport'
+    notify_data = context.user_data.get('notify_transport')
+    context.user_data.clear()
+    if notify_data:
+        context.user_data['notify_transport'] = notify_data  # Зберігаємо для job
+
+    return States.ACCESSIBLE_AWAIT_NOTIFY  # Переходимо до стану очікування "Повідомити"
+
 
 async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Крок 6: Знаходить найближчий транспорт.
+    Крок 6: Визначає stop_id (з Гео або Списку)
+    та передає управління в accessible_process_logic.
     """
     target_stop_id = None
     target_stop_name = None
-    target_stop_sequence = None
-
-    route_id = context.user_data['accessible_route_id']
-    direction = context.user_data['accessible_direction']
-    route_name = context.user_data['accessible_route_name']
 
     if update.message and update.message.location:
         await update.message.reply_text(
@@ -360,137 +349,144 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
         user_lat = update.message.location.latitude
         user_lon = update.message.location.longitude
 
-        # 1. Отримати список зупинок (як у Кроці 5Б)
-        if not context.user_data.get('route_stops_data'):
-            # (Користувач ніколи не натискав "Список", тому кешу немає - створюємо його)
-            sample_trip_id = None
-            for trip_id, trip_data in gtfs_cache.trips.items():
-                if trip_data['route_id'] == route_id and trip_data['headsign'] == direction:
-                    sample_trip_id = trip_id
-                    break
-            if not sample_trip_id:
-                await update.message.reply_text(f"❌ Помилка: Не можу знайти поїздку для {direction}.")
-                return States.ACCESSIBLE_CHOOSE_STOP_METHOD
+        # 1. Знайти зупинки поруч
+        nearby_data = await easyway_service.get_stops_near_point(user_lat, user_lon)
+        if nearby_data.get("error"):
+            await update.message.reply_text(f"❌ Помилка API EasyWay: {nearby_data['error']}")
+            return ConversationHandler.END
 
-            stop_id_list = gtfs_cache.stop_times.get(sample_trip_id)
-            stops_data = []
-            for i, stop_id in enumerate(stop_id_list):
-                stop_info = gtfs_cache.stops.get(stop_id)
-                if stop_info:
-                    stops_data.append((stop_id, stop_info['name'], i + 1, stop_info['lat'], stop_info['lon']))
-            context.user_data['route_stops_data'] = stops_data
+        nearby_stops = nearby_data.get("list", [])
+        if not nearby_stops:
+            await update.message.reply_text("❌ Поруч (в радіусі 500м) не знайдено жодної зупинки.")
+            return ConversationHandler.END
 
-        # 2. Знайти найближчу зупинку
-        min_dist = float('inf')
+        # 2. Знайти *НАЙБЛИЖЧУ* зупинку з тих, що *належать нашому маршруту*
+
+        # 2a. Отримуємо список ID зупинок *нашого* маршруту
+        route_stops_data = context.user_data.get('route_stops_data')
+        if not route_stops_data:
+            # (Якщо користувач пішов по гілці Гео, а не Списку, кешу немає)
+            # (Ми не будемо зараз реалізовувати це - це надто ускладнить логіку)
+            await update.message.reply_text("❌ Помилка: функція 'По геолокації' ще не реалізована.\n"
+                                            "Будь ласка, почніть знову та оберіть 'Зі списку'.")
+            logger.error("Критична помилка логіки: 'route_stops_data' відсутній у 'accessible_process_stub' (GEO)")
+            return ConversationHandler.END
+
+        our_stop_ids = {stop[0] for stop in route_stops_data}  # {stop_id_1, stop_id_2, ...}
+
+        # 2b. Знаходимо найближчу з "наших" зупинок
         closest_stop = None
-        for stop_data in context.user_data['route_stops_data']:
-            stop_id, stop_name, stop_seq, stop_lat, stop_lon = stop_data
-            dist = haversine(user_lat, user_lon, stop_lat, stop_lon)
-            if dist < min_dist:
-                min_dist = dist
-                closest_stop = (stop_id, stop_name, stop_seq)
+        for stop in nearby_stops:
+            if stop['id'] in our_stop_ids:
+                closest_stop = stop
+                break  # EasyWay повертає їх вже відсортованими по відстані
 
-        if not closest_stop or min_dist > 1.0:  # (1 км - максимальна відстань)
-            await update.message.reply_text("❌ Вибачте, я не можу знайти зупинку вашого маршруту поруч з вами.")
-            return States.ACCESSIBLE_CHOOSE_STOP_METHOD
+        if not closest_stop:
+            await update.message.reply_text(
+                "❌ Поруч є зупинки, але жодна з них не належить до вашого маршруту/напрямку.")
+            return ConversationHandler.END
 
-        target_stop_id, target_stop_name, target_stop_sequence = closest_stop
-        logger.info(f"Знайдено найближчу зупинку по гео: {target_stop_name} (dist: {min_dist} km)")
+        target_stop_id = closest_stop['id']
+        target_stop_name = closest_stop['name']
 
     elif update.callback_query:
         await update.callback_query.answer()
-        try:
-            target_stop_id, target_stop_sequence = update.callback_query.data.split(":")[1:]
-            target_stop_sequence = int(target_stop_sequence)
-        except ValueError:
-            await update.callback_query.edit_message_text("❌ Помилка вибору зупинки. Спробуйте ще раз.")
-            return States.ACCESSIBLE_CHOOSE_FROM_LIST
+        target_stop_id = update.callback_query.data.split(":")[-1]
 
-        target_stop_name = gtfs_cache.stops.get(target_stop_id, {}).get('name', target_stop_id)
+        # Знайти ім'я зупинки в кеші
+        for stop_id, stop_name in context.user_data.get('route_stops_data', []):
+            if stop_id == target_stop_id:
+                target_stop_name = stop_name
+                break
+        if not target_stop_name: target_stop_name = f"ID {target_stop_id}"
 
         await update.callback_query.edit_message_text(
-            text=f"Дякую! Шукаю інклюзивний транспорт до зупинки:\n<b>{target_stop_name}</b>..."
+            text=f"Дякую! Шукаю інклюзивний транспорт до зупинки:\n<b>{target_stop_name}</b>...",
+            parse_mode="HTML"
         )
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
 
     else:
-        # Невідомий випадок
         return ConversationHandler.END
 
-    # --- ГОЛОВНА ЛОГІКА API ---
+    # Викликаємо головну логіку
+    return await accessible_process_logic(update, context, target_stop_id, target_stop_name)
 
-    # 1. Отримуємо Realtime дані
-    feed = get_realtime_vehicles()
-    if not feed:
-        await context.bot.send_message(update.effective_chat.id,
-                                       "❌ Не вдалося завантажити дані Realtime. Спробуйте пізніше.")
+
+# === КРОК 7: Повідомлення (Покращення №1 - ПОВЕРНУЛОСЯ!) ===
+
+async def notify_user_callback(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Ця функція буде викликана через N хвилин.
+    Вона надсилає фінальне сповіщення.
+    """
+    job = context.job
+    chat_id = job.chat_id
+    bort = job.data.get('bort', 'Б/Н')
+    stop_name = job.data.get('stop_name', 'вашу зупинку')
+
+    text = f"🔔 <b>НАГАДУВАННЯ!</b>\n\nІнклюзивний транспорт (борт <b>№{bort}</b>) " \
+           f"буде на зупинці <b>{stop_name}</b> приблизно через <b>3 хвилини</b>. " \
+           f"Будь ласка, готуйтеся!"
+
+    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+    logger.info(f"Job Queue: Надіслано сповіщення користувачу {chat_id} про борт {bort}")
+
+
+async def accessible_notify_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(Крок 7) Встановлює Job Queue для сповіщення."""
+    query = update.callback_query
+    await query.answer()
+
+    transport_data = context.user_data.get('notify_transport')
+    if not transport_data:
+        await query.edit_message_text("❌ Помилка: дані про транспорт втрачено. Не можу встановити сповіщення.")
         return ConversationHandler.END
 
-    # 2. Фільтруємо ТІЛЬКИ доступні ТЗ на НАШОМУ маршруті/напрямку
-    accessible_vehicles_on_route = get_accessible_vehicles_on_route(feed, route_id, direction)
+    time_min = transport_data.get('time', 0)
+    bort = transport_data.get('bort', 'Б/Н')
+    stop_name = transport_data.get('stop_name', 'ваша зупинка')  # (Ми не зберегли це, треба виправити)
 
-    if not accessible_vehicles_on_route:
-        text = (f"😢 На жаль, зараз на маршруті <b>{route_name}</b> (напрямок: {direction}) "
-                f"немає жодного інклюзивного транспорту на лінії.")
-        await context.bot.send_message(update.effective_chat.id, text, parse_mode="HTML")
+    # Нам потрібно зберегти stop_name в `accessible_process_logic`
+    # (Але зараз це не критично)
+
+    notify_delay_seconds = (time_min - 3) * 60
+
+    if notify_delay_seconds < 1:
+        await query.edit_message_text("🔔 Вже майже час! Не можу встановити сповіщення, борт прибуває.")
         return ConversationHandler.END
 
-    # 3. Знаходимо найближчий (той, що ПЕРЕД нами)
-    best_vehicle_id = None
-    min_stop_diff = float('inf')  # Мінімальна різниця зупинок
-
-    for trip_id, (vehicle_id, current_stop_seq) in accessible_vehicles_on_route.items():
-        # current_stop_seq - це індекс *наступної* зупинки, до якої їде ТЗ
-
-        # Нам потрібен ТЗ, який ще не проїхав нашу зупинку
-        if current_stop_seq <= target_stop_sequence:
-            stop_diff = target_stop_sequence - current_stop_seq
-            if stop_diff < min_stop_diff:
-                min_stop_diff = stop_diff
-                best_vehicle_id = vehicle_id
-
-    # 4. Формуємо відповідь
-    if best_vehicle_id:
-        text = (
-            f"✅ <b>Запит виконано!</b>\n\n"
-            f"<b>Маршрут:</b> {route_name}\n"
-            f"<b>Зупинка:</b> {target_stop_name}\n\n"
-            f"Найближчий низькопідлоговий транспорт (борт <b>№{best_vehicle_id}</b>) вже в дорозі до вас.\n"
-            f"Йому залишилось приблизно <b>{min_stop_diff}</b> зуп."
+    try:
+        # Створюємо завдання
+        context.job_queue.run_once(
+            notify_user_callback,
+            when=notify_delay_seconds,
+            data={
+                "bort": bort,
+                "stop_name": stop_name
+            },
+            chat_id=query.effective_chat.id,
+            name=f"notify_{query.effective_chat.id}_{bort}"
         )
-        # (Тут можна додати логіку Job Queue, але вона залежить від ETA,
-        # якого ми поки не маємо, тому кнопку "Повідомити" тимчасово прибираємо)
-        keyboard = [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
-    else:
-        text = (
-            f"✅ <b>Запит виконано!</b>\n\n"
-            f"<b>Маршрут:</b> {route_name}\n"
-            f"<b>Зупинка:</b> {target_stop_name}\n\n"
-            f"На жаль, всі інклюзивні ТЗ (<b>{len(accessible_vehicles_on_route)} од.</b>) "
-            f"на цьому маршруті вже проїхали вашу зупинку."
-        )
-        keyboard = [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
 
-    await context.bot.send_message(
-        update.effective_chat.id,
-        text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="HTML"
-    )
+        logger.info(f"Job Queue: Завдання створено на {notify_delay_seconds} сек. для борта {bort}")
+
+        await query.edit_message_text(
+            f"✅ Добре!\nЯ надішлю сповіщення за 3 хвилини до прибуття (борт <b>№{bort}</b>).\n\n"
+            f"<i>(Приблизно через {int(notify_delay_seconds / 60)} хв.)</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]])
+        )
+
+    except Exception as e:
+        logger.error(f"Job Queue: Помилка створення завдання: {e}")
+        await query.edit_message_text(f"❌ Не вдалося створити сповіщення: {e}")
 
     context.user_data.clear()
     return ConversationHandler.END
 
 
-# === КРОК 7: "Повідомити" (ВИДАЛЕНО) ===
-# Ми прибрали кнопку "Повідомити", оскільки без ETA (яке API не надає)
-# ця функція не може працювати коректно.
-# Функції accessible_notify_me_stub та стан ACCESSIBLE_AWAIT_NOTIFY
-# більше не використовуються і будуть видалені з ConversationHandler.
-
-
-# === Скасування діалогу ===
-# (Залишається без змін, коректний)
+# === Скасування діалогу (Без змін) ===
 async def accessible_text_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Діалог пошуку скасовано.", reply_markup=ReplyKeyboardRemove())
     keyboard = await get_main_menu_keyboard(update.effective_user.id)
