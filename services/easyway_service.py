@@ -45,7 +45,7 @@ class EasyWayService:
         Ми будемо використовувати це для пошуку ID маршрутів за їх назвами.
         """
         params = {
-            "function": "routes.GetList"
+            "function": "cities.GetRoutesList"
         }
         return await self._get(params)
 
