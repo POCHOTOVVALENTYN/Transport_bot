@@ -271,9 +271,9 @@ class TransportBot:
                     # Дозволяємо повернутися до вибору методу
                     CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:")
                 ],
-                States.ACCESSIBLE_AWAIT_NOTIFY: [
-                    CallbackQueryHandler(accessible_notify_me_stub, pattern="^acc_notify_me$")
-                ],
+                #States.ACCESSIBLE_AWAIT_NOTIFY: [
+                    #CallbackQueryHandler(accessible_notify_me_stub, pattern="^acc_notify_me$")
+                #],
             },
             fallbacks=[
                 CallbackQueryHandler(main_menu, pattern="^main_menu$"),
@@ -333,10 +333,10 @@ class TransportBot:
 
 
 
-    def start(self):
+    async def start(self):
         logger.info("🚀 Starting bot polling...")
-        self.app.run_polling()
+        await self.app.run_polling()
 
-    async def stop(self):
-        """Зупинка бота"""
+    #async def stop(self):
+       # """Зупинка бота"""
         # ... (код без змін) ...
