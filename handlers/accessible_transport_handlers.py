@@ -265,7 +265,7 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
         transports_data = stop_object.get("transports", {}).get("transport", [])
         # --- КІНЕЦЬ ФІКСУ ПАРСИНГУ ---
 
-        transports_data = arrivals_data.get("transports", {}).get("transport", [])
+
         if not isinstance(transports_data, list):
             transports_data = [transports_data]
 
@@ -356,10 +356,6 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
             if "(" in api_route_title:
                 api_route_title = api_route_title.split("(")[0].strip()
 
-            # 3. Тепер порівнюємо очищену назву з route_num ("5")
-            if (api_route_title == str(route_num)):
-                accessible_arrivals.append(route)
-
             if (api_route_title == str(route_num) and
                     route.get("handicapped") == 1):  # Або "1" якщо це рядок, але 1 надійніше
                 accessible_arrivals.append(route)
@@ -367,8 +363,8 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
     # 3. Формуємо відповідь (ЦЯ ЧАСТИНА БЕЗ ЗМІН)
     if not accessible_arrivals:
         text = (f"😢 На жаль, на зупинці <b>{stop_name}</b>\n"
-                f"зараз <b>немає</b> інклюзивного транспорту на під'їзді.\n"
-                f"для маршруту <b>{route_name}</b>.")
+                f"для маршруту <b>{route_name}</b>\n"
+                f"зараз <b>немає</b> інклюзивного транспорту на під'їзді.")
         keyboard = [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
     else:
         text = (f"✅ <b>Запит виконано!</b>\n\n"
@@ -411,16 +407,16 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
 
 
 # === КРОК 6: Сповіщення (Без змін) ===
-#async def notify_user_callback(context: ContextTypes.DEFAULT_TYPE):
-#    job = context.job
-##    chat_id = job.chat_id
-#    bort = job.data.get('bort', 'Б/Н')
-#    stop_name = job.data.get('stop_name', 'вашу зупинку')
-#
-#    text = f"🔔 <b>НАГАДУВАННЯ!</b>\n\nІнклюзивний транспорт (борт <b>№{bort}</b>) " \
-#           f"буде на зупинці <b>{stop_name}</b> приблизно через <b>3 хвилини</b>. " \
-#           f"Будь ласка, готуйтеся!"
-#    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+async def notify_user_callback(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    chat_id = job.chat_id
+    bort = job.data.get('bort', 'Б/Н')
+    stop_name = job.data.get('stop_name', 'вашу зупинку')
+
+    text = f"🔔 <b>НАГАДУВАННЯ!</b>\n\nІнклюзивний транспорт (борт <b>№{bort}</b>) " \
+           f"буде на зупинці <b>{stop_name}</b> приблизно через <b>3 хвилини</b>. " \
+           f"Будь ласка, готуйтеся!"
+    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 
 
 async def accessible_notify_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
