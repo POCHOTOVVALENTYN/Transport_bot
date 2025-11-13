@@ -1,4 +1,4 @@
-# handlers/accessible_transport_handlers.py
+from handlers.menu_handlers import main_menu
 from utils.logger import logger
 import re
 import math
@@ -168,7 +168,7 @@ async def accessible_request_location(update: Update, context: ContextTypes.DEFA
     return States.ACCESSIBLE_GET_LOCATION
 
 
-# === КРОК 4: Обробка Геолокації (Нова логіка) ===
+# === КРОК 4: Обробка Геолокації (ПЕРЕПИСАНО) ===
 async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     (ПЕРЕПИСАНО)
@@ -181,12 +181,13 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
 
     # Видаляємо кнопку "Надати геолокацію"
     try:
-        await context.bot.delete_message(
-            chat_id=update.effective_chat.id,
-            message_id=context.user_data['dialog_message_id']
-        )
+        if 'dialog_message_id' in context.user_data:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=context.user_data['dialog_message_id']
+            )
     except Exception:
-        pass
+        pass  # Помилка не критична
 
     await update.message.reply_text(
         "Дякую! Оброблюю ваші геодані та шукаю найближчу зупинку...",
@@ -199,48 +200,80 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
 
     # 1. Отримуємо дані з context
     target_route_name = context.user_data.get('accessible_route_num')  # "5"
-    target_route_type = context.user_data.get('accessible_type')  # "tram"
+    target_route_type_key = context.user_data.get('accessible_type')  # "tram" або "trolley"
 
-    if not target_route_name or not target_route_type:
+    # API EasyWay використовує 'trol' для тролейбусів
+    api_route_type = "trol" if target_route_type_key == "trolley" else target_route_type_key
+
+    if not target_route_name or not api_route_type:
         await update.message.reply_text("❌ Критична помилка: дані про маршрут втрачено. Будь ласка, почніть знову.")
+        await main_menu(update, context)  # Повертаємо в головне меню
         return ConversationHandler.END
 
-    # 2. Викликаємо API GetStopsNearPointWithRoutes
-    nearby_data = await easyway_service.get_stops_near_point_with_routes(user_lat, user_lon)
+    # 2. Викликаємо API GetStopsNearPoint (НОВА ФУНКЦІЯ)
+    nearby_data = await easyway_service.get_stops_near_point(user_lat, user_lon)
+
     if nearby_data.get("error"):
-        await update.message.reply_text(f"❌ Помилка API EasyWay: {nearby_data['error']}")
+        await update.message.reply_text(f"❌ Помилка API EasyWay (GetStopsNearPoint): {nearby_data['error']}")
+        await main_menu(update, context)
         return ConversationHandler.END
 
     nearby_stops = nearby_data.get("stop", [])
     if not nearby_stops:
         await update.message.reply_text("❌ Поруч (в радіусі 500м) не знайдено жодної зупинки.")
+        await main_menu(update, context)
         return ConversationHandler.END
 
-    # 3. Шукаємо збіг
+    if not isinstance(nearby_stops, list):
+        nearby_stops = [nearby_stops]  # Робимо списком, якщо це один об'єкт
+
+    logger.info(f"Знайдено {len(nearby_stops)} зупинок поруч. Починаю перевірку маршрутів...")
+
+    # 3. Шукаємо збіг (НОВА ЛОГІКА ЦИКЛУ)
     found_stop_id = None
     found_stop_name = None
+    found_arrivals_data = None  # Тут збережемо дані, щоб не робити зайвий запит
 
     for stop in nearby_stops:
-        # stop = {'id': '123', 'title': 'Автовокзал', 'routes': {'route': [...]}}
-        routes_on_stop = stop.get("routes", {}).get("route", [])
+        stop_id = stop.get("id")
+        stop_name = stop.get("title")
+        if not stop_id:
+            continue
 
-        # Переконуємось, що 'routes_on_stop' - це список
-        if not isinstance(routes_on_stop, list):
-            routes_on_stop = [routes_on_stop]  # Робимо списком, якщо це один об'єкт
+        # 3.1. Викликаємо GetStopInfo для КОЖНОЇ зупинки
+        arrivals_data = await easyway_service.get_stop_arrivals(stop_id)
+        if arrivals_data.get("error"):
+            logger.warning(f"Не вдалося отримати інфо для зупинки {stop_id}: {arrivals_data['error']}")
+            continue  # Переходимо до наступної зупинки
 
-        for route in routes_on_stop:
-            # route = {'type': 'tram', 'title': '5'}
-            api_route_type = route.get("type")
-            api_route_name = route.get("title").strip()  # "5 " -> "5"
+        transports_data = arrivals_data.get("transports", {}).get("transport", [])
+        if not isinstance(transports_data, list):
+            transports_data = [transports_data]
 
-            # Порівнюємо тип (tram/trol) і назву ("5")
-            if api_route_type == target_route_type and api_route_name == target_route_name:
-                found_stop_id = stop.get("id")
-                found_stop_name = stop.get("title")
-                logger.info(f"Знайдено збіг! Зупинка: {found_stop_name} (ID: {found_stop_id})")
-                break  # Знайшли потрібну зупинку
+        # 3.2. Перевіряємо маршрути на цій зупинці
+        for transport_type in transports_data:
+            routes_data = transport_type.get("route", [])
+            if not isinstance(routes_data, list):
+                routes_data = [routes_data]
+
+            for route in routes_data:
+                # Застосовуємо ту саму логіку очищення, що й при завантаженні
+                if "(" in api_route_title:
+                    api_route_title = api_route_title.split("(")[0].strip()
+                api_transport_key = transport_type.get("key")  # 'bus', 'tram', 'trol'
+
+                # 3.3. Перевіряємо збіг
+                if api_route_title == target_route_name and api_transport_key == api_route_type:
+                    found_stop_id = stop_id
+                    found_stop_name = stop_name
+                    found_arrivals_data = arrivals_data
+                    logger.info(
+                        f"✅ Знайдено збіг! Зупинка: {found_stop_name} (ID: {found_stop_id}) має маршрут {api_transport_key} {api_route_title}")
+                    break
+            if found_stop_id:
+                break
         if found_stop_id:
-            break  # Знайшли, виходимо з головного циклу
+            break
 
     if not found_stop_id:
         await update.message.reply_text(
@@ -248,25 +281,27 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
             f"<b>{context.user_data['accessible_route_name']}</b> поруч з вами.",
             parse_mode="HTML"
         )
+        await main_menu(update, context)
         return ConversationHandler.END
 
-    # 4. Викликаємо фінальну логіку
-    return await accessible_process_logic(update, context, found_stop_id, found_stop_name)
+    # 4. Викликаємо фінальну логіку, ПЕРЕДАЮЧИ ЇЙ ВЖЕ ОТРИМАНІ ДАНІ
+    return await accessible_process_logic(update, context, found_stop_id, found_stop_name, found_arrivals_data)
 
 
-# === КРОК 5: Показ результатів (Майже без змін) ===
-async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT_TYPE, stop_id: str, stop_name: str):
-    """(Крок 5) Загальна логіка обробки, викликається з Гео."""
+# === КРОК 5: Показ результатів (ЗМІНЕНО) ===
+async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT_TYPE, stop_id: str, stop_name: str,
+                                   arrivals_data: dict):
+    """
+    (Крок 5) Загальна логіка обробки.
+    Тепер приймає 'arrivals_data' як аргумент.
+    """
 
     route_name = context.user_data['accessible_route_name']
     route_num = context.user_data['accessible_route_num']  # "5"
     chat_id = update.effective_chat.id
 
-    # 1. Отримуємо дані про прибуття (з v=1.2)
-    data = await easyway_service.get_stop_arrivals(stop_id)
-    if data.get("error"):
-        await context.bot.send_message(chat_id, f"❌ Помилка API EasyWay: {data['error']}")
-        return ConversationHandler.END
+    # 1. БІЛЬШЕ НЕ РОБИМО ЗАПИТ. Використовуємо 'arrivals_data'
+    data = arrivals_data
 
     accessible_arrivals = []
 
@@ -287,10 +322,10 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
 
             # Перевіряємо, чи це наш маршрут І чи він інклюзивний
             if (str(route.get("title")).strip() == str(route_num) and
-                    route.get("handicapped") is True):  # АБО "true"
+                    route.get("handicapped") is True):
                 accessible_arrivals.append(route)
 
-    # 3. Формуємо відповідь
+    # 3. Формуємо відповідь (ЦЯ ЧАСТИНА БЕЗ ЗМІН)
     if not accessible_arrivals:
         text = (f"😢 На жаль, на зупинці <b>{stop_name}</b>\n"
                 f"для маршруту <b>{route_name}</b>\n"
@@ -304,8 +339,8 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
         keyboard = []
 
         for i, transport in enumerate(accessible_arrivals):
-            bort = transport.get('bortNumber', 'Б/Н')  # Ключ з вашої підказки
-            time_min = transport.get('timeLeft', 0)  # Ключ з вашої підказки
+            bort = transport.get('bortNumber', 'Б/Н')
+            time_min = transport.get('timeLeft', 0)
             time_source = transport.get('timeSource', 'N/A')
 
             source_emoji = "🛰️ (GPS)" if time_source == "gps" else "📅 (Розклад)"

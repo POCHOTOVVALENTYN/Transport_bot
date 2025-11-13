@@ -17,7 +17,7 @@ class EasyWayService:
         self.base_params = {
             "login": EASYWAY_LOGIN,
             "password": EASYWAY_PASSWORD,
-            "city": EASYWAY_CITY  # <-- Тепер тут буде "odessa"
+            "city": EASYWAY_CITY
         }
 
     async def _get(self, params: dict) -> dict:
@@ -74,22 +74,33 @@ class EasyWayService:
         params = {"function": "cities.GetRoutesList"}
         return await self._get(params)
 
-    # --- НОВА ФУНКЦІЯ (Крок 2) ---
-    async def get_stops_near_point_with_routes(self, lat: float, lon: float, radius_m: int = 500) -> dict:
+    async def get_stops_near_point(self, lat: float, lng: float, radius_m: int = 500) -> dict:
         """
-        Знаходить зупинки в радіусі (з маршрутами).
-
+        (НОВА ФУНКЦІЯ) Знаходить зупинки в радіусі (БЕЗ маршрутів).
+        Викликає 'stops.GetStopsNearPoint'
         """
         params = {
-            "function": "stops.GetStopsNearPointWithRoutes",
+            "function": "stops.GetStopsNearPoint",  # <-- Назва робочої функції
             "lat": str(lat),
-            "lon": str(lon),
-            "radius": str(radius_m),
-            "v": "1.2"  # Про всяк випадок
+            "lng": str(lng),
+            "radius": str(radius_m)
         }
         return await self._get(params)
 
-    # --- КІНЕЦЬ НОВОЇ ФУНКЦІЇ ---
+
+    async def get_stops_near_point_with_routes(self, lat: float, lng: float, radius_m: int = 500) -> dict:
+        """
+        (НОВА ФУНКЦІЯ) Знаходить зупинки в радіусі (БЕЗ маршрутів).
+        Викликає 'stops.GetStopsNearPoint'
+        """
+        params = {
+            "function": "stops.GetStopsNearPoint",  # <-- Назва робочої функції
+            "lat": str(lat),
+            "lng": str(lng),
+            "radius": str(radius_m)
+        }
+        return await self._get(params)
+
 
     async def get_stop_arrivals(self, stop_id: str) -> dict:
         """
