@@ -246,16 +246,24 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
             logger.warning(f"Не вдалося отримати інфо для зупинки {stop_id}: {arrivals_data['error']}")
             continue  # Переходимо до наступної зупинки
 
-        # Давайте перевіримо, що *взагалі* є в 'arrivals_data'
-        if not arrivals_data.get("transports"):
-            logger.info(f"--- [DEBUG] Зупинка {stop_id} ({stop_name}) НЕ МАЄ ключа 'transports'.")
-        elif not arrivals_data.get("transports", {}).get("transport"):
-            logger.info(
-                f"--- [DEBUG] Зупинка {stop_id} ({stop_name}) має 'transports', але НЕ МАЄ ключа 'transport' всередині.")
-        else:
-            # Цей лог покаже нам, що ми знайшли транспорт
-            logger.info(f"--- [DEBUG] Зупинка {stop_id} ({stop_name}) МАЄ транспорт. Перевіряю...")
-        # --- КІНЕЦЬ НОВОГО БЛОКУ ДІАГНОСТИКИ ---
+        # --- ПОЧАТОК ФІКСУ ПАРСИНГУ ---
+        # 1. API повертає {"stop": [...]}, нам потрібен перший елемент
+        stop_object_list = arrivals_data.get("stop", [])
+
+        if not stop_object_list or not isinstance(stop_object_list, list):
+            logger.warning(f"--- [DEBUG] Зупинка {stop_id} ({stop_name}) повернула дивну структуру (не список 'stop')")
+            continue  # Пропускаємо цю зупинку
+
+        stop_object = stop_object_list[0]  # Беремо перший об'єкт зупинки
+
+        # 2. Тепер шукаємо 'transports' *всередині* об'єкта зупинки
+        if not stop_object.get("transports") or not stop_object.get("transports", {}).get("transport"):
+            logger.info(f"--- [DEBUG] Зупинка {stop_id} ({stop_name}) НЕ МАЄ даних 'transports'.")
+            continue  # Пропускаємо цю зупинку
+
+        logger.info(f"--- [DEBUG] Зупинка {stop_id} ({stop_name}) МАЄ транспорт. Перевіряю...")
+        transports_data = stop_object.get("transports", {}).get("transport", [])
+        # --- КІНЕЦЬ ФІКСУ ПАРСИНГУ ---
 
         transports_data = arrivals_data.get("transports", {}).get("transport", [])
         if not isinstance(transports_data, list):
@@ -320,8 +328,14 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
 
     accessible_arrivals = []
 
-    # (data['transports']['transport'] може бути або списком, або одним об'єктом)
-    transports_data = data.get("transports", {}).get("transport", [])
+    # --- ПОЧАТОК ФІКСУ ПАРСИНГУ ---
+    stop_object_list = data.get("stop", [])
+    if not stop_object_list:
+        transports_data = []  # Порожній список, якщо 'stop' відсутній
+    else:
+        transports_data = stop_object_list[0].get("transports", {}).get("transport", [])
+    # --- КІНЕЦЬ ФІКСУ ПАРСИНГУ ---
+
     if not isinstance(transports_data, list):
         transports_data = [transports_data]  # Робимо списком
 
@@ -346,17 +360,21 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
             if (api_route_title == str(route_num)):
                 accessible_arrivals.append(route)
 
+            if (api_route_title == str(route_num) and
+                    route.get("handicapped") == 1):  # Або "1" якщо це рядок, але 1 надійніше
+                accessible_arrivals.append(route)
+
     # 3. Формуємо відповідь (ЦЯ ЧАСТИНА БЕЗ ЗМІН)
     if not accessible_arrivals:
         text = (f"😢 На жаль, на зупинці <b>{stop_name}</b>\n"
-                f"зараз <b>немає</b> прогнозів прибуття\n"
+                f"зараз <b>немає</b> інклюзивного транспорту на під'їзді.\n"
                 f"для маршруту <b>{route_name}</b>.")
         keyboard = [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
     else:
         text = (f"✅ <b>Запит виконано!</b>\n\n"
                 f"<b>Маршрут:</b> {route_name}\n"
                 f"<b>Зупинка:</b> {stop_name}\n\n"
-                f"<b>Найближчий транспорт:</b>\n")
+                f"<b>Очікується інклюзивний транспорт:</b>\n")
         keyboard = []
 
         for i, transport in enumerate(accessible_arrivals):

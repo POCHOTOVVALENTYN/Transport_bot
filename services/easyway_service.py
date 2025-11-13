@@ -109,6 +109,39 @@ class EasyWayService:
         params = {
             "function": "stops.GetStopInfo",
             "id": stop_id,
+            "v": "1.2"
+        }
+        return await self._get(params)
+
+    async def get_my_info(self) -> dict:
+        """
+        (ТЕСТ №1) Перевірка наших прав доступу.
+        Викликає 'user.GetMyInfo'
+        """
+        params = {"function": "user.GetMyInfo"}
+        return await self._get(params)
+
+    async def get_routes_near_point(self, lat: float, lng: float) -> dict:
+        """
+        (ТЕСТ №2) Перевірка, чи повертає маршрути біля точки.
+        Викликає 'routes.GetRoutesNearPoint'
+        """
+        params = {
+            "function": "routes.GetRoutesNearPoint",
+            "lat": str(lat),
+            "lng": str(lng),
+            "radius": "500"
+        }
+        return await self._get(params)
+
+    async def get_route_gps(self, route_id: str) -> dict:
+        """
+        (ТЕСТ №3) Перевірка GPS-даних транспорту на маршруті.
+        Викликає 'routes.GetRouteGPS'
+        """
+        params = {
+            "function": "routes.GetRouteGPS",
+            "id": route_id
         }
         return await self._get(params)
 
