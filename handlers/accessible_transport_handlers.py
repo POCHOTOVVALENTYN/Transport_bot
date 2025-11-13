@@ -246,6 +246,17 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
             logger.warning(f"Не вдалося отримати інфо для зупинки {stop_id}: {arrivals_data['error']}")
             continue  # Переходимо до наступної зупинки
 
+        # Давайте перевіримо, що *взагалі* є в 'arrivals_data'
+        if not arrivals_data.get("transports"):
+            logger.info(f"--- [DEBUG] Зупинка {stop_id} ({stop_name}) НЕ МАЄ ключа 'transports'.")
+        elif not arrivals_data.get("transports", {}).get("transport"):
+            logger.info(
+                f"--- [DEBUG] Зупинка {stop_id} ({stop_name}) має 'transports', але НЕ МАЄ ключа 'transport' всередині.")
+        else:
+            # Цей лог покаже нам, що ми знайшли транспорт
+            logger.info(f"--- [DEBUG] Зупинка {stop_id} ({stop_name}) МАЄ транспорт. Перевіряю...")
+        # --- КІНЕЦЬ НОВОГО БЛОКУ ДІАГНОСТИКИ ---
+
         transports_data = arrivals_data.get("transports", {}).get("transport", [])
         if not isinstance(transports_data, list):
             transports_data = [transports_data]
@@ -264,6 +275,7 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
                 if "(" in api_route_title:
                     api_route_title = api_route_title.split("(")[0].strip()
                 api_transport_key = transport_type.get("key")  # 'bus', 'tram', 'trol'
+                # --- КІНЕЦЬ БЛОКУ ДІАГНОСТИКИ ---
 
                 # 3.3. Перевіряємо збіг
                 if api_route_title == target_route_name and api_transport_key == api_route_type:
@@ -331,21 +343,20 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
                 api_route_title = api_route_title.split("(")[0].strip()
 
             # 3. Тепер порівнюємо очищену назву з route_num ("5")
-            if (api_route_title == str(route_num) and
-                    route.get("handicapped") is True):
+            if (api_route_title == str(route_num)):
                 accessible_arrivals.append(route)
 
     # 3. Формуємо відповідь (ЦЯ ЧАСТИНА БЕЗ ЗМІН)
     if not accessible_arrivals:
         text = (f"😢 На жаль, на зупинці <b>{stop_name}</b>\n"
-                f"для маршруту <b>{route_name}</b>\n"
-                f"зараз <b>немає</b> інклюзивного транспорту на під'їзді.")
+                f"зараз <b>немає</b> прогнозів прибуття\n"
+                f"для маршруту <b>{route_name}</b>.")
         keyboard = [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
     else:
         text = (f"✅ <b>Запит виконано!</b>\n\n"
                 f"<b>Маршрут:</b> {route_name}\n"
                 f"<b>Зупинка:</b> {stop_name}\n\n"
-                f"<b>Очікується інклюзивний транспорт:</b>\n")
+                f"<b>Найближчий транспорт:</b>\n")
         keyboard = []
 
         for i, transport in enumerate(accessible_arrivals):
@@ -382,16 +393,16 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
 
 
 # === КРОК 6: Сповіщення (Без змін) ===
-async def notify_user_callback(context: ContextTypes.DEFAULT_TYPE):
-    job = context.job
-    chat_id = job.chat_id
-    bort = job.data.get('bort', 'Б/Н')
-    stop_name = job.data.get('stop_name', 'вашу зупинку')
-
-    text = f"🔔 <b>НАГАДУВАННЯ!</b>\n\nІнклюзивний транспорт (борт <b>№{bort}</b>) " \
-           f"буде на зупинці <b>{stop_name}</b> приблизно через <b>3 хвилини</b>. " \
-           f"Будь ласка, готуйтеся!"
-    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+#async def notify_user_callback(context: ContextTypes.DEFAULT_TYPE):
+#    job = context.job
+##    chat_id = job.chat_id
+#    bort = job.data.get('bort', 'Б/Н')
+#    stop_name = job.data.get('stop_name', 'вашу зупинку')
+#
+#    text = f"🔔 <b>НАГАДУВАННЯ!</b>\n\nІнклюзивний транспорт (борт <b>№{bort}</b>) " \
+#           f"буде на зупинці <b>{stop_name}</b> приблизно через <b>3 хвилини</b>. " \
+#           f"Будь ласка, готуйтеся!"
+#    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 
 
 async def accessible_notify_me(update: Update, context: ContextTypes.DEFAULT_TYPE):

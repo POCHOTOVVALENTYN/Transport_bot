@@ -109,7 +109,6 @@ class EasyWayService:
         params = {
             "function": "stops.GetStopInfo",
             "id": stop_id,
-            "v": "1.2"  # <-- ДОДАЄМО v=1.2 ДЛЯ 'handicapped'
         }
         return await self._get(params)
 
