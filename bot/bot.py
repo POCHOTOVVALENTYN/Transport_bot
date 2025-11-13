@@ -18,10 +18,7 @@ from bot.states import States
 from handlers.accessible_transport_handlers import (
     accessible_start,
     accessible_show_routes,
-    accessible_choose_direction,
-    accessible_choose_stop_method,
     accessible_request_location,
-    accessible_choose_from_list,
     accessible_process_stub,
     accessible_notify_me,
     #accessible_notify_me_stub,
@@ -254,30 +251,20 @@ class TransportBot:
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:"),
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
                 ],
-                States.ACCESSIBLE_CHOOSE_DIRECTION: [
-                    CallbackQueryHandler(accessible_choose_direction, pattern="^acc_route:"),
-                    CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")
-                ],
-                States.ACCESSIBLE_CHOOSE_STOP_METHOD: [
-                    CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:"),
-                    CallbackQueryHandler(accessible_choose_direction, pattern="^acc_route:")
-                ],
+
+                # --- НОВА, СПРОЩЕНКА ЛОГІКА ---
                 States.ACCESSIBLE_GET_LOCATION: [
-                    CallbackQueryHandler(accessible_request_location, pattern="^acc_stop:geo$"),
-                    CallbackQueryHandler(accessible_choose_from_list, pattern="^acc_stop:list:"),  # Додано :
-                    CallbackQueryHandler(accessible_choose_from_list, pattern="^acc_stop:list$"),
+                    # Сюди ми потрапляємо, обравши маршрут (accessible_show_routes)
+                    # АБО з кнопки "Надати геолокацію"
+                    CallbackQueryHandler(accessible_request_location, pattern="^acc_route:"),
+
+                    # Цей обробник "ловить" саму геолокацію
                     MessageHandler(filters.LOCATION, accessible_process_stub),
-                    CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:")
                 ],
-                States.ACCESSIBLE_CHOOSE_FROM_LIST: [
-                    CallbackQueryHandler(accessible_process_stub, pattern="^acc_stop_select:"),
-                    CallbackQueryHandler(accessible_choose_stop_method, pattern="^acc_dir:")
-                ],
-                # --- ПОВЕРТАЄМО ОБРОБНИК СПОВІЩЕНЬ ---
+                # --- КІНЕЦЬ НОВОЇ ЛОГІКИ ---
+
                 States.ACCESSIBLE_AWAIT_NOTIFY: [
                     CallbackQueryHandler(accessible_notify_me, pattern="^acc_notify_me$"),
-                    # Якщо користувач нічого не натиснув, а пішов далі,
-                    # ми маємо обробити і вихід
                     CallbackQueryHandler(main_menu, pattern="^main_menu$"),
                 ],
             },
