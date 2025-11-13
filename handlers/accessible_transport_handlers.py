@@ -257,7 +257,10 @@ async def accessible_process_stub(update: Update, context: ContextTypes.DEFAULT_
                 routes_data = [routes_data]
 
             for route in routes_data:
-                # Застосовуємо ту саму логіку очищення, що й при завантаженні
+                # 1. Спочатку отримуємо "сиру" назву з API
+                api_route_title = str(route.get("title")).strip()
+
+                # 2. Потім застосовуємо логіку очищення
                 if "(" in api_route_title:
                     api_route_title = api_route_title.split("(")[0].strip()
                 api_transport_key = transport_type.get("key")  # 'bus', 'tram', 'trol'
