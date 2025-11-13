@@ -323,8 +323,15 @@ async def accessible_process_logic(update: Update, context: ContextTypes.DEFAULT
             # route['handicapped'] = true/false (з v1.2)
             # route['time'] = "5" (хвилини)
 
-            # Перевіряємо, чи це наш маршрут І чи він інклюзивний
-            if (str(route.get("title")).strip() == str(route_num) and
+            # 1. Отримуємо "сиру" назву з API
+            api_route_title = str(route.get("title")).strip()
+
+            # 2. Очищуємо її (напр., "5(Автовокзал)" -> "5")
+            if "(" in api_route_title:
+                api_route_title = api_route_title.split("(")[0].strip()
+
+            # 3. Тепер порівнюємо очищену назву з route_num ("5")
+            if (api_route_title == str(route_num) and
                     route.get("handicapped") is True):
                 accessible_arrivals.append(route)
 
