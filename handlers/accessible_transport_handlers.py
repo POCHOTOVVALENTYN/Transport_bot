@@ -61,8 +61,8 @@ async def load_easyway_route_ids(application: Application) -> bool:
             logger.warning(f"Пропускаємо маршрут з неповними даними: {route}")
             continue
 
-        if "(" in route_name:
-            route_name = route_name.split("(")[0].strip()
+        #if "(" in route_name:
+            #route_name = route_name.split("(")[0].strip()
 
         route_obj = {
             "id": route_id,
@@ -151,18 +151,19 @@ async def accessible_show_routes(update: Update, context: ContextTypes.DEFAULT_T
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="HTML"
     )
-    return States.ACCESSIBLE_CHOOSE_DIRECTION # <-- Перехід на Крок 3
+    return States.ACCESSIBLE_CHOOSE_STOP_METHOD # <-- Перехід на Крок 3
 
 
-# === КРОК 3: Вибір Напрямку (НОВА ЛОГІКА "ПЛАН F") ===
-async def accessible_show_directions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# === КРОК 3 (НОВИЙ): Вибір Зупинки (замість Кроку 3 і 4) ===
+async def accessible_show_stops(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     try:
-        _, route_id, route_name, start_pos, stop_pos = query.data.split(":")
+        # "acc_route:113:5(Аркадія):0:300"
+        _, route_id, route_name, start_pos, stop_pos = query.data.split(":", 4) # Розділити 4 рази
     except ValueError:
-        await query.edit_message_text("❌ Помилка: Некоректні дані маршруту.")
+        await query.edit_message_text("❌ Помилка: Некоректні дані маршруту (stop).")
         return ConversationHandler.END
 
     # Зберігаємо дані маршруту в context
@@ -171,112 +172,59 @@ async def accessible_show_directions(update: Update, context: ContextTypes.DEFAU
     context.user_data['route_start_pos'] = start_pos
     context.user_data['route_stop_pos'] = stop_pos
 
-    await query.edit_message_text(f"🔄 Отримую напрямки для <b>{context.user_data['route_name']}</b>...", parse_mode="HTML")
+    # ВАЖЛИВО: Ми знаємо напрямок з 'start_pos'.
+    # API чекає 1 (прямий) або 2 (зворотній).
+    # Ми припускаємо, що якщо start_pos < stop_pos, це прямий (1).
+    # Це може бути ненадійно, але це наша найкраща гіпотеза.
+    # Давайте припустимо, що API 'routes.GetRouteGPS' direction (1 або 2)
+    # відповідає напрямку 'GetRouteToDisplay' (start->stop чи stop->start).
 
-    # --- Наш новий надійний метод ---
-    dir_1_name = "Прямий напрямок"
-    dir_2_name = "Зворотній напрямок"
-    dir_1_stops = []
-    dir_2_stops = []
+    # Ми просто збережемо шлях, який нам потрібен.
+    # Викликаємо GetRouteToDisplay ОДИН РАЗ.
 
-    try:
-        # --- DEBUG LOG ---
-        logger.info(
-            f"[DEBUG accessible_show_directions] Викликаю ПРЯМИЙ: id={route_id}, start={start_pos}, stop={stop_pos}")
-        # --- END DEBUG ---
-        # 1. Отримуємо Прямий напрямок
-        path_data_1 = await easyway_service.get_route_to_display(route_id, start_pos, stop_pos)
-        all_points_1 = path_data_1.get("route", {}).get("points", {}).get("point", [])
-        # --- DEBUG LOG ---
-        logger.info(
-            f"[DEBUG accessible_show_directions] Викликаю ЗВОРОТНІЙ: id={route_id}, start={stop_pos}, stop={start_pos}")
-        # --- END DEBUG ---
+    await query.edit_message_text(f"🔄 Завантажую зупинки для <b>{context.user_data['route_name']}</b>...", parse_mode="HTML")
 
-        # 2. Отримуємо Зворотній напрямок
-        path_data_2 = await easyway_service.get_route_to_display(route_id, stop_pos, start_pos)
-        all_points_2 = path_data_2.get("route", {}).get("points", {}).get("point", [])
-        # --- DEBUG LOG ---
-        logger.info(f"[DEBUG accessible_show_directions] Отримано точок (Прямий): {len(all_points_1)}")
-        logger.info(f"[DEBUG accessible_show_directions] Отримано точок (Зворотній): {len(all_points_2)}")
-        # --- END DEBUG ---
+    path_data = await easyway_service.get_route_to_display(route_id, start_pos, stop_pos)
 
-        if not all_points_1 or not all_points_2:
-            raise ValueError("API не повернуло 'points'")
-
-        # 3. Генеруємо назви напрямків та кешуємо шляхи
-        dir_1_stops = [{"index": i, "data": p} for i, p in enumerate(all_points_1) if p.get("is_stop") == "true"]
-        dir_2_stops = [{"index": i, "data": p} for i, p in enumerate(all_points_2) if p.get("is_stop") == "true"]
-
-        if dir_1_stops:
-            dir_1_name = f"{dir_1_stops[0]['data'].get('title')} - {dir_1_stops[-1]['data'].get('title')}"
-            context.user_data['dir_1_path'] = all_points_1 # Кешуємо повний шлях
-            context.user_data['dir_1_stops'] = dir_1_stops # Кешуємо зупинки
-
-        if dir_2_stops:
-            dir_2_name = f"{dir_2_stops[0]['data'].get('title')} - {dir_2_stops[-1]['data'].get('title')}"
-            context.user_data['dir_2_path'] = all_points_2 # Кешуємо повний шлях
-            context.user_data['dir_2_stops'] = dir_2_stops # Кешуємо зупинки
-
-    except Exception as e:
-        logger.error(f"Помилка під час отримання напрямків GetRouteToDisplay: {e}")
-        await query.edit_message_text(f"❌ Помилка API (GetRouteToDisplay): не вдалося отримати дані про напрямки.")
+    if path_data.get("error") or not path_data.get("route", {}).get("points"):
+        await query.edit_message_text(f"❌ Помилка API (GetRouteToDisplay): {path_data.get('error', 'no data')}")
         return States.ACCESSIBLE_CHOOSE_ROUTE
 
-    keyboard = [
-        [InlineKeyboardButton(f"➡️ {dir_1_name}", callback_data="acc_dir:1")],
-        [InlineKeyboardButton(f"⬅️ {dir_2_name}", callback_data="acc_dir:2")],
-        [InlineKeyboardButton("⬅️ Назад (до маршрутів)", callback_data=f"acc_type:{context.user_data['accessible_type']}")]
-    ]
+    all_points = path_data.get("route", {}).get("points", {}).get("point", [])
+    if not all_points:
+        await query.edit_message_text("❌ Помилка: API не повернуло точки маршруту.")
+        return States.ACCESSIBLE_CHOOSE_ROUTE
 
-    await query.edit_message_text(
-        f"Оберіть напрямок руху для <b>{context.user_data['route_name']}</b>:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="HTML"
-    )
-    return States.ACCESSIBLE_CHOOSE_STOP_METHOD # <-- Перехід на Крок 4
+    context.user_data['route_path_points'] = all_points # Кешуємо повний шлях
 
-
-# === КРОК 4: Вибір Зупинки (НОВА ЛОГІКА "ПЛАН F") ===
-async def accessible_show_stops(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    direction_key = query.data.split(":")[-1] # "1" або "2"
-    context.user_data['direction_key'] = int(direction_key) # Зберігаємо 1 або 2
-
-    # Дістаємо список зупинок з кешу, який ми зберегли на Кроці 3
-    stop_list_key = f'dir_{direction_key}_stops'
-    stop_points = context.user_data.get(stop_list_key)
+    stop_points = []
+    for i, point in enumerate(all_points):
+        if point.get("is_stop") == "true":
+            point['index_in_path'] = i
+            stop_points.append(point)
 
     if not stop_points:
-        await query.edit_message_text("❌ Помилка: дані про зупинки втрачено. Спробуйте знову.")
-        return ConversationHandler.END
+        await query.edit_message_text("❌ Помилка: API не повернуло зупинки для цього напрямку.")
+        return States.ACCESSIBLE_CHOOSE_ROUTE
+
+    context.user_data['route_stops'] = stop_points
 
     buttons = [
         InlineKeyboardButton(
-            stop['data'].get("title"),
-            # Зберігаємо індекс зупинки у списку all_points
-            callback_data=f"acc_stop:{stop.get('index')}"
+            stop.get("title"),
+            callback_data=f"acc_stop:{stop.get('index_in_path')}"
         ) for stop in stop_points
     ]
 
-    keyboard = [buttons[i:i + 1] for i in range(0, len(buttons), 1)] # По одній кнопці в ряд
+    keyboard = [buttons[i:i + 1] for i in range(0, len(buttons), 1)]
+    keyboard.append([InlineKeyboardButton("⬅️ Назад (до маршрутів)", callback_data=f"acc_type:{context.user_data['accessible_type']}")])
 
-    # Кнопка "Назад (до напрямків)"
-    route_id = context.user_data['route_id']
-    route_name = context.user_data['route_name'].split(' ')[-1] # "5"
-    start_pos = context.user_data['route_start_pos']
-    stop_pos = context.user_data['route_stop_pos']
-
-    keyboard.append([InlineKeyboardButton("⬅️ Назад (до напрямків)", callback_data=f"acc_route:{route_id}:{route_name}:{start_pos}:{stop_pos}")])
-
-    # TODO: Додати пагінацію, якщо зупинок > 15
     await query.edit_message_text(
-        "Оберіть вашу зупинку:",
+        f"Оберіть вашу зупинку (маршрут: <b>{context.user_data['route_name']}</b>):",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="HTML"
     )
-    return States.ACCESSIBLE_GET_LOCATION # <-- Перехід на Крок 5
+    return States.ACCESSIBLE_GET_LOCATION # Перехід на Крок 5 (Розрахунок)
 
 
 # === КРОК 5: Розрахунок та Показ (НОВА ЛОГІКА "ПЛАН F") ===
@@ -290,7 +238,7 @@ async def accessible_calculate_and_show(update: Update, context: ContextTypes.DE
         # Дістаємо всі дані, збережені раніше
         route_id = context.user_data['route_id']
         route_name = context.user_data['route_name']
-        direction_key = context.user_data['direction_key'] # 1 або 2
+        #direction_key = context.user_data['direction_key'] # 1 або 2
 
         # Отримуємо ПОВНИЙ шлях для обраного напрямку
         path_key = f'dir_{direction_key}_path'
@@ -323,8 +271,7 @@ async def accessible_calculate_and_show(update: Update, context: ContextTypes.DE
     # 2. Фільтруємо інклюзивні, що їдуть у НАШОМУ напрямку
     accessible_vehicles = [
         v for v in vehicles
-        # direction_key з API (1 або 2)
-        if (v.get("handicapped") == 1 or v.get("handicapped") is True) and v.get("direction") == direction_key
+        if (v.get("handicapped") == 1 or v.get("handicapped") is True)
     ]
 
     if not accessible_vehicles:

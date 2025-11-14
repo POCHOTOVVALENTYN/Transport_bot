@@ -18,7 +18,7 @@ from bot.states import States
 from handlers.accessible_transport_handlers import (
     accessible_start,
     accessible_show_routes,
-    accessible_show_directions,  # <-- НОВИЙ ІМПОРТ
+    #accessible_show_directions,  # <-- НОВИЙ ІМПОРТ
     accessible_show_stops,  # <-- НОВИЙ ІМПОРТ
     accessible_calculate_and_show,
     accessible_text_cancel,
@@ -241,33 +241,28 @@ class TransportBot:
             block=False
         )
         # --- 3. ДОДАЄМО НАШ НОВИЙ CONVERSATION HANDLER ---
+        # --- 3. (ПЕРЕПИСАНО) CONVERSATION HANDLER ДЛЯ ПЛАНУ H ---
         accessible_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
             ],
             states={
-                # Крок 1 -> 2: (Вибір маршруту)
+                # Крок 1 -> 2: (Вибір маршруту, який тепер є і напрямком)
                 States.ACCESSIBLE_CHOOSE_ROUTE: [
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:"),
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
                 ],
 
-                # Крок 2 -> 3: (Вибір напрямку)
-                States.ACCESSIBLE_CHOOSE_DIRECTION: [
-                    CallbackQueryHandler(accessible_show_directions, pattern="^acc_route:"),
+                # Крок 2 -> 3: (Вибір зупинки)
+                States.ACCESSIBLE_CHOOSE_STOP_METHOD: [
+                    CallbackQueryHandler(accessible_show_stops, pattern="^acc_route:"),
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")
                 ],
 
-                # Крок 3 -> 4: (Вибір зупинки)
-                States.ACCESSIBLE_CHOOSE_STOP_METHOD: [
-                    CallbackQueryHandler(accessible_show_stops, pattern="^acc_dir:"),
-                    CallbackQueryHandler(accessible_show_directions, pattern="^acc_route:")
-                ],
-
-                # Крок 4 -> 5: (Розрахунок)
+                # Крок 3 -> 4: (Розрахунок)
                 States.ACCESSIBLE_GET_LOCATION: [
                     CallbackQueryHandler(accessible_calculate_and_show, pattern="^acc_stop:"),
-                    CallbackQueryHandler(accessible_show_stops, pattern="^acc_dir:")
+                    CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")  # Назад до вибору маршруту
                 ],
             },
             fallbacks=[
@@ -277,6 +272,7 @@ class TransportBot:
             ],
             block=False
         )
+        # --- КІНЕЦЬ ПЕРЕПИСУВАННЯ ---
         # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
         # Додавання всіх conversation handlers
