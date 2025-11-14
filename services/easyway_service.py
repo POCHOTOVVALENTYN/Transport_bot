@@ -88,16 +88,26 @@ class EasyWayService:
         return await self._get(params)
 
 
-    async def get_stops_near_point_with_routes(self, lat: float, lng: float, radius_m: int = 500) -> dict:
+
+    async def get_route_info(self, route_id: str) -> dict:
         """
-        (НОВА ФУНКЦІЯ) Знаходить зупинки в радіусі (БЕЗ маршрутів).
-        Викликає 'stops.GetStopsNearPoint'
+        (НОВА ФУНКЦІЯ) Отримує назви напрямків
         """
         params = {
-            "function": "stops.GetStopsNearPoint",  # <-- Назва робочої функції
-            "lat": str(lat),
-            "lng": str(lng),
-            "radius": str(radius_m)
+            "function": "routes.GetRouteInfo",
+            "id": route_id
+        }
+        return await self._get(params)
+
+    async def get_route_to_display(self, route_id: str, start_pos: str, stop_pos: str) -> dict:
+        """
+        (НОВА ФУНКЦІЯ) Отримує повний шлях та зупинки маршруту
+        """
+        params = {
+            "function": "routes.GetRouteToDisplay",
+            "id": route_id,
+            "start_position": start_pos,
+            "stop_position": stop_pos
         }
         return await self._get(params)
 

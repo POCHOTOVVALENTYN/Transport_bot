@@ -18,10 +18,9 @@ from bot.states import States
 from handlers.accessible_transport_handlers import (
     accessible_start,
     accessible_show_routes,
-    accessible_request_location,
-    accessible_process_stub,
-    accessible_notify_me,
-    #accessible_notify_me_stub,
+    accessible_show_directions,  # <-- НОВИЙ ІМПОРТ
+    accessible_show_stops,  # <-- НОВИЙ ІМПОРТ
+    accessible_calculate_and_show,
     accessible_text_cancel,
     load_easyway_route_ids # <-- НОВИЙ ВАЖЛИВИЙ ІМПОРТ
 )
@@ -247,29 +246,42 @@ class TransportBot:
                 CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
             ],
             states={
+                # Крок 1: Користувач обрав тип (tram/trolley). Чекаємо на вибір маршруту.
                 States.ACCESSIBLE_CHOOSE_ROUTE: [
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:"),
+                    # "Назад" з цього меню веде на accessible_start,
+                    # але ми також додамо його сюди для надійності.
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
                 ],
 
-                # --- НОВА, СПРОЩЕНКА ЛОГІКА ---
-                States.ACCESSIBLE_GET_LOCATION: [
-                    # Сюди ми потрапляємо, обравши маршрут (accessible_show_routes)
-                    # АБО з кнопки "Надати геолокацію"
-                    CallbackQueryHandler(accessible_request_location, pattern="^acc_route:"),
-
-                    # Цей обробник "ловить" саму геолокацію
-                    MessageHandler(filters.LOCATION, accessible_process_stub),
+                # Крок 2: Користувач обрав маршрут. Чекаємо на вибір напрямку.
+                States.ACCESSIBLE_CHOOSE_DIRECTION: [
+                    CallbackQueryHandler(accessible_show_directions, pattern="^acc_route:"),
+                    # Кнопка "Назад (до маршрутів)" з accessible_show_directions
+                    # має callback_data="acc_type:...", тому ми ловимо її тут.
+                    CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")
                 ],
-                # --- КІНЕЦЬ НОВОЇ ЛОГІКИ ---
 
-                States.ACCESSIBLE_AWAIT_NOTIFY: [
-                    CallbackQueryHandler(accessible_notify_me, pattern="^acc_notify_me$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$"),
+                # Крок 3: Користувач обрав напрямок. Чекаємо на вибір зупинки.
+                States.ACCESSIBLE_CHOOSE_STOP_METHOD: [
+                    CallbackQueryHandler(accessible_show_stops, pattern="^acc_dir:"),
+                    # Кнопка "Назад (до напрямків)" з accessible_show_stops
+                    # має callback_data="acc_route:...", тому ми ловимо її тут.
+                    CallbackQueryHandler(accessible_show_directions, pattern="^acc_route:")
+                ],
+
+                # Крок 4: Користувач обрав зупинку. Розраховуємо та показуємо.
+                States.ACCESSIBLE_GET_LOCATION: [
+                    CallbackQueryHandler(accessible_calculate_and_show, pattern="^acc_stop:"),
+                    # Кнопка "Назад (до зупинок)" з (на майбутнє, якщо буде)
+                    # має callback_data="acc_dir:...", тому ми ловимо її тут.
+                    CallbackQueryHandler(accessible_show_stops, pattern="^acc_dir:")
                 ],
             },
             fallbacks=[
+                # Універсальні кнопки скасування, які працюють з будь-якого стану
                 CallbackQueryHandler(main_menu, pattern="^main_menu$"),
+                CallbackQueryHandler(accessible_start, pattern="^accessible_start$"),  # Повернутись на початок
                 MessageHandler(filters.TEXT & ~filters.COMMAND, accessible_text_cancel)
             ],
             block=False
