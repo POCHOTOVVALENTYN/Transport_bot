@@ -246,42 +246,33 @@ class TransportBot:
                 CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
             ],
             states={
-                # Крок 1: Користувач обрав тип (tram/trolley). Чекаємо на вибір маршруту.
+                # Крок 1 -> 2: (Вибір маршруту)
                 States.ACCESSIBLE_CHOOSE_ROUTE: [
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:"),
-                    # "Назад" з цього меню веде на accessible_start,
-                    # але ми також додамо його сюди для надійності.
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
                 ],
 
-                # Крок 2: Користувач обрав маршрут. Чекаємо на вибір напрямку.
+                # Крок 2 -> 3: (Вибір напрямку)
                 States.ACCESSIBLE_CHOOSE_DIRECTION: [
                     CallbackQueryHandler(accessible_show_directions, pattern="^acc_route:"),
-                    # Кнопка "Назад (до маршрутів)" з accessible_show_directions
-                    # має callback_data="acc_type:...", тому ми ловимо її тут.
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")
                 ],
 
-                # Крок 3: Користувач обрав напрямок. Чекаємо на вибір зупинки.
+                # Крок 3 -> 4: (Вибір зупинки)
                 States.ACCESSIBLE_CHOOSE_STOP_METHOD: [
                     CallbackQueryHandler(accessible_show_stops, pattern="^acc_dir:"),
-                    # Кнопка "Назад (до напрямків)" з accessible_show_stops
-                    # має callback_data="acc_route:...", тому ми ловимо її тут.
                     CallbackQueryHandler(accessible_show_directions, pattern="^acc_route:")
                 ],
 
-                # Крок 4: Користувач обрав зупинку. Розраховуємо та показуємо.
+                # Крок 4 -> 5: (Розрахунок)
                 States.ACCESSIBLE_GET_LOCATION: [
                     CallbackQueryHandler(accessible_calculate_and_show, pattern="^acc_stop:"),
-                    # Кнопка "Назад (до зупинок)" з (на майбутнє, якщо буде)
-                    # має callback_data="acc_dir:...", тому ми ловимо її тут.
                     CallbackQueryHandler(accessible_show_stops, pattern="^acc_dir:")
                 ],
             },
             fallbacks=[
-                # Універсальні кнопки скасування, які працюють з будь-якого стану
                 CallbackQueryHandler(main_menu, pattern="^main_menu$"),
-                CallbackQueryHandler(accessible_start, pattern="^accessible_start$"),  # Повернутись на початок
+                CallbackQueryHandler(accessible_start, pattern="^accessible_start$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, accessible_text_cancel)
             ],
             block=False

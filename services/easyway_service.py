@@ -74,24 +74,9 @@ class EasyWayService:
         params = {"function": "cities.GetRoutesList"}
         return await self._get(params)
 
-    async def get_stops_near_point(self, lat: float, lng: float, radius_m: int = 500) -> dict:
-        """
-        (НОВА ФУНКЦІЯ) Знаходить зупинки в радіусі (БЕЗ маршрутів).
-        Викликає 'stops.GetStopsNearPoint'
-        """
-        params = {
-            "function": "stops.GetStopsNearPoint",  # <-- Назва робочої функції
-            "lat": str(lat),
-            "lng": str(lng),
-            "radius": str(radius_m)
-        }
-        return await self._get(params)
-
-
-
     async def get_route_info(self, route_id: str) -> dict:
         """
-        (НОВА ФУНКЦІЯ) Отримує назви напрямків
+        (ВИПРАВЛЕНО) Отримує деталі маршруту (для 'shortDescription')
         """
         params = {
             "function": "routes.GetRouteInfo",
@@ -101,7 +86,7 @@ class EasyWayService:
 
     async def get_route_to_display(self, route_id: str, start_pos: str, stop_pos: str) -> dict:
         """
-        (НОВА ФУНКЦІЯ) Отримує повний шлях та зупинки маршруту
+        (НОВА) Отримує повний шлях (точки) та зупинки маршруту
         """
         params = {
             "function": "routes.GetRouteToDisplay",
@@ -111,49 +96,16 @@ class EasyWayService:
         }
         return await self._get(params)
 
-
-    async def get_stop_arrivals(self, stop_id: str) -> dict:
-        """
-        Отримує прогноз прибуття (stops.GetStopInfo).
-        """
-        params = {
-            "function": "stops.GetStopInfo",
-            "id": stop_id,
-            "v": "1.2"
-        }
-        return await self._get(params)
-
-    async def get_my_info(self) -> dict:
-        """
-        (ТЕСТ №1) Перевірка наших прав доступу.
-        Викликає 'user.GetMyInfo'
-        """
-        params = {"function": "user.GetMyInfo"}
-        return await self._get(params)
-
-    async def get_routes_near_point(self, lat: float, lng: float) -> dict:
-        """
-        (ТЕСТ №2) Перевірка, чи повертає маршрути біля точки.
-        Викликає 'routes.GetRoutesNearPoint'
-        """
-        params = {
-            "function": "routes.GetRoutesNearPoint",
-            "lat": str(lat),
-            "lng": str(lng),
-            "radius": "500"
-        }
-        return await self._get(params)
-
     async def get_route_gps(self, route_id: str) -> dict:
         """
-        (ТЕСТ №3) Перевірка GPS-даних транспорту на маршруті.
-        Викликає 'routes.GetRouteGPS'
+        (НОВА) Отримує GPS-дані транспорту на маршруті.
         """
         params = {
             "function": "routes.GetRouteGPS",
             "id": route_id
         }
         return await self._get(params)
+
 
 
 easyway_service = EasyWayService()
