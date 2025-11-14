@@ -242,27 +242,31 @@ class TransportBot:
         )
         # --- 3. ДОДАЄМО НАШ НОВИЙ CONVERSATION HANDLER ---
         # --- 3. (ПЕРЕПИСАНО) CONVERSATION HANDLER ДЛЯ ПЛАНУ H ---
+        # --- 3. (ПЕРЕПИСАНО) CONVERSATION HANDLER ДЛЯ ПЛАНУ J ---
         accessible_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
             ],
             states={
-                # Крок 1 -> 2: (Вибір маршруту, який тепер є і напрямком)
+                # Крок 1 -> 2: (Вибір маршруту)
                 States.ACCESSIBLE_CHOOSE_ROUTE: [
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:"),
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
                 ],
 
                 # Крок 2 -> 3: (Вибір зупинки)
+                # Ми переходимо сюди одразу з ACCESSIBLE_CHOOSE_ROUTE
                 States.ACCESSIBLE_CHOOSE_STOP_METHOD: [
                     CallbackQueryHandler(accessible_show_stops, pattern="^acc_route:"),
+                    # "Назад" з цього меню повертає до вибору типу
                     CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")
                 ],
 
                 # Крок 3 -> 4: (Розрахунок)
                 States.ACCESSIBLE_GET_LOCATION: [
                     CallbackQueryHandler(accessible_calculate_and_show, pattern="^acc_stop:"),
-                    CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")  # Назад до вибору маршруту
+                    # "Назад" з (майбутнього) меню поверне до вибору зупинок
+                    CallbackQueryHandler(accessible_show_stops, pattern="^acc_route:")
                 ],
             },
             fallbacks=[
@@ -272,8 +276,6 @@ class TransportBot:
             ],
             block=False
         )
-        # --- КІНЕЦЬ ПЕРЕПИСУВАННЯ ---
-        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
         # Додавання всіх conversation handlers
         self.app.add_handler(complaint_conv)
