@@ -41,10 +41,5 @@ class States:
     # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     # Нові стани для Пошуку Інклюзивного Транспорту
-    ACCESSIBLE_CHOOSE_TYPE = 30  # Крок 1: Трамвай / Тролейбус
-    ACCESSIBLE_CHOOSE_ROUTE = 31  # Крок 2: Маршрут 5, 7, 10...
-    ACCESSIBLE_CHOOSE_DIRECTION = 32  # Крок 3: Напрямок
-    ACCESSIBLE_CHOOSE_STOP_METHOD = 33  # Крок 4: Гео / Список
-    ACCESSIBLE_GET_LOCATION = 34  # Крок 4А: Очікування гео
-    ACCESSIBLE_CHOOSE_FROM_LIST = 35  # Крок 4Б: Очікування вибору зі списку
-    ACCESSIBLE_AWAIT_NOTIFY = 36  # Крок 5: Очікування "Повідомити" (ми його видалили, але нехай буде)
+    ACCESSIBLE_SEARCH_STOP = 30  # Крок 1: Очікування назви зупинки
+    ACCESSIBLE_SELECT_STOP = 31  # Крок 2: Очікування вибору зупинки зі списку

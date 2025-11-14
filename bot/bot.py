@@ -17,10 +17,9 @@ from bot.states import States
 
 from handlers.accessible_transport_handlers import (
     accessible_start,
-    accessible_show_routes,
-    #accessible_show_directions,  # <-- НОВИЙ ІМПОРТ
-    accessible_show_stops,  # <-- НОВИЙ ІМПОРТ
-    accessible_calculate_and_show,
+    accessible_search_stop,
+    accessible_stop_quick_search,
+    accessible_stop_selected,
     accessible_text_cancel,
     load_easyway_route_ids # <-- НОВИЙ ВАЖЛИВИЙ ІМПОРТ
 )
@@ -240,33 +239,28 @@ class TransportBot:
             ],
             block=False
         )
-        # --- 3. ДОДАЄМО НАШ НОВИЙ CONVERSATION HANDLER ---
-        # --- 3. (ПЕРЕПИСАНО) CONVERSATION HANDLER ДЛЯ ПЛАНУ H ---
-        # --- 3. (ПЕРЕПИСАНО) CONVERSATION HANDLER ДЛЯ ПЛАНУ J ---
         accessible_conv = ConversationHandler(
             entry_points=[
+                # Вхід через кнопку "♿ Пошук інклюзивного транспорту" [cite: 16-17]
                 CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
             ],
             states={
-                # Крок 1 -> 2: (Вибір маршруту)
-                States.ACCESSIBLE_CHOOSE_ROUTE: [
-                    CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:"),
+                # Крок 1: Очікування тексту (назви зупинки) або кнопки "Популярне"
+                States.ACCESSIBLE_SEARCH_STOP: [
+                    # Обробник тексту [cite: 1611-1615]
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, accessible_search_stop),
+                    # Обробник кнопок "Популярне" (напр. stop_search_Центр) [cite: 1616-1620]
+                    CallbackQueryHandler(accessible_stop_quick_search, pattern="^stop_search_"),
+                    # Обробник кнопки (якщо ID зупинки вже відомий, напр. "Ринок Привоз") [cite: 1622-1625]
+                    CallbackQueryHandler(accessible_stop_selected, pattern="^stop_[0-9]+$")
+                ],
+
+                # Крок 2: Очікування вибору конкретної зупинки зі списку
+                States.ACCESSIBLE_SELECT_STOP: [
+                    # Користувач натискає кнопку "📍 ... (ID: 123)" [cite: 1627-1632]
+                    CallbackQueryHandler(accessible_stop_selected, pattern="^stop_[0-9]+$"),
+                    # Додаємо кнопку "Назад" до пошуку
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
-                ],
-
-                # Крок 2 -> 3: (Вибір зупинки)
-                # Ми переходимо сюди одразу з ACCESSIBLE_CHOOSE_ROUTE
-                States.ACCESSIBLE_CHOOSE_STOP_METHOD: [
-                    CallbackQueryHandler(accessible_show_stops, pattern="^acc_route:"),
-                    # "Назад" з цього меню повертає до вибору типу
-                    CallbackQueryHandler(accessible_show_routes, pattern="^acc_type:")
-                ],
-
-                # Крок 3 -> 4: (Розрахунок)
-                States.ACCESSIBLE_GET_LOCATION: [
-                    CallbackQueryHandler(accessible_calculate_and_show, pattern="^acc_stop:"),
-                    # "Назад" з (майбутнього) меню поверне до вибору зупинок
-                    CallbackQueryHandler(accessible_show_stops, pattern="^acc_route:")
                 ],
             },
             fallbacks=[

@@ -42,6 +42,16 @@ EASYWAY_API_URL = "https://api.easyway.info/"
 EASYWAY_LOGIN = "odesainclusive"
 EASYWAY_PASSWORD = "ndHdy2Ytw2Ois"
 EASYWAY_CITY = "odesa"
+# ⭐ НОВІ НАЛАШТУВАННЯ (з плану v1.2)
+EASYWAY_STOP_INFO_VERSION = "1.2"  # Вказуємо API, що хочемо нову версію [cite: 1080]
+
+# Іконки для джерел часу (з плану v1.2) [cite: 1094, 1737-1739]
+TIME_SOURCE_ICONS = {
+    "gps": "🛰️",
+    "schedule": "🗓️",
+    "interval": "⏳",
+    "unknown": "❓"
+}
 
 # ===== DOCUMENTS PATH =====
 DOCUMENTS_PATH = BASE_DIR / "documents"
