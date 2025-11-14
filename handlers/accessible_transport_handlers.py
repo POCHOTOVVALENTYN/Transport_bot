@@ -43,6 +43,9 @@ async def load_easyway_route_ids(application: Application) -> bool:
         return False
 
     for route in route_list_from_api:
+        # --- DEBUG LOG ---
+        logger.info(f"[DEBUG load_easyway_route_ids] Отримано маршрут: {route}")
+        # --- END DEBUG ---
         route_key = route.get("transport")
         route_id = route.get("id")
         route_name = route.get("title")
@@ -177,13 +180,25 @@ async def accessible_show_directions(update: Update, context: ContextTypes.DEFAU
     dir_2_stops = []
 
     try:
+        # --- DEBUG LOG ---
+        logger.info(
+            f"[DEBUG accessible_show_directions] Викликаю ПРЯМИЙ: id={route_id}, start={start_pos}, stop={stop_pos}")
+        # --- END DEBUG ---
         # 1. Отримуємо Прямий напрямок
         path_data_1 = await easyway_service.get_route_to_display(route_id, start_pos, stop_pos)
         all_points_1 = path_data_1.get("route", {}).get("points", {}).get("point", [])
+        # --- DEBUG LOG ---
+        logger.info(
+            f"[DEBUG accessible_show_directions] Викликаю ЗВОРОТНІЙ: id={route_id}, start={stop_pos}, stop={start_pos}")
+        # --- END DEBUG ---
 
         # 2. Отримуємо Зворотній напрямок
         path_data_2 = await easyway_service.get_route_to_display(route_id, stop_pos, start_pos)
         all_points_2 = path_data_2.get("route", {}).get("points", {}).get("point", [])
+        # --- DEBUG LOG ---
+        logger.info(f"[DEBUG accessible_show_directions] Отримано точок (Прямий): {len(all_points_1)}")
+        logger.info(f"[DEBUG accessible_show_directions] Отримано точок (Зворотній): {len(all_points_2)}")
+        # --- END DEBUG ---
 
         if not all_points_1 or not all_points_2:
             raise ValueError("API не повернуло 'points'")
