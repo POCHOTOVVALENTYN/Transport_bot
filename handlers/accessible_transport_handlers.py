@@ -1,5 +1,3 @@
-# handlers/accessible_transport_handlers.py
-
 from handlers.menu_handlers import main_menu
 from utils.logger import logger
 import re
@@ -10,7 +8,23 @@ from handlers.command_handlers import get_main_menu_keyboard
 from services.easyway_service import easyway_service
 import asyncio
 import telegram.error
-import html  # <--- ДОДАТИ ЦЕЙ РЯДОК
+import html
+from fuzzywuzzy import fuzz
+
+
+# Словник "синонімів" для виправлення поширених помилок пошуку
+# Ключ (в нижньому регістрі) = що вводить користувач
+# Значення = що ми насправді шукаємо в API EasyWay
+SEARCH_SYNONYMS = {
+    "музкомедія": "Театр Музкомедії",
+    "вокзал": "Залізничний вокзал",
+    "привоз": "Привоз" # Це виправить і текстовий пошук, а не лише кнопку
+    # Додайте сюди інші проблемні випадки, коли їх знайдете
+}
+
+# Мінімальний відсоток схожості для нечіткого пошуку (0-100)
+FUZZY_SEARCH_THRESHOLD = 80
+
 
 
 # === ФУНКЦІЯ, ЩО ЗАЛИШАЄТЬСЯ (для main.py та thanks_handler) ===
@@ -96,8 +110,7 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Ініціалізуємо/очищуємо дані
     context.user_data.clear()
 
-    # Клавіатура з популярними зупинками (з плану v1.2) [cite: 1373-1380]
-    # ID зупинок (6026) взяті з прикладу в PDF [cite: 1655]
+    # Клавіатура з популярними зупинками
     keyboard = [
         [InlineKeyboardButton("📍 Ринок Привоз", callback_data="stop_search_Привоз")],
         [InlineKeyboardButton("🚉 Залізничний вокзал", callback_data="stop_search_Залізничний вокзал")],
@@ -120,9 +133,46 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
     """
     Крок 2: Користувач вводить текст для пошуку зупинки. [cite: 1384-1386]
     """
-    search_term = update.message.text
     user_id = update.effective_user.id
-    logger.info(f"User {user_id} searching for stop: {search_term}")
+    original_input = update.message.text.strip()
+    normalized_input = original_input.lower()
+
+    search_term = None  # Поки що не визначено
+
+    # --- ПОЧАТОК РЕФАКТОРИНГУ: Нечіткий (Fuzzy) пошук ---
+
+    # 1. Спершу шукаємо точний збіг у синонімах (найшвидший варіант)
+    if normalized_input in SEARCH_SYNONYMS:
+        search_term = SEARCH_SYNONYMS[normalized_input]
+        logger.info(f"User {user_id} search (Synonym): '{original_input}' -> '{search_term}'")
+
+    # 2. Якщо точного збігу немає, пробуємо нечіткий пошук по ключах словника
+    if not search_term:
+        # Шукаємо найкращий збіг серед наших ключів ("музкомедія", "вокзал", "привоз")
+        best_match_key = None
+        best_score = 0
+
+        for key in SEARCH_SYNONYMS.keys():
+            score = fuzz.ratio(normalized_input, key)  # Розрахунок схожості
+            if score > best_score:
+                best_score = score
+                best_match_key = key
+
+        # Якщо найкращий збіг достатньо схожий
+        if best_score >= FUZZY_SEARCH_THRESHOLD:
+            search_term = SEARCH_SYNONYMS[best_match_key]  # Беремо ПРАВИЛЬНИЙ термін
+            logger.info(
+                f"User {user_id} search (Fuzzy): '{original_input}' -> '{search_term}' (Match: '{best_match_key}', Score: {best_score}%)")
+
+    # 3. Якщо нічого не допомогло (ні точний, ні нечіткий пошук),
+    #    беремо те, що користувач ввів "як є".
+    if not search_term:
+        search_term = original_input
+        logger.info(f"User {user_id} searching for stop: {search_term}")
+
+    # --- КІНЕЦЬ РЕФАКТОРИНГУ ---
+
+    await update.message.chat.send_action("typing")
 
     await update.message.chat.send_action("typing")
 
@@ -197,7 +247,7 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
             title = place['title']
             summary = place.get('routes_summary')
 
-            # Рядок 1: Назва зупинки
+
             # Рядок 1: Назва зупинки
             button_text = f"📍 {title}"
             if summary:
@@ -333,6 +383,7 @@ async def _show_stops_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
+
         "Оберіть точну зупинку зі списку:",
         reply_markup=reply_markup
     )
