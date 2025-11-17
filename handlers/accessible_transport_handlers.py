@@ -2,6 +2,7 @@ from handlers.menu_handlers import main_menu
 from utils.logger import logger
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler, Application
 from bot.states import States
 from handlers.command_handlers import get_main_menu_keyboard
@@ -247,7 +248,6 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
             title = place['title']
             summary = place.get('routes_summary')
 
-
             # Рядок 1: Назва зупинки
             button_text = f"📍 {title}"
             if summary:
@@ -311,7 +311,7 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
 
         if stop_info.get("error"):
             # Це спрацює при тайм-ауті (з Кроку 2)
-            await query.edit_message_text(f"❌ Помилка API v1.2: {stop_info['error']}")
+            await query.edit_message_text(f"❌ Помилка API: {stop_info['error']}")
             return States.ACCESSIBLE_SEARCH_STOP
 
         stop_title = stop_info.get("title", f"Зупинка ID: {stop_id}")
@@ -355,7 +355,6 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
 async def _show_stops_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE, places: list):
     """
     Допоміжна функція для показу списку зупинок як кнопок.
-    [cite: 1514-1520]
     """
     keyboard = []
     for place in places[:10]:  # Максимум 10 кнопок
@@ -383,13 +382,13 @@ async def _show_stops_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-
-        "Оберіть точну зупинку зі списку:",
-        reply_markup=reply_markup
+        "✅ Знайдено! Оберіть точну зупинку зі списку:\n\n"
+    "💡 <b>Підказка:</b> Натисніть на зупинку, щоб побачити час прибуття та "
+    "<b>напрямок</b> руху (напр., \"→ у бік пл. Тираспільська\").",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
     )
 
-
-# handlers/accessible_transport_handlers.py
 
 async def _show_accessible_transport_results(query, stop_title: str, routes: list):
     """
