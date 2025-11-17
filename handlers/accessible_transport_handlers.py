@@ -198,7 +198,7 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data["search_results"] = places
 
         # Показуємо кнопки зі знайденими зупинками
-        await _show_stops_keyboard(update, context, places)
+        await _show_stops_keyboard(update, places)
         return States.ACCESSIBLE_SELECT_STOP
 
     except Exception as e:
@@ -324,7 +324,7 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
         await _show_accessible_transport_results(query, stop_title_safe, handicapped_routes)
 
         context.user_data.clear()
-        return ConversationHandler.END
+        return States.ACCESSIBLE_SHOWING_RESULTS
 
     except telegram.error.BadRequest as br_error:
         # Користувач натиснув щось інше, поки бот "думав"
@@ -352,22 +352,20 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
     # === КІНЕЦЬ ВЕЛИКОГО TRY...EXCEPT БЛОКУ ===
 
 
-async def _show_stops_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE, places: list):
+async def _show_stops_keyboard(update: Update, places: list):
     """
-    Допоміжна функція для показу списку зупинок як кнопок.
+    УНІВЕРСАЛЬНА функція: показує список знайдених зупинок
+    і працює як для нового повідомлення, так і для редагування.
     """
     keyboard = []
     for place in places[:10]:  # Максимум 10 кнопок
         title = place['title']
         summary = place.get('routes_summary')
 
-        # Рядок 1: Назва зупинки
         button_text = f"📍 {title}"
         if summary:
-            # Рядок 2: Маршрути
-            button_text += f"\n{summary}"
+            button_text += f"\n{summary}" # Формат, який ми обрали
 
-        # Обрізаємо, якщо ДУЖЕ довго (ліміт 64 байти)
         if len(button_text.encode('utf-8')) > 60:
             button_text = button_text[:57] + "..."
 
@@ -377,17 +375,30 @@ async def _show_stops_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
                 callback_data=f"stop_{place['id']}"
             )
         ])
-        # --- КІНЕЦЬ НОВОГО РЕФАКТОРИНГУ ---
-    keyboard.append([InlineKeyboardButton("⬅️ Назад (до пошуку)", callback_data="accessible_start")])
+    keyboard.append([InlineKeyboardButton("⬅️ Назад до пошуку", callback_data="accessible_start")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await update.message.reply_text(
+    # Текст повідомлення з підказкою
+    message_text = (
         "✅ Знайдено! Оберіть точну зупинку зі списку:\n\n"
-    "💡 <b>Підказка:</b> Натисніть на зупинку, щоб побачити час прибуття та "
-    "<b>напрямок</b> руху (напр., \"→ у бік пл. Тираспільська\").",
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.HTML
+        "💡 <b>Підказка:</b> Натисніть на зупинку, щоб побачити час прибуття та "
+        "<b>напрямок</b> руху (напр., \"→ у бік пл. Тираспільська\")."
     )
+
+    if update.callback_query:
+        # Якщо це CallbackQuery (напр., "Назад"), редагуємо повідомлення
+        await update.callback_query.edit_message_text(
+            message_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
+    elif update.message:
+        # Якщо це Message (текстовий пошук), відправляємо нове
+        await update.message.reply_text(
+            message_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
 
 
 async def _show_accessible_transport_results(query, stop_title: str, routes: list):
@@ -402,8 +413,11 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
             f"❌ На жаль, найближчим часом <b>немає</b> низькопідлогового транспорту, "
             f"що прямує до цієї зупинки."
         )
-        keyboard = [[InlineKeyboardButton("⬅️ Пошук іншої зупинки", callback_data="accessible_start")],
-                    [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад до списку зупинок", callback_data="accessible_back_to_list")],
+            [InlineKeyboardButton("🔄 Пошук іншої зупинки", callback_data="accessible_start")],
+            [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+        ]
         await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         return
 
@@ -460,6 +474,27 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
     keyboard = [[InlineKeyboardButton("⬅️ Пошук іншої зупинки", callback_data="accessible_start")],
                 [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
     await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+
+async def accessible_back_to_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Повертає користувача до списку знайдених зупинок
+    (зі стану ACCESSIBLE_SHOWING_RESULTS).
+    """
+    query = update.callback_query
+    await query.answer()
+
+    # Дістаємо збережені результати пошуку
+    places = context.user_data.get("search_results")
+
+    if not places:
+        # Якщо дані з якоїсь причини втрачено, повертаємось на старт
+        logger.warning("No 'search_results' in user_data for accessible_back_to_list")
+        return await accessible_start(update, context)
+
+    # Використовуємо нашу універсальну функцію, щоб показати кнопки
+    await _show_stops_keyboard(update, places)
+    return States.ACCESSIBLE_SELECT_STOP
 
 
 async def accessible_text_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):

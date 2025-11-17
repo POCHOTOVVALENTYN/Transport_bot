@@ -21,7 +21,7 @@ from handlers.accessible_transport_handlers import (
     accessible_stop_quick_search,
     accessible_stop_selected,
     accessible_text_cancel,
-    load_easyway_route_ids # <-- НОВИЙ ВАЖЛИВИЙ ІМПОРТ
+    load_easyway_route_ids, accessible_back_to_list  # <-- НОВИЙ ВАЖЛИВИЙ ІМПОРТ
 )
 
 from handlers.static_handlers import (
@@ -247,7 +247,7 @@ class TransportBot:
             states={
                 # Крок 1: Очікування тексту (назви зупинки) або кнопки "Популярне"
                 States.ACCESSIBLE_SEARCH_STOP: [
-                    # Обробник тексту [cite: 1611-1615]
+                    # Обробник тексту
                     MessageHandler(filters.TEXT & ~filters.COMMAND, accessible_search_stop),
                     # Обробник кнопок "Популярне" (напр. stop_search_Центр) [cite: 1616-1620]
                     CallbackQueryHandler(accessible_stop_quick_search, pattern="^stop_search_"),
@@ -257,10 +257,15 @@ class TransportBot:
 
                 # Крок 2: Очікування вибору конкретної зупинки зі списку
                 States.ACCESSIBLE_SELECT_STOP: [
-                    # Користувач натискає кнопку "📍 ... (ID: 123)" [cite: 1627-1632]
+                    # Користувач натискає кнопку "📍 ... (ID: 123)"
                     CallbackQueryHandler(accessible_stop_selected, pattern="^stop_[0-9]+$"),
                     # Додаємо кнопку "Назад" до пошуку
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
+                ],
+                States.ACCESSIBLE_SHOWING_RESULTS: [
+                    CallbackQueryHandler(accessible_back_to_list, pattern="^accessible_back_to_list$"),
+                    CallbackQueryHandler(accessible_start, pattern="^accessible_start$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$"),
                 ],
             },
             fallbacks=[

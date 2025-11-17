@@ -43,3 +43,4 @@ class States:
     # Нові стани для Пошуку Інклюзивного Транспорту
     ACCESSIBLE_SEARCH_STOP = 30  # Крок 1: Очікування назви зупинки
     ACCESSIBLE_SELECT_STOP = 31  # Крок 2: Очікування вибору зупинки зі списку
+    ACCESSIBLE_SHOWING_RESULTS = 32
