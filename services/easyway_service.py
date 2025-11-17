@@ -92,6 +92,18 @@ class EasyWayService:
                 async with session.get(url, timeout=timeout) as response:
                     if response.status == 200:
                         data = await response.json(content_type=None)
+                        # --- ПОЧАТОК ДІАГНОСТИЧНОГО ЛОГУ ---
+                        try:
+                            import json
+                            # Використовуємо json.dumps для гарного форматування
+                            raw_json_data = json.dumps(data, indent=2, ensure_ascii=False)
+
+                            logger.info(f"===== RAW API RESPONSE for term '{search_term}' =====")
+                            logger.info(raw_json_data)
+                            logger.info(f"=====================================================")
+                        except Exception as log_e:
+                            logger.error(f"Error during diagnostic logging: {log_e}")
+                        # --- КІНЕЦЬ ДІАГНОСТИЧНОГО ЛОГУ ---
                         return self._parse_places_response(data, root_key="item")
                     else:
                         raise Exception(f"API returned {response.status}")
@@ -148,7 +160,12 @@ class EasyWayService:
 
             parsed_stops = []
             for item in items:
-                if item.get("type") == "stop":
+                # Отримуємо вкладений словник "@attributes"
+                attributes = item.get("@attributes", {})
+                # Шукаємо "type" вже всередині нього
+                item_type = attributes.get("type")
+
+                if item_type == "stop":
                     parsed_stops.append({
                         "id": int(item.get("id", 0)),
                         "title": item.get("title", ""),
