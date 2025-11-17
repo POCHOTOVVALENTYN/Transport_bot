@@ -70,11 +70,6 @@ async def load_easyway_route_ids(application: Application) -> bool:
     return True
 
 
-# ❌ accessible_start (старий) - ВИДАЛЕНО
-# ❌ accessible_show_routes - ВИДАЛЕНО [cite: 1845]
-# ❌ accessible_show_stops - ВИДАЛЕНО [cite: 1849]
-# ❌ accessible_calculate_and_show - ВИДАЛЕНО [cite: 1851]
-
 
 # === НОВІ ОБРОБНИКИ (План v1.2) ===
 
@@ -86,6 +81,17 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # Виконайте пошук "Ринок"
+    data = await easyway_service.get_places_by_name(search_term="Ринок Привоз")
+    stops = data.get("stops", [])
+
+    # 🔍 ЛОГУВАННЯ ДЛЯ ДІАГНОСТИКИ
+    logger.info(f"===== DIAGNOSTIC: Пошук 'Ринок Привоз' =====")
+    for stop in stops:
+        logger.info(f"ID: {stop['id']}, Назва: {stop['title']}, Lat: {stop['lat']}, Lng: {stop['lng']}")
+    logger.info(f"=====================================")
+
+
     logger.info(f"User {update.effective_user.id} started v1.2 accessible transport search")
 
     # Ініціалізуємо/очищуємо дані
@@ -94,7 +100,7 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Клавіатура з популярними зупинками (з плану v1.2) [cite: 1373-1380]
     # ID зупинок (6026) взяті з прикладу в PDF [cite: 1655]
     keyboard = [
-        [InlineKeyboardButton("📍 Ринок Привоз", callback_data="stop_6026")],
+        [InlineKeyboardButton("📍 Ринок Привоз", callback_data="stop_search_Ринок Привоз")],
         [InlineKeyboardButton("🚉 Залізничний вокзал", callback_data="stop_search_Залізничний вокзал")],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]
     ]
@@ -325,7 +331,7 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
     header = (
         f"♿️ <b>Низькопідлоговий Транспорт</b>\n"
         f"Зупинка: <b>{stop_title}</b>\n"
-        f"────────────────────────\n\n"
+        f"───────────────\n\n"
     )
 
     routes_text = ""
@@ -356,7 +362,7 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
 
     # === ВИПРАВЛЕННЯ ТУТ ===
     footer = (
-        f"────────────────────────\n"
+        f"─────────────────\n"
         f"<i>{easyway_service.time_icons['gps']} = час за GPS, {easyway_service.time_icons['schedule']} = за розкладом</i>"
     )
     # =======================
