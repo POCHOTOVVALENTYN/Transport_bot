@@ -219,13 +219,16 @@ class EasyWayService:
                     routes_summary = " | ".join(summary_parts)
                     # --- КІНЕЦЬ НОВОГО БЛОКУ ---
 
-                    parsed_stops.append({
-                        "id": int(item.get("id", 0)),
-                        "title": item.get("title", ""),
-                        "lat": float(item.get("lat", 0)),
-                        "lng": float(item.get("lng", 0)),
-                        "routes_summary": routes_summary  # <--- ДОДАЄМО НАШЕ НОВЕ ПОЛЕ
-                    })
+                    # Додаємо зупинку до списку, ТІЛЬКИ ЯКЩО
+                    # на ній є трамваї (trams) АБО тролейбуси (trols).
+                    if trams or trols:
+                        parsed_stops.append({
+                            "id": int(item.get("id", 0)),
+                            "title": item.get("title", ""),
+                            "lat": float(item.get("lat", 0)),
+                            "lng": float(item.get("lng", 0)),
+                            "routes_summary": routes_summary  # <--- ДОДАЄМО НАШЕ НОВЕ ПОЛЕ
+                        })
 
             logger.info(f"Parsed {len(parsed_stops)} stops (with route summaries)")
             return {"stops": parsed_stops}

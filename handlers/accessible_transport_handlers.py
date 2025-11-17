@@ -10,6 +10,7 @@ from handlers.command_handlers import get_main_menu_keyboard
 from services.easyway_service import easyway_service
 import asyncio
 import telegram.error
+from telegram.helpers import escape_html
 
 
 # ❌ haversine(...) - ВИДАЛЕНО [cite: 1837-1839]
@@ -263,12 +264,13 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
             return States.ACCESSIBLE_SEARCH_STOP
 
         stop_title = stop_info.get("title", f"Зупинка ID: {stop_id}")
+        stop_title_safe = escape_html(stop_title)
 
         # ФІЛЬТРУЄМО ТІЛЬКИ НИЗЬКОПІДЛОГОВИЙ ТРАНСПОРТ
         handicapped_routes = easyway_service.filter_handicapped_routes(stop_info)
 
         # Показуємо результати
-        await _show_accessible_transport_results(query, stop_title, handicapped_routes)
+        await _show_accessible_transport_results(query, stop_title_safe, handicapped_routes)
 
         context.user_data.clear()
         return ConversationHandler.END
@@ -365,13 +367,22 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
 
         comfort_str = f"| {', '.join(comfort_items)}" if comfort_items else ""
 
+        # --- ПОЧАТОК ВИПРАВЛЕННЯ: Екранування HTML ---
+        # Екрануємо ВСІ дані, що прийшли з API
+        safe_transport_name = escape_html(route.get('transport_name', 'N/A'))
+        safe_title = escape_html(route.get('title', 'N/A'))
+        safe_direction = escape_html(route.get('direction', 'N/A'))
+        safe_bort_number = escape_html(route.get('bort_number', '??'))
+        safe_time_left = escape_html(route.get('time_left_formatted', 'N/A'))
+
         route_line = (
-            f"<b>{i}. {transport_icon} {route['transport_name']} №{route['title']}</b>\n"
-            f"   → <i>(напрямок: {route['direction']})</i>\n"
-            f"   Борт: <b>{route.get('bort_number', '??')}</b> {comfort_str}\n"
-            f"   <b>Прибуття: {time_icon} {route['time_left_formatted']}</b>\n\n"
+            f"<b>{i}. {transport_icon} {safe_transport_name} №{safe_title}</b>\n"
+            f"   → <i>(напрямок: {safe_direction})</i>\n"
+            f"   Борт: <b>{safe_bort_number}</b> {comfort_str}\n"
+            f"   <b>Прибуття: {time_icon} {safe_time_left}</b>\n\n"
         )
         routes_text += route_line
+        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     # === ВИПРАВЛЕННЯ ТУТ ===
     footer = (
