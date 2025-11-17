@@ -160,22 +160,79 @@ class EasyWayService:
 
             parsed_stops = []
             for item in items:
+
                 # Отримуємо вкладений словник "@attributes"
                 attributes = item.get("@attributes", {})
                 # Шукаємо "type" вже всередині нього
                 item_type = attributes.get("type")
 
                 if item_type == "stop":
+
+                    # --- ПОЧАТОК НОВОГО БЛОКУ: Парсинг маршрутів ---
+                    trams = []
+                    trols = []
+                    buses = []
+                    # Звертаємось до 'routes', які ми бачили в документації
+                    routes_data = item.get("routes", {}).get("route", [])
+
+                    # Переконуємось, що це список (на випадок одного маршруту)
+                    if not isinstance(routes_data, list):
+                        routes_data = [routes_data] if routes_data else []
+
+                    for route in routes_data:
+                        if not route: continue
+                        title = route.get("title")
+                        # Атрибути 'type' знову вкладені в "@attributes"
+                        # (На основі логів з "Привозом")
+                        # Або, якщо вірити документації (XML), вони можуть бути просто 'type'
+                        # Давайте перевіримо обидва варіанти для надійності
+
+                        attrs = route.get("@attributes", {})
+                        rtype = attrs.get("type")
+
+                        # Якщо не знайшли в @attributes, шукаємо в корені
+                        if not rtype:
+                            rtype = route.get("type")
+
+                        if not title: continue
+
+                        if rtype == "tram":
+                            trams.append(title)
+                        elif rtype == "trol":
+                            trols.append(title)
+                        elif rtype == "bus" or rtype == "marshrutka":
+                            buses.append(title)
+
+                    # Формуємо короткий інформативний рядок
+                    summary_parts = []
+                    if trams:
+                        summary_parts.append(f"{self.transport_icons['tram']} {', '.join(trams)}")
+                    if trols:
+                        summary_parts.append(f"{self.transport_icons['trol']} {', '.join(trols)}")
+                    if buses:
+                        # Обмежуємо автобуси, щоб рядок не був занадто довгим
+                        bus_summary = f"{self.transport_icons['bus']} {', '.join(buses[:3])}"
+                        if len(buses) > 3:
+                            bus_summary += ", ..."
+                        summary_parts.append(bus_summary)
+
+                    routes_summary = " | ".join(summary_parts)
+                    # --- КІНЕЦЬ НОВОГО БЛОКУ ---
+
                     parsed_stops.append({
                         "id": int(item.get("id", 0)),
                         "title": item.get("title", ""),
                         "lat": float(item.get("lat", 0)),
                         "lng": float(item.get("lng", 0)),
+                        "routes_summary": routes_summary  # <--- ДОДАЄМО НАШЕ НОВЕ ПОЛЕ
                     })
-            logger.info(f"Parsed {len(parsed_stops)} stops")
+
+            logger.info(f"Parsed {len(parsed_stops)} stops (with route summaries)")
             return {"stops": parsed_stops}
+
         except Exception as e:
-            logger.error(f"Error parsing places response: {e}")
+            # Додаємо exc_info=True, щоб бачити повний traceback помилки у логах
+            logger.error(f"Error parsing places response: {e}", exc_info=True)
             return {"error": f"Error parsing places response: {e}"}
 
     def _parse_stop_info_v12(self, data: Dict) -> Dict:

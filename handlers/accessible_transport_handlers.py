@@ -194,12 +194,25 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
         # Показуємо кнопки [cite: 1453-1466]
         keyboard = []
         for place in places[:10]:  # Максимум 10
+            # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+            title = place['title']
+            summary = place.get('routes_summary')  # Отримуємо наш новий рядок
+
+            button_text = f"📍 {title}"
+            if summary:  # Додаємо, якщо він є
+                button_text += f" ({summary})"
+
+            # Обрізаємо текст кнопки, якщо він занадто довгий для Telegram (ліміт 64 байти)
+            if len(button_text.encode('utf-8')) > 60:
+                button_text = button_text[:25] + "..."  # Безпечне обрізання
+
             keyboard.append([
                 InlineKeyboardButton(
-                    f"📍 {place['title']}",
+                    button_text,
                     callback_data=f"stop_{place['id']}"
                 )
             ])
+            # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
         keyboard.append([InlineKeyboardButton("⬅️ Назад (до пошуку)", callback_data="accessible_start")])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
