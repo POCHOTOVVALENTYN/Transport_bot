@@ -262,8 +262,11 @@ class TransportBot:
                     # Додаємо кнопку "Назад" до пошуку
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
                 ],
+                # --- ПОЧАТОК НОВОГО БЛОКУ ---
                 States.ACCESSIBLE_SHOWING_RESULTS: [
+                    # Обробник для нашої нової кнопки "Назад до списку"
                     CallbackQueryHandler(accessible_back_to_list, pattern="^accessible_back_to_list$"),
+                    # Обробники для кнопок "Пошук іншої" та "Головне меню"
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$"),
                 ],

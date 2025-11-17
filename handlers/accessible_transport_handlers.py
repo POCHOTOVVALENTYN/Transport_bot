@@ -90,7 +90,6 @@ async def load_easyway_route_ids(application: Application) -> bool:
 async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Крок 1: Користувач запускає пошук. Одразу просимо ввести назву зупинки.
-    [cite: 1356-1359]
     """
     query = update.callback_query
     await query.answer()
@@ -121,7 +120,6 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message = (
         "♿️ <b>Пошук Низькопідлогового Транспорту</b>\n\n"
-        "Місто: <b>Одеса</b>\n\n"
         "Будь ласка, <b>надішліть мені назву зупинки</b> (напр., <i>Привоз</i> або <i>Пантелеймонівська</i>) "
         "або виберіть з популярних варіантів нижче:"
     )
@@ -132,7 +130,7 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Крок 2: Користувач вводить текст для пошуку зупинки. [cite: 1384-1386]
+    Крок 2: Користувач вводить текст для пошуку зупинки.
     """
     user_id = update.effective_user.id
     original_input = update.message.text.strip()
@@ -364,7 +362,7 @@ async def _show_stops_keyboard(update: Update, places: list):
 
         button_text = f"📍 {title}"
         if summary:
-            button_text += f"\n{summary}" # Формат, який ми обрали
+            button_text += f"\n{summary}" # Наш дворядковий формат
 
         if len(button_text.encode('utf-8')) > 60:
             button_text = button_text[:57] + "..."
@@ -387,6 +385,7 @@ async def _show_stops_keyboard(update: Update, places: list):
 
     if update.callback_query:
         # Якщо це CallbackQuery (напр., "Назад"), редагуємо повідомлення
+        await update.callback_query.answer() # Відповідаємо на запит
         await update.callback_query.edit_message_text(
             message_text,
             reply_markup=reply_markup,
@@ -476,6 +475,8 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
     await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 
+# handlers/accessible_transport_handlers.py
+
 async def accessible_back_to_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Повертає користувача до списку знайдених зупинок
@@ -490,9 +491,16 @@ async def accessible_back_to_list(update: Update, context: ContextTypes.DEFAULT_
     if not places:
         # Якщо дані з якоїсь причини втрачено, повертаємось на старт
         logger.warning("No 'search_results' in user_data for accessible_back_to_list")
-        return await accessible_start(update, context)
+
+        # Використовуємо той самий об'єкт query для повернення на старт
+        await query.edit_message_text(
+            text="♿️ <b>Пошук Низькопідлогового Транспорту</b>\n\n...", # (Текст з accessible_start)
+            reply_markup=... # (Клавіатура з accessible_start)
+        )
+        return States.ACCESSIBLE_SEARCH_STOP
 
     # Використовуємо нашу універсальну функцію, щоб показати кнопки
+    # (Ми оновимо _show_stops_keyboard у Кроці 6, щоб вона працювала з query)
     await _show_stops_keyboard(update, places)
     return States.ACCESSIBLE_SELECT_STOP
 
