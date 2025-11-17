@@ -9,6 +9,7 @@ from bot.states import States
 from handlers.command_handlers import get_main_menu_keyboard
 from services.easyway_service import easyway_service
 import asyncio
+import telegram.error
 
 
 # ❌ haversine(...) - ВИДАЛЕНО [cite: 1837-1839]
@@ -209,48 +210,74 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
         return States.ACCESSIBLE_SEARCH_STOP
 
 
+# handlers/accessible_transport_handlers.py
+
 async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Крок 3: Користувач обрав зупинку. Робимо магічний виклик v1.2.
-    [cite: 1472-1475]
+    (ВЕРСІЯ З ПОВНИМ БЛОКОМ TRY...EXCEPT)
     """
     query = update.callback_query
     await query.answer()
 
     try:
-        stop_id = int(query.data.split("stop_")[-1])
-    except (ValueError, IndexError):
-        await query.edit_message_text("❌ Помилка: Некоректний ID зупинки.")
-        return States.ACCESSIBLE_SEARCH_STOP
+        # === ПОЧАТОК ВЕЛИКОГО TRY...EXCEPT БЛОКУ ===
+        # (Захист від BadRequest на кожному кроці)
 
-    user_id = query.from_user.id
-    logger.info(f"User {user_id} selected stop_id: {stop_id}")
+        try:
+            stop_id = int(query.data.split("stop_")[-1])
+        except (ValueError, IndexError):
+            await query.edit_message_text("❌ Помилка: Некоректний ID зупинки.")
+            return States.ACCESSIBLE_SEARCH_STOP
 
-    await query.edit_message_text("🔄 Отримую інформацію про прибуття (v1.2)...")
+        user_id = query.from_user.id
+        logger.info(f"User {user_id} selected stop_id: {stop_id}")
 
-    try:
-        # API CALL #2: stops.GetStopInfo v1.2 [cite: 1485-1488]
+        await query.edit_message_text("🔄 Отримую інформацію про прибуття (v1.2)...")
+
+        # API CALL #2: stops.GetStopInfo v1.2
         stop_info = await easyway_service.get_stop_info_v12(stop_id=stop_id)
 
         if stop_info.get("error"):
+            # Це спрацює при тайм-ауті (з Кроку 2)
             await query.edit_message_text(f"❌ Помилка API v1.2: {stop_info['error']}")
             return States.ACCESSIBLE_SEARCH_STOP
 
         stop_title = stop_info.get("title", f"Зупинка ID: {stop_id}")
 
-        # ФІЛЬТРУЄМО ТІЛЬКИ НИЗЬКОПІДЛОГОВИЙ ТРАНСПОРТ [cite: 1496-1497]
+        # ФІЛЬТРУЄМО ТІЛЬКИ НИЗЬКОПІДЛОГОВИЙ ТРАНСПОРТ
         handicapped_routes = easyway_service.filter_handicapped_routes(stop_info)
 
-        # Показуємо результати [cite: 1499-1503]
+        # Показуємо результати
         await _show_accessible_transport_results(query, stop_title, handicapped_routes)
 
         context.user_data.clear()
         return ConversationHandler.END
 
+    except telegram.error.BadRequest as br_error:
+        # Користувач натиснув щось інше, поки бот "думав"
+        logger.warning(f"BadRequest in accessible_stop_selected (stale query?): {br_error}")
+        # Ми не можемо відповісти на query, бо він застарілий.
+        # Просто виходимо зі сцени.
+        return ConversationHandler.END
+
     except Exception as e:
-        logger.error(f"Error getting stop info v1.2: {e}", exc_info=True)
-        await query.edit_message_text(f"❌ Критична помилка при отриманні v1.2: {str(e)}")
+        # Всі інші помилки (напр., помилки парсингу, якщо API змінилось)
+        logger.error(f"Critical error in accessible_stop_selected: {e}", exc_info=True)
+        try:
+            # Спробуємо повідомити про помилку
+            await query.edit_message_text(
+                f"❌ Критична помилка: {str(e)}",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("⬅️ Пошук іншої зупинки", callback_data="accessible_start")]]
+                )
+            )
+        except telegram.error.BadRequest:
+            # Якщо навіть це не вдалося, просто логуємо
+            logger.warning("Stale query in accessible_stop_selected (Exception block)")
+
         return States.ACCESSIBLE_SEARCH_STOP
+    # === КІНЕЦЬ ВЕЛИКОГО TRY...EXCEPT БЛОКУ ===
 
 
 async def _show_stops_keyboard(update: Update, context: ContextTypes.DEFAULT_TYPE, places: list):
