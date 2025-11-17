@@ -38,14 +38,15 @@ TICKET_PASSES_FILE_ID_1 = "AgACAgIAAxkBAAIEL2kMn2UoUM2r0dc0GvTlXCax0L9hAAKJDWsbL
 TICKET_PASSES_FILE_ID_2 = "AgACAgIAAxkBAAIEMWkMn4t4dEJ9rOyVA-95XzsgsewJAAKSDWsbLpppSEMR6et11IqTAQADAgADeQADNgQ"
 
 # EasyWay API
-EASYWAY_API_URL = "https://api.easyway.info/"
+EASYWAY_API_URL = "https://api.easyway.info"
 EASYWAY_LOGIN = "odesainclusive"
 EASYWAY_PASSWORD = "ndHdy2Ytw2Ois"
 EASYWAY_CITY = "odesa"
-# ⭐ НОВІ НАЛАШТУВАННЯ (з плану v1.2)
-EASYWAY_STOP_INFO_VERSION = "1.2"  # Вказуємо API, що хочемо нову версію [cite: 1080]
 
-# Іконки для джерел часу (з плану v1.2) [cite: 1094, 1737-1739]
+# ⭐ НОВІ НАЛАШТУВАННЯ (v1.2)
+EASYWAY_STOP_INFO_VERSION = "1.2"  # API версія з GPS
+
+# Іконки для джерел часу
 TIME_SOURCE_ICONS = {
     "gps": "🛰️",
     "schedule": "🗓️",
