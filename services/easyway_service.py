@@ -209,12 +209,12 @@ class EasyWayService:
                         summary_parts.append(f"{self.transport_icons['tram']} {', '.join(trams)}")
                     if trols:
                         summary_parts.append(f"{self.transport_icons['trol']} {', '.join(trols)}")
-                    if buses:
+                    #if buses:
                         # Обмежуємо автобуси, щоб рядок не був занадто довгим
-                        bus_summary = f"{self.transport_icons['bus']} {', '.join(buses[:3])}"
-                        if len(buses) > 3:
-                            bus_summary += ", ..."
-                        summary_parts.append(bus_summary)
+                    #    bus_summary = f"{self.transport_icons['bus']} {', '.join(buses[:3])}"
+                    #    if len(buses) > 3:
+                    #        bus_summary += ", ..."
+                    #    summary_parts.append(bus_summary)
 
                     routes_summary = " | ".join(summary_parts)
                     # --- КІНЕЦЬ НОВОГО БЛОКУ ---

@@ -13,8 +13,6 @@ import telegram.error
 import html  # <--- ДОДАТИ ЦЕЙ РЯДОК
 
 
-# ❌ haversine(...) - ВИДАЛЕНО [cite: 1837-1839]
-
 # === ФУНКЦІЯ, ЩО ЗАЛИШАЄТЬСЯ (для main.py та thanks_handler) ===
 async def load_easyway_route_ids(application: Application) -> bool:
     logger.info("Завантажую EasyWay Route ID...")
@@ -200,10 +198,11 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
             summary = place.get('routes_summary')
 
             # Рядок 1: Назва зупинки
+            # Рядок 1: Назва зупинки
             button_text = f"📍 {title}"
             if summary:
-                # Рядок 2: Маршрути (з відступом для краси)
-                button_text += f"\n  ({summary})"
+                # Рядок 2: Маршрути
+                button_text += f"\n{summary}"
 
             # Обрізаємо, якщо ДУЖЕ довго (ліміт 64 байти)
             if len(button_text.encode('utf-8')) > 60:
@@ -237,8 +236,7 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
 
 async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Крок 3: Користувач обрав зупинку. Робимо магічний виклик v1.2.
-    (ВЕРСІЯ З ПОВНИМ БЛОКОМ TRY...EXCEPT)
+    Крок 3: Користувач обрав зупинку. Робимо виклик.
     """
     query = update.callback_query
     await query.answer()
@@ -256,7 +254,7 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
         user_id = query.from_user.id
         logger.info(f"User {user_id} selected stop_id: {stop_id}")
 
-        await query.edit_message_text("🔄 Отримую інформацію про прибуття (v1.2)...")
+        await query.edit_message_text("🔄 Отримую інформацію про прибуття...")
 
         # API CALL #2: stops.GetStopInfo v1.2
         stop_info = await easyway_service.get_stop_info_v12(stop_id=stop_id)
@@ -317,8 +315,8 @@ async def _show_stops_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
         # Рядок 1: Назва зупинки
         button_text = f"📍 {title}"
         if summary:
-            # Рядок 2: Маршрути (з відступом)
-            button_text += f"\n  ({summary})"
+            # Рядок 2: Маршрути
+            button_text += f"\n{summary}"
 
         # Обрізаємо, якщо ДУЖЕ довго (ліміт 64 байти)
         if len(button_text.encode('utf-8')) > 60:
@@ -403,8 +401,8 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
 
     # === ВИПРАВЛЕННЯ ТУТ ===
     footer = (
-        f"─────────────────\n"
-        f"<i>{easyway_service.time_icons['gps']} = час за GPS, {easyway_service.time_icons['schedule']} = за розкладом</i>"
+        f"<b>Умовні позначення:\n</b>"
+        f"<i>{easyway_service.time_icons['gps']} = час за GPS</i>"
     )
     # =======================
 
