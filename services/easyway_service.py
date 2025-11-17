@@ -263,7 +263,7 @@ class EasyWayService:
                     "transport_key": route.get("transportKey"),
                     "handicapped": route.get("handicapped", False),
                     "bort_number": route.get("bortNumber"),
-                    "time_left": int(route.get("timeLeft", 9999)),
+                    "time_left": float(route.get("timeLeft", 9999)),
                     "time_left_formatted": route.get("timeLeftFormatted", ""),
                     "time_source": route.get("timeSource", "unknown"),
                     "wifi": route.get("wifi", False),

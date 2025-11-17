@@ -10,7 +10,7 @@ from handlers.command_handlers import get_main_menu_keyboard
 from services.easyway_service import easyway_service
 import asyncio
 import telegram.error
-from telegram.helpers import escape_html
+import html  # <--- ДОДАТИ ЦЕЙ РЯДОК
 
 
 # ❌ haversine(...) - ВИДАЛЕНО [cite: 1837-1839]
@@ -195,17 +195,20 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
         # Показуємо кнопки [cite: 1453-1466]
         keyboard = []
         for place in places[:10]:  # Максимум 10
-            # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
+            # --- ПОЧАТОК НОВОГО РЕФАКТОРИНГУ ---
             title = place['title']
-            summary = place.get('routes_summary')  # Отримуємо наш новий рядок
+            summary = place.get('routes_summary')
 
+            # Рядок 1: Назва зупинки
             button_text = f"📍 {title}"
-            if summary:  # Додаємо, якщо він є
-                button_text += f" ({summary})"
+            if summary:
+                # Рядок 2: Маршрути (з відступом для краси)
+                button_text += f"\n  ({summary})"
 
-            # Обрізаємо текст кнопки, якщо він занадто довгий для Telegram (ліміт 64 байти)
+            # Обрізаємо, якщо ДУЖЕ довго (ліміт 64 байти)
             if len(button_text.encode('utf-8')) > 60:
-                button_text = button_text[:25] + "..."  # Безпечне обрізання
+                # Обрізаємо, але зберігаємо початок
+                button_text = button_text[:57] + "..."
 
             keyboard.append([
                 InlineKeyboardButton(
@@ -213,7 +216,7 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
                     callback_data=f"stop_{place['id']}"
                 )
             ])
-            # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+            # --- КІНЕЦЬ НОВОГО РЕФАКТОРИНГУ ---
         keyboard.append([InlineKeyboardButton("⬅️ Назад (до пошуку)", callback_data="accessible_start")])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -264,7 +267,7 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
             return States.ACCESSIBLE_SEARCH_STOP
 
         stop_title = stop_info.get("title", f"Зупинка ID: {stop_id}")
-        stop_title_safe = escape_html(stop_title)
+        stop_title_safe = html.escape(stop_title)
 
         # ФІЛЬТРУЄМО ТІЛЬКИ НИЗЬКОПІДЛОГОВИЙ ТРАНСПОРТ
         handicapped_routes = easyway_service.filter_handicapped_routes(stop_info)
@@ -307,13 +310,27 @@ async def _show_stops_keyboard(update: Update, context: ContextTypes.DEFAULT_TYP
     [cite: 1514-1520]
     """
     keyboard = []
-    for place in places[:10]:  # Максимум 10 кнопок [cite: 1522]
+    for place in places[:10]:  # Максимум 10 кнопок
+        title = place['title']
+        summary = place.get('routes_summary')
+
+        # Рядок 1: Назва зупинки
+        button_text = f"📍 {title}"
+        if summary:
+            # Рядок 2: Маршрути (з відступом)
+            button_text += f"\n  ({summary})"
+
+        # Обрізаємо, якщо ДУЖЕ довго (ліміт 64 байти)
+        if len(button_text.encode('utf-8')) > 60:
+            button_text = button_text[:57] + "..."
+
         keyboard.append([
             InlineKeyboardButton(
-                f"📍 {place['title']}",
-                callback_data=f"stop_{place['id']}"  # [cite: 1525]
+                button_text,
+                callback_data=f"stop_{place['id']}"
             )
         ])
+        # --- КІНЕЦЬ НОВОГО РЕФАКТОРИНГУ ---
     keyboard.append([InlineKeyboardButton("⬅️ Назад (до пошуку)", callback_data="accessible_start")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -369,11 +386,11 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
 
         # --- ПОЧАТОК ВИПРАВЛЕННЯ: Екранування HTML ---
         # Екрануємо ВСІ дані, що прийшли з API
-        safe_transport_name = escape_html(route.get('transport_name', 'N/A'))
-        safe_title = escape_html(route.get('title', 'N/A'))
-        safe_direction = escape_html(route.get('direction', 'N/A'))
-        safe_bort_number = escape_html(route.get('bort_number', '??'))
-        safe_time_left = escape_html(route.get('time_left_formatted', 'N/A'))
+        safe_transport_name = html.escape(route.get('transport_name', 'N/A'))
+        safe_title = html.escape(route.get('title', 'N/A'))
+        safe_direction = html.escape(route.get('direction', 'N/A'))
+        safe_bort_number = html.escape(route.get('bort_number', '??'))
+        safe_time_left = html.escape(route.get('time_left_formatted', 'N/A'))
 
         route_line = (
             f"<b>{i}. {transport_icon} {safe_transport_name} №{safe_title}</b>\n"
