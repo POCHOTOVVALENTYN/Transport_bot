@@ -10,7 +10,7 @@ from services.easyway_service import easyway_service
 import asyncio
 import telegram.error
 import html
-from fuzzywuzzy import fuzz
+from rapidfuzz import fuzz
 
 
 # Словник "синонімів" для виправлення поширених помилок пошуку
