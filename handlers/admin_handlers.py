@@ -6,7 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, \
     filters
-from config.settings import MUSEUM_ADMIN_ID, GOOGLE_SHEETS_ID
+from config.settings import MUSEUM_ADMIN_ID, GOOGLE_SHEETS_ID, GENERAL_ADMIN_IDS
 from integrations.google_sheets.client import GoogleSheetsClient
 from utils.logger import logger
 from bot.states import States
@@ -26,27 +26,40 @@ ADMIN_BROADCAST_TEXT = 50
 (ADMIN_STATE_ADD_DATE, ADMIN_STATE_DEL_DATE_CONFIRM) = range(16, 18)  # Використовуємо нові стани
 
 
-async def admin_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Головне меню супер-адміна"""
+# --- НОВА ФУНКЦІЯ: Меню Загального Адміна (Валентин і Тетяна) ---
+async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Головне меню для новин та керування ботом"""
     query = update.callback_query
-    await query.answer()
+    if query: await query.answer()
+
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return
 
     # Отримуємо статистику
     stats = await user_service.get_stats()
 
     text = (
-        f"⚙️ <b>Панель Адміністратора</b>\n\n"
-        f"👥 Всього користувачів: <b>{stats['total_users']}</b>\n"
+        f"⚙️ <b>Панель Керування (Новини та Статистика)</b>\n\n"
+        f"👥 Всього користувачів у базі: <b>{stats['total_users']}</b>\n"
+        f"👋 Вітаю, {update.effective_user.first_name}!"
     )
 
     keyboard = [
+        [InlineKeyboardButton("📢 Зробити розсилку (Новини)", callback_data="admin_broadcast_start")],
         [InlineKeyboardButton("🔄 Синхронізувати БД -> Sheets", callback_data="admin_sync_db")],
-        [InlineKeyboardButton("📢 Зробити розсилку", callback_data="admin_broadcast_start")],
-        [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")]
+        [InlineKeyboardButton("🏠 В режим користувача", callback_data="main_menu")]
     ]
 
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
+    if query:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+# --- ФУНКЦІЇ ЗАГАЛЬНИХ АДМІНІВ (Розсилка і Sync) ---
 
 async def admin_sync_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ручний запуск синхронізації"""
@@ -56,23 +69,31 @@ async def admin_sync_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         count = await tickets_service.sync_new_feedbacks_to_sheets()
+        # Кнопка "Назад" має вести в General Menu
+        back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]])
+
         await query.edit_message_text(
             f"✅ Успішно!\nВивантажено нових записів: <b>{count}</b>",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В адмінку", callback_data="admin_menu_show")]])
-            , parse_mode=ParseMode.HTML)
+            reply_markup=back_btn,
+            parse_mode=ParseMode.HTML
+        )
     except Exception as e:
         await query.edit_message_text(f"❌ Помилка: {e}")
 
 
-# --- Логіка розсилки ---
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # Кнопка "Скасувати" веде в General Menu
+    back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="general_admin_menu")]])
+
     await query.edit_message_text(
-        "📢 <b>Режим розсилки</b>\n\nНадішліть повідомлення (текст, фото або відео), яке отримають ВСІ користувачі бота.",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="admin_menu_show")]])
-        , parse_mode=ParseMode.HTML)
+        "📢 <b>Режим розсилки новин</b>\n\n"
+        "Надішліть повідомлення (текст, фото або відео), яке отримають <b>ВСІ</b> користувачі бота.",
+        reply_markup=back_btn,
+        parse_mode=ParseMode.HTML
+    )
     return ADMIN_BROADCAST_TEXT
 
 
@@ -82,26 +103,46 @@ async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYP
     count = 0
     blocked = 0
 
-    # Повідомлення, яке пересилаємо
     msg = update.message
-
     status_msg = await update.message.reply_text(f"🚀 Починаю розсилку на {len(users)} користувачів...")
 
     for user_id in users:
         try:
-            # Копіюємо повідомлення користувачу
             await msg.copy(chat_id=user_id)
             count += 1
-            await asyncio.sleep(0.05)  # Щоб не перевищити ліміти Telegram (30 msg/sec)
+            await asyncio.sleep(0.05)
         except Exception:
             blocked += 1
+
+    back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]])
 
     await status_msg.edit_text(
         f"✅ Розсилка завершена!\n\n"
         f"📨 Отримали: {count}\n"
-        f"🚫 Заблокували бота: {blocked}"
+        f"🚫 Заблокували бота: {blocked}",
+        reply_markup=back_btn
     )
     return ConversationHandler.END
+
+
+
+
+
+# --- ІСНУЮЧА ФУНКЦІЯ: Меню Музею (Максим) ---
+async def admin_menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Меню тільки для Музею"""
+    keyboard = await get_admin_main_menu_keyboard() # Ця клавіатура вже налаштована для музею
+    text = "👋 Вітаю, Максиме! Ви в адмін-панелі Музею."
+
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(text=text, reply_markup=keyboard)
+    else:
+        await update.effective_chat.send_message(text=text, reply_markup=keyboard)
+    return ConversationHandler.END
+
+
+
 
 
 # Перевірка, чи є користувач адміном

@@ -12,6 +12,10 @@ DEBUG = os.getenv("DEBUG", "False") == "True"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DEVELOPER_ID = int(os.getenv("DEVELOPER_ID", 0))
 MUSEUM_ADMIN_ID = int(os.getenv("MUSEUM_ADMIN_ID", 0))
+GENERAL_ADMIN_IDS = [
+    830196453,  # Валентин
+    384349401   # Тетяна
+]
 
 # Google Sheets
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID")

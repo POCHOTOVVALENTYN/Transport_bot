@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from config.messages import MESSAGES
 from utils.logger import logger
-from config.settings import MUSEUM_ADMIN_ID
+from config.settings import MUSEUM_ADMIN_ID, GENERAL_ADMIN_IDS
 from services.user_service import UserService
 
 # Ініціалізація
@@ -10,7 +10,7 @@ user_service = UserService()
 
 
 async def get_main_menu_keyboard(user_id: int):
-    """Повертає клавіатуру головного меню (з адмін-кнопкою, якщо потрібно)"""
+    """Повертає клавіатуру головного меню з урахуванням прав доступу"""
     keyboard = [
         [InlineKeyboardButton("📍 Де мій транспорт? (Real-time)", callback_data="realtime_transport")],
         [InlineKeyboardButton("♿ Пошук інклюзивного транспорту", callback_data="accessible_start")],
@@ -22,13 +22,20 @@ async def get_main_menu_keyboard(user_id: int):
         [InlineKeyboardButton("🏛️ Музей КП 'ОМЕТ'", callback_data="museum_menu")],
         [InlineKeyboardButton("🏢 Про підприємство", callback_data="company_menu")],
     ]
-    # Якщо це адмін музею, додаємо йому кнопку "Повернутися в адмінку"
+    # 1. Якщо це Максим -> Додаємо кнопку Музею
     if user_id == MUSEUM_ADMIN_ID:
         keyboard.append(
-            [InlineKeyboardButton("⚙️ Адмін-панель", callback_data="admin_menu_show")]
+            [InlineKeyboardButton("🏛️ Адмін-панель (Музей)", callback_data="admin_menu_show")]
+        )
+
+    # 2. Якщо це Ви або Тетяна -> Додаємо кнопку Загальної Адмінки
+    if user_id in GENERAL_ADMIN_IDS:
+        keyboard.append(
+            [InlineKeyboardButton("📢 Адмін-панель (Новини/Стат)", callback_data="general_admin_menu")]
         )
 
     return InlineKeyboardMarkup(keyboard)
+
 
 async def get_admin_main_menu_keyboard():
     """Повертає клавіатуру головного меню для Адміна Музею."""
@@ -42,32 +49,24 @@ async def get_admin_main_menu_keyboard():
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start - показує різне меню для адміна та користувача."""
-    user_id = update.effective_user.id
+    """Команда /start"""
+    user = update.effective_user
+    user_id = user.id
     logger.info(f"👤 User {user_id} started bot")
 
-    # --- ЗБЕРЕЖЕННЯ ЮЗЕРА ---
-    # Це виконується фоном, користувач не чекає
+    # Реєструємо юзера в БД
     try:
         await user_service.register_user(user)
     except Exception as e:
         logger.error(f"User reg error: {e}")
-    # ------------------------
 
-    if user_id == MUSEUM_ADMIN_ID:
-        # --- Меню для Адміністратора Музею ---
-        keyboard = await get_admin_main_menu_keyboard()
-        await update.message.reply_text(
-            "👋 Вітаю, Максиме! Ви в адмін-панелі Музею.",
-            reply_markup=keyboard
-        )
-    else:
-        # --- Меню для Звичайного Користувача ---
-        keyboard = await get_main_menu_keyboard(user_id)
-        await update.message.reply_text(
-            MESSAGES['welcome'],  # Ваш WELCOME_MESSAGE
-            reply_markup=keyboard
-        )
+    # Отримуємо правильну клавіатуру (функція сама визначить, які адмін-кнопки показати)
+    keyboard = await get_main_menu_keyboard(user_id)
+
+    await update.message.reply_text(
+        MESSAGES['welcome'],
+        reply_markup=keyboard
+    )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
