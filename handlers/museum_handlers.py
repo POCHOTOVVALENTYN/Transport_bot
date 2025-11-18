@@ -464,7 +464,7 @@ async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAUL
     await update.message.reply_text(
         f"✅ <b>Заявку прийнято!</b>\n\n"
         f"Ми чекаємо вас <b>{date}</b>.\n"
-        f"Організатор зв'яжеться з вами за номером {phone} для підтвердження деталей.",
+        f"Адреса музею: <b>м. Одеса, площа Олексіївська, 21А.</b>",
         reply_markup=keyboard_final,
         parse_mode=ParseMode.HTML
     )
