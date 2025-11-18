@@ -59,7 +59,8 @@ from handlers.suggestion_handlers import (
 from handlers.admin_handlers import (
     admin_menu, admin_add_date_start, admin_add_date_save,
     admin_del_date_menu, admin_del_date_confirm, admin_menu_show,
-    admin_show_bookings # Нова функція зі списком
+    admin_show_bookings, admin_dashboard, admin_sync_db,
+    admin_broadcast_start, admin_broadcast_send, ADMIN_BROADCAST_TEXT # Нова функція зі списком
 )
 
 from utils.logger import logger
@@ -88,8 +89,24 @@ class TransportBot:
         self.app.add_handler(CommandHandler("start", cmd_start))
         self.app.add_handler(CommandHandler("help", cmd_help))
 
-        ## CONVERSATION: СКАРГИ (існуючий)
+
         # --- CONVERSATION HANDLERS ---
+        broadcast_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast_start$")],
+            states={
+                ADMIN_BROADCAST_TEXT: [
+                    MessageHandler(filters.ALL & ~filters.COMMAND, admin_broadcast_send)
+                ]
+            },
+            fallbacks=[CallbackQueryHandler(admin_dashboard, pattern="^admin_menu_show$")]
+        )
+
+        self.app.add_handler(broadcast_conv)
+
+        # 3. Хендлери адмін-кнопок
+        self.app.add_handler(CallbackQueryHandler(admin_dashboard, pattern="^admin_menu_show$"))
+        self.app.add_handler(CallbackQueryHandler(admin_sync_db, pattern="^admin_sync_db$"))
+
 
         # CONVERSATION: СКАРГИ (існуючий)
         complaint_conv = ConversationHandler(

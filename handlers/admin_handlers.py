@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -11,8 +12,96 @@ from utils.logger import logger
 from bot.states import States
 from handlers.command_handlers import get_admin_main_menu_keyboard
 
+from services.user_service import UserService
+from services.tickets_service import TicketsService
+from config.settings import MUSEUM_ADMIN_ID
+
+user_service = UserService()
+tickets_service = TicketsService()
+
+# Стани для розсилки
+ADMIN_BROADCAST_TEXT = 50
+
 # Стани для адміна
 (ADMIN_STATE_ADD_DATE, ADMIN_STATE_DEL_DATE_CONFIRM) = range(16, 18)  # Використовуємо нові стани
+
+
+async def admin_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Головне меню супер-адміна"""
+    query = update.callback_query
+    await query.answer()
+
+    # Отримуємо статистику
+    stats = await user_service.get_stats()
+
+    text = (
+        f"⚙️ <b>Панель Адміністратора</b>\n\n"
+        f"👥 Всього користувачів: <b>{stats['total_users']}</b>\n"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("🔄 Синхронізувати БД -> Sheets", callback_data="admin_sync_db")],
+        [InlineKeyboardButton("📢 Зробити розсилку", callback_data="admin_broadcast_start")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")]
+    ]
+
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+
+async def admin_sync_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ручний запуск синхронізації"""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("⏳ Синхронізація даних... Зачекайте.")
+
+    try:
+        count = await tickets_service.sync_new_feedbacks_to_sheets()
+        await query.edit_message_text(
+            f"✅ Успішно!\nВивантажено нових записів: <b>{count}</b>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В адмінку", callback_data="admin_menu_show")]])
+            , parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await query.edit_message_text(f"❌ Помилка: {e}")
+
+
+# --- Логіка розсилки ---
+async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_text(
+        "📢 <b>Режим розсилки</b>\n\nНадішліть повідомлення (текст, фото або відео), яке отримають ВСІ користувачі бота.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="admin_menu_show")]])
+        , parse_mode=ParseMode.HTML)
+    return ADMIN_BROADCAST_TEXT
+
+
+async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Відправка повідомлення всім юзерам"""
+    users = await user_service.get_all_users_ids()
+    count = 0
+    blocked = 0
+
+    # Повідомлення, яке пересилаємо
+    msg = update.message
+
+    status_msg = await update.message.reply_text(f"🚀 Починаю розсилку на {len(users)} користувачів...")
+
+    for user_id in users:
+        try:
+            # Копіюємо повідомлення користувачу
+            await msg.copy(chat_id=user_id)
+            count += 1
+            await asyncio.sleep(0.05)  # Щоб не перевищити ліміти Telegram (30 msg/sec)
+        except Exception:
+            blocked += 1
+
+    await status_msg.edit_text(
+        f"✅ Розсилка завершена!\n\n"
+        f"📨 Отримали: {count}\n"
+        f"🚫 Заблокували бота: {blocked}"
+    )
+    return ConversationHandler.END
 
 
 # Перевірка, чи є користувач адміном

@@ -1,160 +1,130 @@
+# services/tickets_service.py
 from datetime import datetime
-import asyncio
+from sqlalchemy import select, func
+from database.db import AsyncSessionLocal, Feedback
+from config.constants import SHEET_NAMES
 from integrations.google_sheets.client import GoogleSheetsClient
 from config.settings import GOOGLE_SHEETS_ID
-from config.constants import SHEET_NAMES, TicketStatus
 from utils.logger import logger
-from utils.text_formatter import format_ticket_id, get_status_emoji
-import uuid
+from utils.text_formatter import format_ticket_id
+import asyncio
 
 
 class TicketsService:
-    """Сервіс для управління тікетами скарг"""
-
     def __init__(self):
-        self.sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
+        self.sheets_client = GoogleSheetsClient(GOOGLE_SHEETS_ID)
 
-    async def create_complaint_ticket(
-            self,
-            telegram_id: int,
-            complaint_data: dict
-    ) -> dict:
-        """Створення тікету скарги в Google Sheets (Асинхронно)"""
+    async def _save_to_db(self, data: dict):
+        """Універсальний метод збереження в БД"""
         try:
-            # Генерація ID
-            ticket_id = format_ticket_id()
-
-            # Формування рядка для Google Sheets
-            row_data = [
-                datetime.now().strftime("%d.%m.%Y %H:%M"),  # Дата створення
-                ticket_id,  # ID тікету
-                get_status_emoji(TicketStatus.NEW),  # Статус
-                "🟡 Середня",  # Пріоритет
-                complaint_data.get("route", "N/A"),  # Маршрут
-                complaint_data.get("problem", ""),  # повний опис
-                complaint_data.get("board_number", "N/A"),  # Борт
-                complaint_data.get("user_name", ""),  # Імя
-                complaint_data.get("user_phone", ""),  # Телефон
-                complaint_data.get("user_email", "N/A"), # J
-                "",  # Примітки (порожньо)
-                ""  # Адмін (порожньо)
-            ]
-
-            # Додавання в Google Sheets
-            success = self.sheets.append_row(
-                sheet_name=SHEET_NAMES["complaints"],
-                values=row_data
-            )
-
-            if success:
-                logger.info(f"✅ Complaint ticket created: {ticket_id}")
-                return {
-                    "success": True,
-                    "ticket_id": ticket_id,
-                    "message": f"✅ Ваша скарга зареєстрована!\nНомер: {ticket_id}"
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": "❌ Помилка при збереженні скарги"
-                }
-
+            async with AsyncSessionLocal() as session:
+                feedback = Feedback(**data)
+                session.add(feedback)
+                await session.commit()
+                return True
         except Exception as e:
-            logger.error(f"❌ Error creating ticket: {e}")
-            return {
-                "success": False,
-                "message": "❌ Сталася помилка"
-            }
+            logger.error(f"❌ DB Save Error: {e}")
+            return False
 
-    async def create_suggestion_ticket(
-            self,
-            telegram_id: int,
-            suggestion_data: dict
-    ) -> dict:
-        """Створення тікету пропозиції (Оновлено)"""
-        try:
-            ticket_id = format_ticket_id()
-            text = suggestion_data.get("text", "")
-            user_name = suggestion_data.get("user_name", "Анонімно")
-            user_phone = suggestion_data.get("user_phone", "N/A")
+    async def create_complaint_ticket(self, telegram_id: int, complaint_data: dict) -> dict:
+        ticket_id = format_ticket_id()
 
-            row_data = [
-                datetime.now().strftime("%d.%m.%Y %H:%M"),
-                ticket_id,
-                "💡 Пропозиція",
-                "🟢 Низька",
-                "N/A",
-                text[:100],
-                "N/A",
-                user_name,
-                user_phone,
-                suggestion_data.get("user_email", "N/A")
-            ]
+        # Готуємо об'єкт для БД
+        db_data = {
+            "ticket_id": ticket_id,
+            "category": "complaint",
+            "user_id": telegram_id,
+            "text": complaint_data.get("problem"),
+            "route": complaint_data.get("route"),
+            "board_number": complaint_data.get("board_number"),
+            "user_name": complaint_data.get("user_name"),
+            "user_phone": complaint_data.get("user_phone"),
+            "user_email": complaint_data.get("user_email"),
+            "status": "new"
+        }
 
-            # === АСИНХРОННИЙ ВИКЛИК ===
+        if await self._save_to_db(db_data):
+            return {"success": True, "ticket_id": ticket_id, "message": f"✅ Скарга прийнята (ID: {ticket_id})"}
+        return {"success": False, "message": "❌ Помилка бази даних"}
+
+    # ... (Аналогічно оновіть create_suggestion_ticket та create_thanks_ticket, змінюючи лише category) ...
+
+    async def create_suggestion_ticket(self, telegram_id: int, suggestion_data: dict) -> dict:
+        ticket_id = format_ticket_id()
+        db_data = {
+            "ticket_id": ticket_id,
+            "category": "suggestion",
+            "user_id": telegram_id,
+            "text": suggestion_data.get("text"),
+            "user_name": suggestion_data.get("user_name"),
+            "user_phone": suggestion_data.get("user_phone"),
+            "user_email": suggestion_data.get("user_email"),
+            "status": "new"
+        }
+        if await self._save_to_db(db_data):
+            return {"success": True, "ticket_id": ticket_id, "message": f"💡 Пропозиція прийнята (ID: {ticket_id})"}
+        return {"success": False, "message": "❌ Помилка"}
+
+    async def create_thanks_ticket(self, telegram_id: int, thanks_data: dict) -> dict:
+        ticket_id = format_ticket_id()
+        db_data = {
+            "ticket_id": ticket_id,
+            "category": "thanks",
+            "user_id": telegram_id,
+            "text": thanks_data.get("text"),
+            "route": thanks_data.get("route"),
+            "board_number": thanks_data.get("board_number"),
+            "user_name": thanks_data.get("user_name"),
+            "status": "new"
+        }
+        if await self._save_to_db(db_data):
+            return {"success": True, "ticket_id": ticket_id, "message": f"❤️ Подяка прийнята (ID: {ticket_id})"}
+        return {"success": False, "message": "❌ Помилка"}
+
+    # --- СИНХРОНІЗАЦІЯ (Для Адмінки) ---
+    async def sync_new_feedbacks_to_sheets(self):
+        """Читає всі 'new' записи з БД і вантажить в Google Sheets"""
+        count = 0
+        async with AsyncSessionLocal() as session:
+            # Отримуємо всі несинхронізовані записи
+            result = await session.execute(select(Feedback).where(Feedback.status == "new"))
+            feedbacks = result.scalars().all()
+
+            if not feedbacks:
+                return 0
+
             loop = asyncio.get_running_loop()
-            success = await loop.run_in_executor(
-                None,
-                self.sheets.append_row,
-                SHEET_NAMES["suggestions"],
-                row_data
-            )
 
-            if success:
-                logger.info(f"✅ Suggestion ticket created: {ticket_id}")
-                return {
-                    "success": True,
-                    "ticket_id": ticket_id,
-                    "message": f"💡 Дякуємо! Ваша пропозиція зареєстрована.\nНомер: {ticket_id}"
-                }
-            else:
-                return {"success": False, "message": "❌ Помилка при збереженні пропозиції"}
+            for item in feedbacks:
+                # Визначаємо лист в залежності від категорії
+                sheet_name = SHEET_NAMES.get(f"{item.category}s", "Інше")  # complaints -> Скарги
 
-        except Exception as e:
-            logger.error(f"❌ Error creating suggestion: {e}")
-            return {"success": False, "message": "❌ Сталася помилка"}
+                # Формуємо рядок (порядок полів має збігатися з шапкою вашої таблиці!)
+                # Приклад для Скарги: Дата | ID | Статус | Пріоритет | Маршрут | Проблема | Борт | Ім'я | Телефон | Email
+                row = [
+                    item.created_at.strftime("%d.%m.%Y %H:%M"),
+                    item.ticket_id,
+                    "🆕 Нова (БД)",
+                    "БД",
+                    item.route or "N/A",
+                    item.text,
+                    item.board_number or "N/A",
+                    item.user_name,
+                    item.user_phone,
+                    item.user_email or ""
+                ]
 
-    async def create_thanks_ticket(
-            self,
-            telegram_id: int,
-            thanks_data: dict
-    ) -> dict:
-        """Створення тікету подяки (Асинхронно)"""
-        try:
-            ticket_id = format_ticket_id()
+                # Відправляємо в Sheets (в окремому потоці)
+                success = await loop.run_in_executor(
+                    None,
+                    self.sheets_client.append_row,
+                    sheet_name,
+                    row
+                )
 
-            row_data = [
-                datetime.now().strftime("%d.%m.%Y %H:%M"),
-                ticket_id,
-                "✅ Подяка",
-                "🟢 Низька",
-                thanks_data.get("route") or "N/A",
-                thanks_data.get("text", "")[:100],
-                thanks_data.get("board_number") or "N/A",
-                thanks_data.get("user_name", "Анонім"),
-                "N/A",
-                "",
-                ""
-            ]
+                if success:
+                    item.status = "synced"
+                    count += 1
 
-            # === АСИНХРОННИЙ ВИКЛИК ===
-            loop = asyncio.get_running_loop()
-            success = await loop.run_in_executor(
-                None,
-                self.sheets.append_row,
-                SHEET_NAMES["thanks"],
-                row_data
-            )
-
-            if success:
-                return {
-                    "success": True,
-                    "ticket_id": ticket_id,
-                    "message": f"❤️ Дякуємо! Вашу подяку зареєстровано.\nНомер: {ticket_id}"
-                }
-            else:
-                return {"success": False, "message": "❌ Помилка"}
-
-        except Exception as e:
-            logger.error(f"❌ Error creating thanks: {e}")
-            return {"success": False, "message": "❌ Сталася помилка"}
+            await session.commit()
+            return count

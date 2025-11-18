@@ -3,6 +3,10 @@ from telegram.ext import ContextTypes
 from config.messages import MESSAGES
 from utils.logger import logger
 from config.settings import MUSEUM_ADMIN_ID
+from services.user_service import UserService
+
+# Ініціалізація
+user_service = UserService()
 
 
 async def get_main_menu_keyboard(user_id: int):
@@ -41,6 +45,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start - показує різне меню для адміна та користувача."""
     user_id = update.effective_user.id
     logger.info(f"👤 User {user_id} started bot")
+
+    # --- ЗБЕРЕЖЕННЯ ЮЗЕРА ---
+    # Це виконується фоном, користувач не чекає
+    try:
+        await user_service.register_user(user)
+    except Exception as e:
+        logger.error(f"User reg error: {e}")
+    # ------------------------
 
     if user_id == MUSEUM_ADMIN_ID:
         # --- Меню для Адміністратора Музею ---
