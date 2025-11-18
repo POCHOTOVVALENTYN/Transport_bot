@@ -159,9 +159,13 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
     """
     Крок 2: Користувач вводить текст для пошуку зупинки.
     """
-    context.user_data['last_search_term'] = original_input
+    # 1. СПЕРШУ отримуємо дані від користувача
     user_id = update.effective_user.id
-    original_input = update.message.text.strip()
+    original_input = update.message.text.strip()  # <--- Оголошуємо змінну тут
+
+    # 2. ТЕПЕР можемо її використовувати
+    context.user_data['last_search_term'] = original_input  # <--- Тепер помилки не буде
+
     normalized_input = original_input.lower()
 
     search_term = None  # Поки що не визначено
@@ -201,26 +205,17 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
 
     await update.message.chat.send_action("typing")
 
-    await update.message.chat.send_action("typing")
-
     try:
-        # API CALL #1: cities.GetPlacesByName [cite: 1392]
+        # API CALL #1: cities.GetPlacesByName
         data = await easyway_service.get_places_by_name(search_term=search_term)
 
         if data.get("error"):
-            # Для повтору ручного пошуку нам потрібен окремий callback,
-            # або ми можемо схитрувати і використати "stop_search_ТЕКСТ"
-            # (якщо текст не дуже довгий), але краще створити спеціальний обробник.
-            # Для спрощення, давайте використаємо доступний механізм:
-
             error_text = (
                 "❌ <b>Помилка API-даних</b>\n\n"
                 "Сервер не відповів вчасно. Спробуємо ще раз."
             )
-            # Тут ми змушені використати stop_search_, сподіваючись що текст не задовгий
-            # Або краще: просто повертаємо на старт пошуку, якщо це ручний ввід
 
-            # Збережемо запит, щоб використати його у спеціальному Retry (якщо потрібно)
+            # Збережемо запит, щоб використати його у спеціальному Retry
             context.user_data['failed_search_query'] = original_input
 
             await update.message.reply_text(
@@ -228,20 +223,31 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
                 reply_markup=_get_error_keyboard(retry_callback_data="accessible_retry_manual"),
                 parse_mode=ParseMode.HTML
             )
-            return States.ACCESSIBLE_SEARCH_STOP  # Залишаємось у цьому стані
+            return States.ACCESSIBLE_SEARCH_STOP
 
-        # Зберігаємо результати в контекст [cite: 1408]
-        context.user_data["search_results"] = places
+        # 3. ВИЗНАЧАЄМО змінну places, витягуючи її з data
+        places = data.get("stops", [])  # <--- ВИПРАВЛЕНО: Створення змінної places
+
+        # Важлива перевірка: чи знайшлися взагалі зупинки?
+        if not places:
+            await update.message.reply_text(
+                f"❌ Зупинок не знайдено за запитом <b>'{search_term}'</b>.\n\n"
+                f"Спробуйте іншу назву.",
+                parse_mode="HTML"
+            )
+            return States.ACCESSIBLE_SEARCH_STOP
+
+        # Зберігаємо результати в контекст
+        context.user_data["search_results"] = places  # <--- Тепер змінна існує, помилки не буде
 
         # Показуємо кнопки зі знайденими зупинками
-        await _show_stops_keyboard(update, places)
+        await _show_stops_keyboard(update, places)  # <--- Тепер змінна існує
         return States.ACCESSIBLE_SELECT_STOP
 
     except Exception as e:
         logger.error(f"Error searching stops: {e}")
         await update.message.reply_text(f"❌ Помилка при пошуку: {str(e)}")
         return States.ACCESSIBLE_SEARCH_STOP
-
 
 async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
