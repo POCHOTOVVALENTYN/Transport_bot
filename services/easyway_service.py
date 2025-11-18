@@ -51,7 +51,7 @@ class EasyWayService:
         logger.info("✅ EasyWay Stop Cache initialized (TTL=30s)")
 
     async def get_routes_list(self) -> dict:
-        """Отримує список маршрутів"""
+        """Отримує список маршрутів (з авто-повтором)"""
         params = {
             "login": self.login,
             "password": self.password,
@@ -60,25 +60,30 @@ class EasyWayService:
             "format": self.config.DEFAULT_FORMAT
         }
 
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                url = self._build_url(params)
-                logger.info(f"EasyWay API Call: {url}")
+        url = self._build_url(params)
+        timeout = aiohttp.ClientTimeout(total=45)  # Збільшений таймаут для важкого запиту
 
-                timeout = aiohttp.ClientTimeout(total=15)
-                async with session.get(url, timeout=timeout) as response:
-                    if response.status == 200:
-                        data = await response.json(content_type=None)
-                        return data
-                    else:
-                        raise Exception(f"API returned {response.status}")
+        for attempt in range(3):
+            try:
+                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+                    logger.info(f"EasyWay API Call (RoutesList) Attempt {attempt + 1}/3: {url}")
 
-        except asyncio.TimeoutError:
-            logger.error("GetRoutesList error: Request timed out")
-            return {"error": "Сервер EasyWay не відповів вчасно (10 сек)."}
-        except Exception as e:
-            logger.error(f"GetRoutesList error: {e}")
-            return {"error": str(e)}
+                    async with session.get(url, timeout=timeout) as response:
+                        if response.status == 200:
+                            data = await response.json(content_type=None)
+                            return data
+                        else:
+                            # Логуємо помилку, але не падаємо одразу
+                            logger.warning(f"API returned status {response.status} for GetRoutesList")
+
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning(f"GetRoutesList error (Attempt {attempt + 1}/3): {e}")
+
+            # Чекаємо перед наступною спробою
+            if attempt < 2:
+                await asyncio.sleep(2)
+
+        return {"error": "Не вдалося завантажити список маршрутів після 3 спроб."}
 
 
     async def get_places_by_name(self, search_term: str) -> dict:
