@@ -5,22 +5,21 @@ from handlers.command_handlers import get_main_menu_keyboard
 
 
 async def dismiss_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Видаляє повідомлення розсилки і показує (оновлює) головне меню"""
+    """
+    Видаляє повідомлення розсилки і показує Головне меню.
+    """
     query = update.callback_query
-    await query.answer()  # Щоб кнопка не блимала
+    await query.answer()
 
-    # 1. Видаляємо повідомлення розсилки
+    # 1. Видаляємо повідомлення з новиною
     try:
         await query.message.delete()
     except Exception:
         pass
 
-    # 2. Надсилаємо свіже головне меню (щоб юзер не загубився)
-    # АБО якщо меню вже є знизу, можна нічого не робити.
-    # Але надіслати меню - це хороша практика "Home"
-
-    # keyboard = await get_main_menu_keyboard(update.effective_user.id)
-    # await query.message.reply_text("🚊 Головне меню:", reply_markup=keyboard)
+    # 2. Викликаємо головне меню (щоб користувач повернувся в інтерфейс)
+    from handlers.menu_handlers import main_menu
+    await main_menu(update, context)
 
 
 async def get_back_keyboard(callback_data: str = "main_menu") -> InlineKeyboardMarkup:
