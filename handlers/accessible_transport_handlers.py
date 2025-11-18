@@ -19,7 +19,20 @@ from fuzzywuzzy import fuzz
 SEARCH_SYNONYMS = {
     "музкомедія": "Театр Музкомедії",
     "вокзал": "Залізничний вокзал",
-    "привоз": "Привоз" # Це виправить і текстовий пошук, а не лише кнопку
+    "привоз": "Привоз", # Це виправить і текстовий пошук, а не лише кнопку
+    "новий ринок": "Новий ринок",
+    "парк горького": "вул. Героїв Крут",
+    "південний": "Ринок Південний",
+    "тираспольська": "пл. Тираспільська",
+    "дерев'янка": "пл. Бориса Дерев'янка",
+    "площа дерев'янка": "пл. Бориса Дерев'янка",
+    "обласна лікарня": "вул. Заболотного", # Тут пошук по вулиці виправданий
+    "заболотного": "вул. Заболотного",
+    "паустовського": "вул. 28-ї Бригади",
+    "політех": "Політехнічний інститут",
+    "філатова": "Інститут Філатова",
+    "парк шевченка": "Парк ім. Тараса Шевченка",
+    "парк победы": "Парк Перемоги"
     # Додайте сюди інші проблемні випадки, коли їх знайдете
 }
 
@@ -99,7 +112,7 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stops = data.get("stops", [])
 
     # 🔍 ЛОГУВАННЯ ДЛЯ ДІАГНОСТИКИ
-    logger.info(f"===== DIAGNOSTIC: Пошук 'Ринок Привоз' =====")
+    logger.info(f"===== DIAGNOSTIC: Пошук =====")
     for stop in stops:
         logger.info(f"ID: {stop['id']}, Назва: {stop['title']}, Lat: {stop['lat']}, Lng: {stop['lng']}")
     logger.info(f"=====================================")
@@ -112,8 +125,22 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Клавіатура з популярними зупинками
     keyboard = [
-        [InlineKeyboardButton("📍 Ринок Привоз", callback_data="stop_search_Привоз")],
-        [InlineKeyboardButton("🚉 Залізничний вокзал", callback_data="stop_search_Залізничний вокзал")],
+        [
+            InlineKeyboardButton("🚉 Залізничний вокзал", callback_data="stop_search_Залізничний вокзал"),
+            InlineKeyboardButton("📍 Ринок Привоз", callback_data="stop_search_Привоз")
+        ],
+        [
+            InlineKeyboardButton("🏛️ Соборна площа", callback_data="stop_search_Соборна площа"),
+            InlineKeyboardButton("🌊 Аркадія", callback_data="stop_search_Аркадія")
+        ],
+        [
+            InlineKeyboardButton("🏞️ Старосінна площа", callback_data="stop_search_Старосінна площа"),
+            InlineKeyboardButton("🛍️ Ринок 'Південний'", callback_data="stop_search_Ринок Південний")
+        ],
+        [
+            InlineKeyboardButton("🌳 Парк ім. Тараса Шевченка", callback_data="stop_search_Парк ім. Тараса Шевченка"),
+            InlineKeyboardButton("🏁 вул. 28-ї бригади", callback_data="stop_search_вул. 28-ї Бригади")
+        ],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -180,7 +207,7 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
         data = await easyway_service.get_places_by_name(search_term=search_term)
 
         if data.get("error"):
-            await update.message.reply_text(f"❌ Помилка API: {data['error']}")
+            await update.message.reply_text(f"❌ Помилка API-даних: {data['error']}")
             return States.ACCESSIBLE_SEARCH_STOP
 
         places = data.get("stops", [])
@@ -208,7 +235,6 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
 async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Крок 2 (альтернативний): Користувач натискає кнопку популярної зупинки.
-    [cite: 1421-1423]
     """
     query = update.callback_query
     await query.answer()
@@ -226,7 +252,7 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
         data = await easyway_service.get_places_by_name(search_term=search_term)
 
         if data.get("error"):
-            await query.edit_message_text(f"❌ Помилка API: {data['error']}")
+            await query.edit_message_text(f"❌ Помилка API-даних: {data['error']}")
             return States.ACCESSIBLE_SEARCH_STOP
 
         places = data.get("stops", [])
@@ -240,38 +266,7 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
         context.user_data["search_results"] = places
 
         # Показуємо кнопки [cite: 1453-1466]
-        keyboard = []
-        for place in places[:10]:  # Максимум 10
-            # --- ПОЧАТОК НОВОГО РЕФАКТОРИНГУ ---
-            title = place['title']
-            summary = place.get('routes_summary')
-
-            # Рядок 1: Назва зупинки
-            button_text = f"📍 {title}"
-            if summary:
-                # Рядок 2: Маршрути
-                button_text += f"\n{summary}"
-
-            # Обрізаємо, якщо ДУЖЕ довго (ліміт 64 байти)
-            if len(button_text.encode('utf-8')) > 60:
-                # Обрізаємо, але зберігаємо початок
-                button_text = button_text[:57] + "..."
-
-            keyboard.append([
-                InlineKeyboardButton(
-                    button_text,
-                    callback_data=f"stop_{place['id']}"
-                )
-            ])
-            # --- КІНЕЦЬ НОВОГО РЕФАКТОРИНГУ ---
-        keyboard.append([InlineKeyboardButton("⬅️ Назад (до пошуку)", callback_data="accessible_start")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(
-            f"Оберіть зупинку за терміном <b>'{search_term}'</b>:",
-            reply_markup=reply_markup,
-            parse_mode="HTML"
-        )
+        await _show_stops_keyboard(update, places)
         return States.ACCESSIBLE_SELECT_STOP
 
     except Exception as e:
@@ -309,7 +304,7 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
 
         if stop_info.get("error"):
             # Це спрацює при тайм-ауті (з Кроку 2)
-            await query.edit_message_text(f"❌ Помилка API: {stop_info['error']}")
+            await query.edit_message_text(f"❌ Помилка API-даних: {stop_info['error']}")
             return States.ACCESSIBLE_SEARCH_STOP
 
         stop_title = stop_info.get("title", f"Зупинка ID: {stop_id}")
@@ -321,7 +316,7 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
         # Показуємо результати
         await _show_accessible_transport_results(query, stop_title_safe, handicapped_routes)
 
-        context.user_data.clear()
+        #context.user_data.clear()
         return States.ACCESSIBLE_SHOWING_RESULTS
 
     except telegram.error.BadRequest as br_error:
@@ -378,9 +373,10 @@ async def _show_stops_keyboard(update: Update, places: list):
 
     # Текст повідомлення з підказкою
     message_text = (
-        "✅ Знайдено! Оберіть точну зупинку зі списку:\n\n"
-        "💡 <b>Підказка:</b> Натисніть на зупинку, щоб побачити час прибуття та "
-        "<b>напрямок</b> руху (напр., \"→ у бік пл. Тираспільська\")."
+        "✅ Знайдено!✅  Оберіть точну зупинку зі списку: 👇\n\n"
+        "💡 <b><i>Підказка:</i></b> Щоб побачити \n<b>\n🧭 НАПРЯМОК  РУХУ🧭</b> \n(напр., \"→ у бік пл. Тираспольська\")"
+        "\nта час прибуття ⏱️\n\n"
+        "👇 <b>НАТИСНІТЬ НА ЗУПИНКУ</b> 👇"
     )
 
     if update.callback_query:
@@ -423,8 +419,11 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
     # Сценарій: Є низькопідлоговий транспорт
     header = (
         f"♿️ <b>Низькопідлоговий Транспорт</b>\n"
-        f"Зупинка: <b>{stop_title}</b>\n"
-        f"───────────────\n\n"
+        f"📍 Зупинка: <b>{stop_title}</b>\n"
+        f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n"
+        f"👋 Шановні пасажари!\n"
+        f"⏱️ Інформація про час прибуття \n\n<b>⚠️дійсна на момент запиту⚠️</b>\n\n"
+        f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n\n"
     )
 
     routes_text = ""
@@ -489,15 +488,12 @@ async def accessible_back_to_list(update: Update, context: ContextTypes.DEFAULT_
     places = context.user_data.get("search_results")
 
     if not places:
-        # Якщо дані з якоїсь причини втрачено, повертаємось на старт
-        logger.warning("No 'search_results' in user_data for accessible_back_to_list")
+        # Якщо дані з якоїсь причини втрачено, просто повертаємось на старт
+        logger.warning("No 'search_results' in user_data for accessible_back_to_list, returning to start.")
 
-        # Використовуємо той самий об'єкт query для повернення на старт
-        await query.edit_message_text(
-            text="♿️ <b>Пошук Низькопідлогового Транспорту</b>\n\n...", # (Текст з accessible_start)
-            reply_markup=... # (Клавіатура з accessible_start)
-        )
-        return States.ACCESSIBLE_SEARCH_STOP
+        # Викликаємо accessible_start, він сам впорається з редагуванням
+        # і поверне правильний стан.
+        return await accessible_start(update, context)
 
     # Використовуємо нашу універсальну функцію, щоб показати кнопки
     # (Ми оновимо _show_stops_keyboard у Кроці 6, щоб вона працювала з query)
