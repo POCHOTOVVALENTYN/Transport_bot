@@ -5,10 +5,12 @@ from telegram.ext import ContextTypes, ConversationHandler
 from config.messages import MESSAGES
 from handlers.common import get_back_keyboard, get_cancel_keyboard
 from bot.states import States
+from services import museum_service
 from utils.logger import logger
 from config.settings import MUSEUM_LOGO_IMAGE, GOOGLE_SHEETS_ID, MUSEUM_ADMIN_ID
 from telegram.constants import ParseMode
 from integrations.google_sheets.client import GoogleSheetsClient
+from services.museum_service import MuseumService
 
 
 async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -191,17 +193,17 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
     #Логування для діагностики
     logger.info(f"User {update.effective_user.id} started museum registration. Context: {context.user_data}")
 
+    # ЗАМІСТЬ прямого виклику GoogleSheetsClient:
     try:
-        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
-        # Читаємо дати з аркуша "MuseumDates", стовпець A
-        dates_data = sheets.read_range(sheet_range="MuseumDates!A1:A50")
+        # Викликаємо наш розумний метод з кешуванням
+        dates_list = await museum_service.get_available_dates()
 
         # --- ДОДАНО: Діагностичне логування ---
-        logger.info(f"📊 Google Sheets read result: {dates_data}")
-        logger.info(f"📊 Number of dates loaded: {len(dates_data) if dates_data else 0}")
+        #logger.info(f"📊 Google Sheets read result: {dates_data}")
+        #logger.info(f"📊 Number of dates loaded: {len(dates_data) if dates_data else 0}")
         # --- КІНЕЦЬ ДОДАВАННЯ ---
 
-        if not dates_data:
+        if not dates_list:
             keyboard = await get_back_keyboard("museum_menu")
             # --- ВИПРАВЛЕННЯ: Видаляємо + надсилаємо нове ---
             await query.message.delete()
@@ -213,9 +215,10 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
             return ConversationHandler.END
 
         keyboard = []
-        text = "🗓️ Оберіть вільну дату та час для екскурсії:\n"
+        for date_str in dates_list:
+            keyboard.append([InlineKeyboardButton(date_str, callback_data=f"museum_date:{date_str}")])
 
-        for row in dates_data:
+        for row in dates_list:
             if row: # Якщо рядок не пустий
                 date_str = row[0]
                 # 'callback_data' тепер містить саму дату
@@ -237,8 +240,10 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
         # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
         return States.MUSEUM_DATE
 
+
     except Exception as e:
-        logger.error(f"Failed to read museum dates from sheets: {e}")
+
+        logger.error(f"Error: {e}")
         keyboard = await get_back_keyboard("museum_menu")
         # --- ВИПРАВЛЕННЯ: Видаляємо + надсилаємо нове ---
         await query.message.delete()
@@ -413,70 +418,57 @@ async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAUL
     # --- КІНЕЦЬ БЛОКУ ВАЛІДАЦІЇ ---
 
     # Валідація пройдена, збираємо дані:
-    date = context.user_data.get('museum_date', 'НЕ ВКАЗАНО')
-    count = context.user_data.get('museum_people_count', 'НЕ ВКАЗАНО')
-    name = context.user_data.get('museum_name', 'НЕ ВКАЗАНО')
-    phone = phone_text  # Зберігаємо оригінальний ввід користувача
+    # Збираємо дані
+    date = context.user_data.get('museum_date')
+    count = context.user_data.get('museum_people_count')
+    name = context.user_data.get('museum_name')
+    phone = phone_text
 
-    logger.info(f"New museum registration: Date={date}, Count={count}, Name={name}, Phone={phone}")
-
-    # --- ЗБЕРІГАЄМО В GOOGLE SHEETS ("MuseumBookings") ---
-    try:
-        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
-        row_data = [
-            datetime.now().strftime("%d.%m.%Y %H:%M"),  # A: Дата реєстрації
-            date,  # B: Дата екскурсії
-            count,  # C: Кількість
-            name,  # D: П.І.Б.
-            phone  # E: Телефон
-        ]
-        sheets.append_row(sheet_name="MuseumBookings", values=row_data)
-        logger.info("✅ Museum booking saved to Google Sheets")
-
-    except Exception as e:
-        logger.error(f"❌ FAILED to save museum booking to Google Sheets: {e}")
+    # ЗАМІСТЬ запису в Google Sheets напряму:
+    success = await museum_service.create_booking(date, count, name, phone)
         # Не зупиняємо процес, головне - повідомити адміна
 
     # --- НАДСИЛАЄМО ПОВІДОМЛЕННЯ АДМІНУ (Максиму) ---
-    try:
-        admin_message = (
-            f"🔔 Нова заявка на екскурсію до Музею!\n\n"
-            f"🗓 <b>Дата екскурсії:</b> {date}\n"
-            f"👥 <b>Кількість:</b> {count}\n"
-            f"👤 <b>ПІБ:</b> {name}\n"
-            f"📞 <b>Телефон:</b> {phone}"
-        )
+    if success:
+        try:
+            admin_message = (
+                f"🔔 Нова заявка на екскурсію до Музею!\n\n"
+                f"🗓 <b>Дата екскурсії:</b> {date}\n"
+                f"👥 <b>Кількість:</b> {count}\n"
+                f"👤 <b>ПІБ:</b> {name}\n"
+                f"📞 <b>Телефон:</b> {phone}"
+            )
 
-        keyboard_admin = [
-            [InlineKeyboardButton("⚙️ Адмін-панель", callback_data="admin_menu_show")]
-        ]
-        reply_markup_admin = InlineKeyboardMarkup(keyboard_admin)
+            keyboard_admin = [
+                [InlineKeyboardButton("⚙️ Адмін-панель", callback_data="admin_menu_show")]
+            ]
+            reply_markup_admin = InlineKeyboardMarkup(keyboard_admin)
 
-        await context.bot.send_message(
-            chat_id=MUSEUM_ADMIN_ID,
-            text=admin_message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup_admin
-        )
-        logger.info(f"✅ Museum booking notification sent to MUSEUM_ADMIN_ID {MUSEUM_ADMIN_ID}")
+            await context.bot.send_message(
+                chat_id=MUSEUM_ADMIN_ID,
+                text=admin_message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup_admin
+            )
+            logger.info(f"✅ Museum booking notification sent to MUSEUM_ADMIN_ID {MUSEUM_ADMIN_ID}")
 
+    else:
+        except Exception as e:
+            logger.error(f"❌ FAILED to send museum booking to MUSEUM_ADMIN_ID {MUSEUM_ADMIN_ID}: {e}")
+            # Повідомляємо користувача, що сталася помилка
+            keyboard_final = await get_back_keyboard("main_menu")
+            await update.message.reply_text(
+                "❌ Сталася помилка при надсиланні вашої заявки. Будь ласка, спробуйте пізніше.",
+                reply_markup=keyboard_final
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
 
-    except Exception as e:
-        logger.error(f"❌ FAILED to send museum booking to MUSEUM_ADMIN_ID {MUSEUM_ADMIN_ID}: {e}")
-        # Повідомляємо користувача, що сталася помилка
+        # --- Відповідь користувачу ---
         keyboard_final = await get_back_keyboard("main_menu")
         await update.message.reply_text(
-            "❌ Сталася помилка при надсиланні вашої заявки. Будь ласка, спробуйте пізніше.",
+            "✅ Дякуємо! Ваша заявка прийнята. Організатор зв'яжеться з вами для підтвердження.",
             reply_markup=keyboard_final
         )
         context.user_data.clear()
         return ConversationHandler.END
-
-    # --- Відповідь користувачу ---
-    keyboard_final = await get_back_keyboard("main_menu")
-    await update.message.reply_text(
-        "✅ Дякуємо! Ваша заявка прийнята. Організатор зв'яжеться з вами для підтвердження.",
-        reply_markup=keyboard_final
-    )
-    context.user_data.clear()
-    return ConversationHandler.END

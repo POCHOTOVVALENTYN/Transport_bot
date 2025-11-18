@@ -1,4 +1,5 @@
 from datetime import datetime
+import asyncio
 from integrations.google_sheets.client import GoogleSheetsClient
 from config.settings import GOOGLE_SHEETS_ID
 from config.constants import SHEET_NAMES, TicketStatus
@@ -18,19 +19,7 @@ class TicketsService:
             telegram_id: int,
             complaint_data: dict
     ) -> dict:
-        """
-        Створення тікету скарги в Google Sheets
-
-        complaint_data повинен містити:
-        {
-            "problem": "опис",
-            "route": "5",
-            "board_number": "1234",
-            "incident_datetime": "28.10.2025 14:30",
-            "user_name": "Іван Петренко",
-            "user_phone": "+380501234567"
-        }
-        """
+        """Створення тікету скарги в Google Sheets (Асинхронно)"""
         try:
             # Генерація ID
             ticket_id = format_ticket_id()
@@ -85,30 +74,30 @@ class TicketsService:
         """Створення тікету пропозиції (Оновлено)"""
         try:
             ticket_id = format_ticket_id()
-
-            # Дані, які ми отримуємо
             text = suggestion_data.get("text", "")
             user_name = suggestion_data.get("user_name", "Анонімно")
             user_phone = suggestion_data.get("user_phone", "N/A")
 
-            # Формування рядка згідно 9 колонок:
-            # Дата | Номер | Тип | Пріоритет | Маршрут | Опис | Борт | ПІБ | Телефон
             row_data = [
-                datetime.now().strftime("%d.%m.%Y %H:%M"),  # Дата реєстрації
-                ticket_id,  # Номер пропозиції
-                "💡 Пропозиція",  # Тип
-                "🟢 Низька",  # Пріоритет
-                "N/A",  # № Маршруту
-                text[:100],  # Опис
-                "N/A",  # Бортовий №
-                user_name,  # П.І.Б.
-                user_phone,  # Телефон
-                suggestion_data.get("user_email", "N/A")  # J
+                datetime.now().strftime("%d.%m.%Y %H:%M"),
+                ticket_id,
+                "💡 Пропозиція",
+                "🟢 Низька",
+                "N/A",
+                text[:100],
+                "N/A",
+                user_name,
+                user_phone,
+                suggestion_data.get("user_email", "N/A")
             ]
 
-            success = self.sheets.append_row(
-                sheet_name=SHEET_NAMES["suggestions"],
-                values=row_data
+            # === АСИНХРОННИЙ ВИКЛИК ===
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(
+                None,
+                self.sheets.append_row,
+                SHEET_NAMES["suggestions"],
+                row_data
             )
 
             if success:
@@ -119,42 +108,42 @@ class TicketsService:
                     "message": f"💡 Дякуємо! Ваша пропозиція зареєстрована.\nНомер: {ticket_id}"
                 }
             else:
-                return {
-                    "success": False,
-                    "message": "❌ Помилка при збереженні пропозиції"
-                }
+                return {"success": False, "message": "❌ Помилка при збереженні пропозиції"}
 
         except Exception as e:
             logger.error(f"❌ Error creating suggestion: {e}")
             return {"success": False, "message": "❌ Сталася помилка"}
-
 
     async def create_thanks_ticket(
             self,
             telegram_id: int,
             thanks_data: dict
     ) -> dict:
-        """Створення тікету подяки"""
+        """Створення тікету подяки (Асинхронно)"""
         try:
             ticket_id = format_ticket_id()
 
             row_data = [
-                datetime.now().strftime("%d.%m.%Y %H:%M"),  # Дата
-                ticket_id,  # ID
-                "✅ Подяка",  # Статус
-                "🟢 Низька",  # Пріоритет
-                thanks_data.get("route") or "N/A",  # Маршрут
-                thanks_data.get("text", "")[:100],  # Текст
-                thanks_data.get("board_number") or "N/A",  # Борт
-                thanks_data.get("user_name", "Анонім"),  # ІМ'Я
-                "N/A",  # Телефон (не збираємо)
+                datetime.now().strftime("%d.%m.%Y %H:%M"),
+                ticket_id,
+                "✅ Подяка",
+                "🟢 Низька",
+                thanks_data.get("route") or "N/A",
+                thanks_data.get("text", "")[:100],
+                thanks_data.get("board_number") or "N/A",
+                thanks_data.get("user_name", "Анонім"),
+                "N/A",
                 "",
                 ""
             ]
 
-            success = self.sheets.append_row(
-                sheet_name=SHEET_NAMES["thanks"],
-                values=row_data
+            # === АСИНХРОННИЙ ВИКЛИК ===
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(
+                None,
+                self.sheets.append_row,
+                SHEET_NAMES["thanks"],
+                row_data
             )
 
             if success:

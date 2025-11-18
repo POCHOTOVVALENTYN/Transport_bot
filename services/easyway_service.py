@@ -4,6 +4,7 @@ import json
 import logging
 import asyncio
 from typing import List, Dict, Optional
+from cachetools import TTLCache
 
 from config.settings import (
     EASYWAY_API_URL, EASYWAY_LOGIN, EASYWAY_PASSWORD, EASYWAY_CITY,
@@ -43,6 +44,12 @@ class EasyWayService:
         }
         self.time_icons = TIME_SOURCE_ICONS
 
+        # === НАЛАШТУВАННЯ КЕШУ ===
+        # maxsize=1000: зберігаємо максимум 1000 запитів
+        # ttl=30: час життя запису - 30 секунд
+        self.stop_cache = TTLCache(maxsize=1000, ttl=30)
+        logger.info("✅ EasyWay Stop Cache initialized (TTL=30s)")
+
     async def get_routes_list(self) -> dict:
         """Отримує список маршрутів"""
         params = {
@@ -72,6 +79,7 @@ class EasyWayService:
         except Exception as e:
             logger.error(f"GetRoutesList error: {e}")
             return {"error": str(e)}
+
 
     async def get_places_by_name(self, search_term: str) -> dict:
         """Пошук зупинок за назвою (з авто-повтором)"""
@@ -126,7 +134,14 @@ class EasyWayService:
         return {"error": "Сервер не відповів вчасно. Спробуємо ще раз."}
 
     async def get_stop_info_v12(self, stop_id: int) -> dict:
-        """Отримання інформації v1.2 про зупинку (з авто-повтором)"""
+        """Отримання інформації v1.2 про зупинку (з кешуванням)"""
+
+        # 1. Перевіряємо кеш
+        if stop_id in self.stop_cache:
+            logger.info(f"💎 Cache HIT for stop_id: {stop_id}")
+            return self.stop_cache[stop_id]
+
+        # Якщо в кеші немає, робимо запит
         params = {
             "login": self.config.LOGIN,
             "password": self.config.PASSWORD,
@@ -138,7 +153,7 @@ class EasyWayService:
         }
 
         url = self._build_url(params)
-        timeout = aiohttp.ClientTimeout(total=30)  # 30 секунд
+        timeout = aiohttp.ClientTimeout(total=30)
 
         for attempt in range(3):
             try:
@@ -147,7 +162,15 @@ class EasyWayService:
                     async with session.get(url, timeout=timeout) as response:
                         if response.status == 200:
                             data = await response.json(content_type=None)
-                            return self._parse_stop_info_v12(data)
+                            parsed_data = self._parse_stop_info_v12(data)
+
+                            # 2. Зберігаємо результат у кеш перед поверненням
+                            # Зберігаємо тільки якщо немає помилки в даних
+                            if not parsed_data.get("error"):
+                                self.stop_cache[stop_id] = parsed_data
+                                logger.info(f"💾 Saved to cache: stop_id {stop_id}")
+
+                            return parsed_data
             except (asyncio.TimeoutError, Exception) as e:
                 logger.warning(f"GetStopInfo error (Attempt {attempt + 1}/3): {e}")
                 if attempt < 2: await asyncio.sleep(1)

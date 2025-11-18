@@ -1,0 +1,32 @@
+# database/db.py
+import asyncio
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import Column, Integer, String, DateTime, func
+from config.settings import BASE_DIR
+
+# Шлях до файлу БД (буде створено автоматично)
+DATABASE_URL = f"sqlite+aiosqlite:///{BASE_DIR}/bot_database.db"
+
+Base = declarative_base()
+
+# --- Опис таблиці записів до Музею ---
+class MuseumBooking(Base):
+    __tablename__ = "museum_bookings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=func.now())
+    excursion_date = Column(String, nullable=False) # Дата екскурсії
+    people_count = Column(Integer, nullable=False)
+    user_name = Column(String, nullable=False)
+    user_phone = Column(String, nullable=False)
+    status = Column(String, default="new") # new, synced_to_sheets
+
+# --- Налаштування підключення ---
+engine = create_async_engine(DATABASE_URL, echo=False)
+AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+async def init_db():
+    """Створює таблиці, якщо їх немає"""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)

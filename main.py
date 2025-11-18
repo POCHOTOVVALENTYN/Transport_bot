@@ -4,6 +4,9 @@ from config.settings import TELEGRAM_BOT_TOKEN
 from bot.bot import TransportBot
 from utils.logger import logger
 from handlers.accessible_transport_handlers import load_easyway_route_ids
+from database.db import init_db
+
+
 
 
 async def main():
@@ -15,6 +18,10 @@ async def main():
 
     logger.info("🚀 Запуск Telegram бота...")
     bot = TransportBot(TELEGRAM_BOT_TOKEN)
+
+    # Ініціалізація Бази Даних
+    logger.info("📂 Ініціалізація бази даних SQLite...")
+    await init_db()
 
     # Завантажуємо маршрути з EasyWay
     logger.info("--- [MAIN] Викликаю load_easyway_route_ids ---")
