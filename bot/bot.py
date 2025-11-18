@@ -21,7 +21,7 @@ from handlers.accessible_transport_handlers import (
     accessible_stop_quick_search,
     accessible_stop_selected,
     accessible_text_cancel,
-    load_easyway_route_ids, accessible_back_to_list  # <-- НОВИЙ ВАЖЛИВИЙ ІМПОРТ
+    load_easyway_route_ids, accessible_back_to_list, accessible_retry_manual_search  # <-- НОВИЙ ВАЖЛИВИЙ ІМПОРТ
 )
 
 from handlers.static_handlers import (
@@ -252,7 +252,9 @@ class TransportBot:
                     # Обробник кнопок "Популярне" (напр. stop_search_Центр) [cite: 1616-1620]
                     CallbackQueryHandler(accessible_stop_quick_search, pattern="^stop_search_"),
                     # Обробник кнопки (якщо ID зупинки вже відомий, напр. "Ринок Привоз") [cite: 1622-1625]
-                    CallbackQueryHandler(accessible_stop_selected, pattern="^stop_[0-9]+$")
+                    CallbackQueryHandler(accessible_stop_selected, pattern="^stop_[0-9]+$"),
+                    # У states -> ACCESSIBLE_SEARCH_STOP (або де ви показуєте помилку)
+                    CallbackQueryHandler(accessible_retry_manual_search, pattern="^accessible_retry_manual$"),
                 ],
 
                 # Крок 2: Очікування вибору конкретної зупинки зі списку

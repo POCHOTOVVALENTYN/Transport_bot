@@ -74,7 +74,7 @@ class EasyWayService:
             return {"error": str(e)}
 
     async def get_places_by_name(self, search_term: str) -> dict:
-        """Пошук зупинок за назвою"""
+        """Пошук зупинок за назвою (з авто-повтором)"""
         params = {
             "login": self.config.LOGIN,
             "password": self.config.PASSWORD,
@@ -83,67 +83,76 @@ class EasyWayService:
             "term": search_term,
             "format": self.config.DEFAULT_FORMAT,
         }
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                url = self._build_url(params)
-                logger.info(f"EasyWay API Call: {url}")
 
-                timeout = aiohttp.ClientTimeout(total=15)
-                async with session.get(url, timeout=timeout) as response:
-                    if response.status == 200:
-                        data = await response.json(content_type=None)
-                        # --- ПОЧАТОК ДІАГНОСТИЧНОГО ЛОГУ ---
-                        try:
-                            import json
-                            # Використовуємо json.dumps для гарного форматування
-                            raw_json_data = json.dumps(data, indent=2, ensure_ascii=False)
+        url = self._build_url(params)
+        # Збільшуємо таймаут до 30 секунд
+        timeout = aiohttp.ClientTimeout(total=30)
 
-                            logger.info(f"===== RAW API RESPONSE for term '{search_term}' =====")
-                            logger.info(raw_json_data)
-                            logger.info(f"=====================================================")
-                        except Exception as log_e:
-                            logger.error(f"Error during diagnostic logging: {log_e}")
-                        # --- КІНЕЦЬ ДІАГНОСТИЧНОГО ЛОГУ ---
-                        return self._parse_places_response(data, root_key="item")
-                    else:
-                        raise Exception(f"API returned {response.status}")
-        except asyncio.TimeoutError:
-            logger.error("GetPlacesByName error: Request timed out")
-            return {"error": "Сервер EasyWay не відповів вчасно (10 сек)."}
-        except Exception as e:
-            logger.error(f"GetPlacesByName error: {e}")
-            return {"error": str(e)}
+        # Робимо 3 спроби
+        for attempt in range(3):
+            try:
+                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+                    logger.info(f"EasyWay API Call (Attempt {attempt + 1}/3): {url}")
+
+                    async with session.get(url, timeout=timeout) as response:
+                        if response.status == 200:
+                            data = await response.json(content_type=None)
+
+                            # --- ДІАГНОСТИЧНИЙ ЛОГ (залишаємо, як було) ---
+                            try:
+                                import json
+                                raw_json_data = json.dumps(data, indent=2, ensure_ascii=False)
+                                logger.info(f"===== RAW API RESPONSE for term '{search_term}' =====")
+                                logger.info(raw_json_data)
+                                logger.info(f"=====================================================")
+                            except Exception:
+                                pass
+                            # -----------------------------------------------
+
+                            return self._parse_places_response(data, root_key="item")
+                        else:
+                            logger.warning(f"API returned status {response.status}, retrying...")
+
+            except asyncio.TimeoutError:
+                logger.warning(f"Request timed out (Attempt {attempt + 1}/3). Retrying...")
+            except Exception as e:
+                logger.error(f"Request error (Attempt {attempt + 1}/3): {e}")
+
+            # Чекаємо 1 секунду перед наступною спробою (крім останньої)
+            if attempt < 2:
+                await asyncio.sleep(1)
+
+        # Якщо всі спроби вичерпано
+        return {"error": "Сервер не відповів вчасно. Спробуємо ще раз."}
 
     async def get_stop_info_v12(self, stop_id: int) -> dict:
-        """Отримання інформації v1.2 про зупинку (з GPS)"""
+        """Отримання інформації v1.2 про зупинку (з авто-повтором)"""
         params = {
             "login": self.config.LOGIN,
             "password": self.config.PASSWORD,
             "function": "stops.GetStopInfo",
             "city": self.config.DEFAULT_CITY,
             "id": stop_id,
-            "v": self.config.STOP_INFO_VERSION,  # v1.2!
+            "v": self.config.STOP_INFO_VERSION,
             "format": self.config.DEFAULT_FORMAT,
         }
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                url = self._build_url(params)
-                logger.info(f"EasyWay API Call (v1.2): {url}")
 
-                timeout = aiohttp.ClientTimeout(total=15)
-                async with session.get(url, timeout=timeout) as response:
-                    if response.status == 200:
-                        data = await response.json(content_type=None)
-                        logger.info(f"EasyWay API Response v1.2: {str(data)[:200]}")
-                        return self._parse_stop_info_v12(data)
-                    else:
-                        raise Exception(f"API returned {response.status}")
-        except asyncio.TimeoutError:
-            logger.error("GetStopInfo v1.2 error: Request timed out")
-            return {"error": "Сервер EasyWay не відповів вчасно (10 сек)."}
-        except Exception as e:
-            logger.error(f"GetStopInfo v1.2 error: {e}")
-            return {"error": str(e)}
+        url = self._build_url(params)
+        timeout = aiohttp.ClientTimeout(total=30)  # 30 секунд
+
+        for attempt in range(3):
+            try:
+                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+                    logger.info(f"EasyWay API Call v1.2 (Attempt {attempt + 1}/3): {url}")
+                    async with session.get(url, timeout=timeout) as response:
+                        if response.status == 200:
+                            data = await response.json(content_type=None)
+                            return self._parse_stop_info_v12(data)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.warning(f"GetStopInfo error (Attempt {attempt + 1}/3): {e}")
+                if attempt < 2: await asyncio.sleep(1)
+
+        return {"error": "Сервер не відповів вчасно. Спробуємо ще раз."}
 
     def _build_url(self, params: Dict) -> str:
         """Будує URL для API запиту"""
