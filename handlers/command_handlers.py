@@ -21,6 +21,7 @@ async def get_main_menu_keyboard(user_id: int):
         [InlineKeyboardButton("🎓 Навчально-курсовий комбінат", callback_data="education_menu")],
         [InlineKeyboardButton("🏛️ Музей КП 'ОМЕТ'", callback_data="museum_menu")],
         [InlineKeyboardButton("🏢 Про підприємство", callback_data="company_menu")],
+        [InlineKeyboardButton("🔔 Сповіщення від бота", callback_data="subscription_menu")]
     ]
     # 1. Якщо це Максим -> Додаємо кнопку Музею
     if user_id == MUSEUM_ADMIN_ID:

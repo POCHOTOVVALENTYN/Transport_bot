@@ -66,6 +66,9 @@ from handlers.admin_handlers import (
 
 from utils.logger import logger
 
+from handlers.subscription_handlers import show_subscription_menu, handle_subscription_choice
+from handlers.common import dismiss_broadcast_message
+
 
 class TransportBot:
     """Головний клас бота"""
@@ -89,6 +92,13 @@ class TransportBot:
         # --- КОМАНДИ ---
         self.app.add_handler(CommandHandler("start", cmd_start))
         self.app.add_handler(CommandHandler("help", cmd_help))
+
+        # --- СПОВІЩЕННЯ ---
+        self.app.add_handler(CallbackQueryHandler(show_subscription_menu, pattern="^subscription_menu$"))
+        self.app.add_handler(CallbackQueryHandler(handle_subscription_choice, pattern="^sub:"))
+
+        # --- ОБРОБКА КНОПКИ "ПРИХОВАТИ" (ПІД РОЗСИЛКОЮ) ---
+        self.app.add_handler(CallbackQueryHandler(dismiss_broadcast_message, pattern="^broadcast_dismiss$"))
 
 
         # --- CONVERSATION HANDLERS ---

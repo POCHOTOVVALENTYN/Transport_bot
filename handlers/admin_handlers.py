@@ -40,8 +40,9 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
     stats = await user_service.get_stats()
 
     text = (
-        f"⚙️ <b>Панель Керування (Новини та Статистика)</b>\n\n"
-        f"👥 Всього користувачів у базі: <b>{stats['total_users']}</b>\n"
+        f"⚙️ <b>Панель Керування</b>\n\n"
+        f"👥 Всього користувачів: <b>{stats['total_users']}</b>\n"
+        f"🔔 Підписано на новини: <b>{stats['subscribed_users']}</b> 🟢\n"  
         f"👋 Вітаю, {update.effective_user.first_name}!"
     )
 
@@ -98,17 +99,31 @@ async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Відправка повідомлення всім юзерам"""
-    users = await user_service.get_all_users_ids()
+    """Відправка повідомлення ТІЛЬКИ ПІДПИСАНИМ з кнопкою закриття"""
+
+    # 1. Беремо тільки підписаних!
+    users = await user_service.get_subscribed_users_ids()
+
+    if not users:
+        await update.message.reply_text("🤷‍♂️ Немає підписаних користувачів для розсилки.")
+        return ConversationHandler.END
+
     count = 0
     blocked = 0
-
     msg = update.message
-    status_msg = await update.message.reply_text(f"🚀 Починаю розсилку на {len(users)} користувачів...")
+
+    status_msg = await update.message.reply_text(f"🚀 Починаю розсилку на {len(users)} підписаних користувачів...")
+
+    # 2. Створюємо кнопку "Головне меню (Закрити)" для повідомлення
+    # Ця кнопка буде під кожним розісланим повідомленням
+    close_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗑 Зрозуміло (Приховати)", callback_data="broadcast_dismiss")]
+    ])
 
     for user_id in users:
         try:
-            await msg.copy(chat_id=user_id)
+            # 3. Копіюємо повідомлення з нашою кнопкою
+            await msg.copy(chat_id=user_id, reply_markup=close_markup)
             count += 1
             await asyncio.sleep(0.05)
         except Exception:
@@ -119,7 +134,7 @@ async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYP
     await status_msg.edit_text(
         f"✅ Розсилка завершена!\n\n"
         f"📨 Отримали: {count}\n"
-        f"🚫 Заблокували бота: {blocked}",
+        f"🚫 Недоступні: {blocked}",
         reply_markup=back_btn
     )
     return ConversationHandler.END

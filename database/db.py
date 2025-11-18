@@ -2,7 +2,7 @@
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, String, DateTime, func
+from sqlalchemy import Column, Integer, String, DateTime, func, Boolean
 from config.settings import BASE_DIR
 from sqlalchemy import Column, Integer, String, DateTime, func, BigInteger # <-- Додали BigInteger
 
@@ -52,10 +52,12 @@ class BotUser(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    telegram_id = Column(BigInteger, unique=True, nullable=False)  # ID в Телеграм
+    telegram_id = Column(BigInteger, unique=True, nullable=False)
     first_name = Column(String, nullable=True)
     username = Column(String, nullable=True)
     joined_at = Column(DateTime, default=func.now())
+    # НОВЕ ПОЛЕ: Підписка на новини
+    is_subscribed = Column(Boolean, default=False)
 
 
 # --- 2. Єдина таблиця для Зворотного зв'язку (Скарги, Подяки, Пропозиції) ---
