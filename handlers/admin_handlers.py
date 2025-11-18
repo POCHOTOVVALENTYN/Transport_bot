@@ -187,7 +187,13 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_add_date_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.from_user.id != MUSEUM_ADMIN_ID: return ConversationHandler.END  # Додаткова перевірка
+
+    user_id = query.from_user.id
+    logger.info(f"📢 Admin attempt by user_id: {user_id}. Expected: {MUSEUM_ADMIN_ID}")  # <-- ЛОГ
+
+    if user_id != MUSEUM_ADMIN_ID:
+        await query.message.reply_text(f"⛔ Помилка доступу. Ваш ID: {user_id}")  # <-- ПОВІДОМЛЕННЯ
+        return ConversationHandler.END
 
     # Клавіатура для скасування
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_menu_show")]]
@@ -262,12 +268,25 @@ async def admin_add_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE
 # --- Потік видалення дати ---
 async def admin_del_date_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    # Одразу відповідаємо, щоб телеграм не показував "годинничок"
     await query.answer()
-    if query.from_user.id != MUSEUM_ADMIN_ID: return ConversationHandler.END
+
+    if query.from_user.id != MUSEUM_ADMIN_ID:
+        return ConversationHandler.END
+
+    # Показуємо "Зачекайте", бо читання може бути довгим
+    await query.edit_message_text("⏳ Завантажую список дат...")
 
     try:
         sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
-        dates_data = sheets.read_range(sheet_range="MuseumDates!A1:A100")  # Читаємо 100 рядків
+        loop = asyncio.get_running_loop()
+
+        # Асинхронне читання
+        dates_data = await loop.run_in_executor(
+            None,
+            sheets.read_range,
+            "MuseumDates!A1:A100"
+        )
 
         if not dates_data:
             await query.edit_message_text("Немає дат для видалення.", reply_markup=InlineKeyboardMarkup(

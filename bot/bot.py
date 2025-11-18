@@ -268,23 +268,32 @@ class TransportBot:
             ]
         )
         # NEW CONVERSATION: АДМІН-ПАНЕЛЬ МУЗЕЮ
+        # NEW CONVERSATION: АДМІН-ПАНЕЛЬ МУЗЕЮ
         admin_conv = ConversationHandler(
             entry_points=[
-                CommandHandler("admin_museum", admin_menu),  # Додаткова команда
+                # Точки входу - натискання кнопок у меню
                 CallbackQueryHandler(admin_add_date_start, pattern="^admin_add_date$"),
                 CallbackQueryHandler(admin_del_date_menu, pattern="^admin_del_date_menu$"),
-                CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$")
+                # Команда теж може бути точкою входу (але вона веде в меню)
+                CommandHandler("admin_museum", admin_menu)
             ],
             states={
-                States.ADMIN_STATE_ADD_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_date_save)],
+                States.ADMIN_STATE_ADD_DATE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_date_save),
+                    # Додаємо кнопку "Назад" прямо в стані
+                    CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$")
+                ],
                 States.ADMIN_STATE_DEL_DATE_CONFIRM: [
-                    CallbackQueryHandler(admin_del_date_confirm, pattern="^admin_del_confirm:")]
+                    CallbackQueryHandler(admin_del_date_confirm, pattern="^admin_del_confirm:"),
+                    # Додаємо кнопку "Назад"
+                    CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$")
+                ]
             },
             fallbacks=[
-                CommandHandler("admin_museum", admin_menu),
-                CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$")
+                CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"),
+                CommandHandler("admin_museum", admin_menu)
             ],
-            block=False
+            # per_message=False (за замовчуванням True, для кнопок часто треба False, але тут краще залишити)
         )
         accessible_conv = ConversationHandler(
             entry_points=[
