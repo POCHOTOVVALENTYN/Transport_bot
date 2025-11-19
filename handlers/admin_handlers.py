@@ -114,6 +114,14 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
     # 1. Перевіряємо кількість підписників
     users = await user_service.get_subscribed_users_ids()
     if not users:
+        # Очищення стартового повідомлення, якщо користувачів немає
+        start_msg_id = context.user_data.pop('broadcast_start_msg_id', None)
+        if start_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=msg.chat_id, message_id=start_msg_id)
+            except Exception:
+                pass
+
         await msg.reply_text(
             "🤷‍♂️ Немає підписаних користувачів для розсилки.",
             reply_markup=InlineKeyboardMarkup(
@@ -125,7 +133,7 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['broadcast_msg_id'] = msg.message_id
     context.user_data['broadcast_chat_id'] = msg.chat_id
 
-    # --- ЗМІНА: Формуємо список видалення ---
+    # --- Формуємо список видалення ---
     msgs_to_delete = []
 
     # а) Додаємо стартове повідомлення ("Режим розсилки..."), якщо воно є
@@ -136,15 +144,18 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
     # б) Додаємо повідомлення, яке щойно надіслав адмін (текст/фото)
     msgs_to_delete.append(msg.message_id)
 
-    # Зберігаємо список у контекст
+    # Зберігаємо список у контекст (поки що неповний)
     context.user_data['msgs_to_delete'] = msgs_to_delete
 
-    # 3. Робимо "Прев'ю" - копіюємо повідомлення адміну
-    # ВИПРАВЛЕННЯ: Прибрали кнопку "Приховати" для адміна, вона тут зайва
-    await msg.reply_text("👁 <b>Попередній перегляд:</b>", parse_mode=ParseMode.HTML)
+    # 3. Робимо "Прев'ю"
+    # === 👇 ВИПРАВЛЕННЯ ТУТ 👇 ===
+    # Ми зберігаємо повідомлення в змінну і додаємо його ID у список видалення
+    preview_title_msg = await msg.reply_text("👁 <b>Попередній перегляд:</b>", parse_mode=ParseMode.HTML)
+    msgs_to_delete.append(preview_title_msg.message_id)
+    # ==============================
 
     preview_msg = await msg.copy(chat_id=user_id)
-    # Зберігаємо ID прев'ю, щоб потім видалити
+    # Додаємо ID самого прев'ю (копії) до списку видалення
     context.user_data['msgs_to_delete'].append(preview_msg.message_id)
 
     # 4. Клавіатура підтвердження
@@ -161,7 +172,7 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
         reply_markup=InlineKeyboardMarkup(confirm_keyboard),
         parse_mode=ParseMode.HTML
     )
-    # Зберігаємо ID меню
+    # Додаємо ID меню до списку видалення
     context.user_data['msgs_to_delete'].append(menu_msg.message_id)
 
     # Переходимо до стану очікування підтвердження
@@ -195,6 +206,9 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         # --- ЛОГІКА ВІДПРАВКИ ---
         status_msg = await query.message.reply_text("🚀 Розсилка розпочалась... Не закривайте бота.")
 
+        # РЕКОМЕНДАЦІЯ: Додайте його в список на видалення для надійності
+        msgs_to_delete.append(status_msg.message_id)
+
         msg_id = context.user_data.get('broadcast_msg_id')
         from_chat_id = context.user_data.get('broadcast_chat_id')
         users = await user_service.get_subscribed_users_ids()
@@ -223,7 +237,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
                 blocked += 1
 
         # Видаляємо повідомлення "Розсилка розпочалась..."
-        await status_msg.delete()
+        #await status_msg.delete()
 
         # Фінальний звіт
         await context.bot.send_message(
