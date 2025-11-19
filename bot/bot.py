@@ -103,6 +103,9 @@ class TransportBot:
                 # Кнопки дій теж є точками входу
                 CallbackQueryHandler(admin_add_date_start, pattern="^admin_add_date$"),
                 CallbackQueryHandler(admin_del_date_menu, pattern="^admin_del_date_menu$"),
+                # === 👇 (1) ДОДАЄМО ВХІД ДЛЯ РОЗСИЛКИ ТУТ 👇 ===
+                CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast_start$"),
+
             ],
             states={
                 States.ADMIN_STATE_ADD_DATE: [
@@ -113,11 +116,24 @@ class TransportBot:
                 States.ADMIN_STATE_DEL_DATE_CONFIRM: [
                     CallbackQueryHandler(admin_del_date_confirm, pattern="^admin_del_confirm:"),
                     CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
+                ],
+                # === 👇 (2) ДОДАЄМО СТАНИ РОЗСИЛКИ ТУТ 👇 ===
+                States.ADMIN_BROADCAST_TEXT: [
+                    MessageHandler(filters.ALL & ~filters.COMMAND, admin_broadcast_preview)
+                ],
+                States.ADMIN_BROADCAST_CONFIRM: [
+                    CallbackQueryHandler(admin_broadcast_send_confirm, pattern="^broadcast_confirm$"),
+                    CallbackQueryHandler(admin_broadcast_send_confirm, pattern="^broadcast_cancel$"),
                 ]
+                # =============================================
             },
             fallbacks=[
                 CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$"),
-                CommandHandler("admin_museum", admin_menu)
+                CommandHandler("admin_museum", admin_menu),
+
+                # === 👇 (3) ДОДАЄМО ВИХІД В ЗАГАЛЬНУ АДМІНКУ ТУТ 👇 ===
+                # Це потрібно, щоб кнопка "Скасувати" (яка веде в general_admin_menu) спрацювала як вихід з діалогу
+                CallbackQueryHandler(show_general_admin_menu, pattern="^general_admin_menu$")
             ],
             allow_reentry=True
         )
@@ -133,26 +149,6 @@ class TransportBot:
         # --- ОБРОБКА КНОПКИ "ПРИХОВАТИ" (ПІД РОЗСИЛКОЮ) ---
         self.app.add_handler(CallbackQueryHandler(dismiss_broadcast_message, pattern="^broadcast_dismiss$"))
 
-        # bot/bot.py
-
-        # 1. Розсилка (Для Вас і Тетяни)
-        broadcast_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast_start$")],
-            states={
-                # Етап 1: Очікуємо текст від адміна -> показуємо прев'ю
-                States.ADMIN_BROADCAST_TEXT: [
-                    MessageHandler(filters.ALL & ~filters.COMMAND, admin_broadcast_preview)
-                ],
-                # Етап 2: Очікуємо натискання кнопки (Надіслати / Скасувати)
-                States.ADMIN_BROADCAST_CONFIRM: [
-                    CallbackQueryHandler(admin_broadcast_send_confirm, pattern="^broadcast_confirm$"),
-                    CallbackQueryHandler(admin_broadcast_send_confirm, pattern="^broadcast_cancel$"),
-                ]
-            },
-            # Fallbacks (вихід з будь-якого етапу)
-            fallbacks=[CallbackQueryHandler(show_general_admin_menu, pattern="^general_admin_menu$")]
-        )
-        self.app.add_handler(broadcast_conv)
 
         # Кнопка входу в Адмінку Новин (Валентин/Тетяна)
         self.app.add_handler(CallbackQueryHandler(show_general_admin_menu, pattern="^general_admin_menu$"))
