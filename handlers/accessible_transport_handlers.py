@@ -107,18 +107,18 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Крок 1: Користувач запускає пошук. Одразу просимо ввести назву зупинки.
     """
-    query = update.callback_query
-    await query.answer()
+    #query = update.callback_query
+    #await query.answer()
 
     # Виконайте пошук "Ринок"
-    data = await easyway_service.get_places_by_name(search_term="Ринок Привоз")
-    stops = data.get("stops", [])
+    #data = await easyway_service.get_places_by_name(search_term="Ринок Привоз")
+    #stops = data.get("stops", [])
 
     # 🔍 ЛОГУВАННЯ ДЛЯ ДІАГНОСТИКИ
-    logger.info(f"===== DIAGNOSTIC: Пошук =====")
-    for stop in stops:
-        logger.info(f"ID: {stop['id']}, Назва: {stop['title']}, Lat: {stop['lat']}, Lng: {stop['lng']}")
-    logger.info(f"=====================================")
+    #logger.info(f"===== DIAGNOSTIC: Пошук =====")
+    #for stop in stops:
+    #    logger.info(f"ID: {stop['id']}, Назва: {stop['title']}, Lat: {stop['lat']}, Lng: {stop['lng']}")
+    #logger.info(f"=====================================")
 
 
     logger.info(f"User {update.effective_user.id} started v1.2 accessible transport search")

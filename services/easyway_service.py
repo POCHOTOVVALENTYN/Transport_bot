@@ -199,6 +199,7 @@ class EasyWayService:
         query_string = "&".join(f"{k}={v}" for k, v in params.items())
         return f"{base}/?{query_string}"
 
+
     def _parse_places_response(self, data: dict, root_key: str = "item") -> dict:
         """Парсить відповідь cities.GetPlacesByName"""
         try:
@@ -208,39 +209,28 @@ class EasyWayService:
 
             parsed_stops = []
             for item in items:
-
                 # Отримуємо вкладений словник "@attributes"
                 attributes = item.get("@attributes", {})
-                # Шукаємо "type" вже всередині нього
+                # Шукаємо "type"
                 item_type = attributes.get("type")
 
+                # Якщо це зупинка (або вузол)
                 if item_type == "stop":
-
-                    # --- ПОЧАТОК НОВОГО БЛОКУ: Парсинг маршрутів ---
                     trams = []
                     trols = []
-                    buses = []
-                    # Звертаємось до 'routes', які ми бачили в документації
-                    routes_data = item.get("routes", {}).get("route", [])
 
-                    # Переконуємось, що це список (на випадок одного маршруту)
+                    # Парсинг маршрутів
+                    routes_data = item.get("routes", {}).get("route", [])
                     if not isinstance(routes_data, list):
                         routes_data = [routes_data] if routes_data else []
 
                     for route in routes_data:
                         if not route: continue
                         title = route.get("title")
-                        # Атрибути 'type' знову вкладені в "@attributes"
-                        # (На основі логів з "Привозом")
-                        # Або, якщо вірити документації (XML), вони можуть бути просто 'type'
-                        # Давайте перевіримо обидва варіанти для надійності
 
+                        # Отримуємо тип маршруту
                         attrs = route.get("@attributes", {})
-                        rtype = attrs.get("type")
-
-                        # Якщо не знайшли в @attributes, шукаємо в корені
-                        if not rtype:
-                            rtype = route.get("type")
+                        rtype = attrs.get("type") or route.get("type")
 
                         if not title: continue
 
@@ -248,41 +238,35 @@ class EasyWayService:
                             trams.append(title)
                         elif rtype == "trol":
                             trols.append(title)
-                        elif rtype == "bus" or rtype == "marshrutka":
-                            buses.append(title)
+                        # Можна додати логування, якщо тип невідомий, для відладки
+                        # else:
+                        #    logger.info(f"Unknown route type: {rtype}")
 
-                    # Формуємо короткий інформативний рядок
+                    # Формуємо рядок опису
                     summary_parts = []
                     if trams:
                         summary_parts.append(f"{self.transport_icons['tram']} {', '.join(trams)}")
                     if trols:
                         summary_parts.append(f"{self.transport_icons['trol']} {', '.join(trols)}")
-                    #if buses:
-                        # Обмежуємо автобуси, щоб рядок не був занадто довгим
-                    #    bus_summary = f"{self.transport_icons['bus']} {', '.join(buses[:3])}"
-                    #    if len(buses) > 3:
-                    #        bus_summary += ", ..."
-                    #    summary_parts.append(bus_summary)
 
                     routes_summary = " | ".join(summary_parts)
-                    # --- КІНЕЦЬ НОВОГО БЛОКУ ---
 
-                    # Додаємо зупинку до списку, ТІЛЬКИ ЯКЩО
-                    # на ній є трамваї (trams) АБО тролейбуси (trols).
-                    if trams or trols:
-                        parsed_stops.append({
-                            "id": int(item.get("id", 0)),
-                            "title": item.get("title", ""),
-                            "lat": float(item.get("lat", 0)),
-                            "lng": float(item.get("lng", 0)),
-                            "routes_summary": routes_summary  # <--- ДОДАЄМО НАШЕ НОВЕ ПОЛЕ
-                        })
+                    # === ГОЛОВНА ЗМІНА ===
+                    # Додаємо зупинку, НАВІТЬ ЯКЩО summary порожній.
+                    # Це дозволить знайти зупинку, навіть якщо API не віддало список маршрутів у пошуку.
 
-            logger.info(f"Parsed {len(parsed_stops)} stops (with route summaries)")
+                    parsed_stops.append({
+                        "id": int(item.get("id", 0)),
+                        "title": item.get("title", ""),
+                        "lat": float(item.get("lat", 0)),
+                        "lng": float(item.get("lng", 0)),
+                        "routes_summary": routes_summary
+                    })
+
+            logger.info(f"Parsed {len(parsed_stops)} stops")
             return {"stops": parsed_stops}
 
         except Exception as e:
-            # Додаємо exc_info=True, щоб бачити повний traceback помилки у логах
             logger.error(f"Error parsing places response: {e}", exc_info=True)
             return {"error": f"Error parsing places response: {e}"}
 
