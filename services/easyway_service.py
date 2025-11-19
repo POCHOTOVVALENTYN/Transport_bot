@@ -251,17 +251,17 @@ class EasyWayService:
 
                     routes_summary = " | ".join(summary_parts)
 
-                    # === ГОЛОВНА ЗМІНА ===
-                    # Додаємо зупинку, НАВІТЬ ЯКЩО summary порожній.
-                    # Це дозволить знайти зупинку, навіть якщо API не віддало список маршрутів у пошуку.
-
-                    parsed_stops.append({
-                        "id": int(item.get("id", 0)),
-                        "title": item.get("title", ""),
-                        "lat": float(item.get("lat", 0)),
-                        "lng": float(item.get("lng", 0)),
-                        "routes_summary": routes_summary
-                    })
+                    # === 👇 ЗМІНА ТУТ: Фільтруємо "пусті" зупинки 👇 ===
+                    # Якщо на зупинці немає ні трамваїв, ні тролейбусів (рядок пустий) - пропускаємо її
+                    if routes_summary:
+                        parsed_stops.append({
+                            "id": int(item.get("id", 0)),
+                            "title": item.get("title", ""),
+                            "lat": float(item.get("lat", 0)),
+                            "lng": float(item.get("lng", 0)),
+                            "routes_summary": routes_summary
+                        })
+                    # ===================================================
 
             logger.info(f"Parsed {len(parsed_stops)} stops")
             return {"stops": parsed_stops}
