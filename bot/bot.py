@@ -61,7 +61,7 @@ from handlers.admin_handlers import (
     admin_del_date_menu, admin_del_date_confirm, admin_menu_show,
     admin_show_bookings, admin_sync_db,
     admin_broadcast_start, admin_broadcast_preview,       # Нова функція прев'ю
-    admin_broadcast_send_confirm, ADMIN_BROADCAST_TEXT,
+    admin_broadcast_send_confirm,
     show_general_admin_menu, admin_museum_menu_show # Нова функція зі списком
 )
 

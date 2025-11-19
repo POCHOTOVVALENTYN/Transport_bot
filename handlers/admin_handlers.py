@@ -20,8 +20,7 @@ from config.settings import MUSEUM_ADMIN_ID
 user_service = UserService()
 tickets_service = TicketsService()
 
-# Стани для розсилки
-ADMIN_BROADCAST_TEXT = 50
+
 
 # Стани для адміна
 (ADMIN_STATE_ADD_DATE, ADMIN_STATE_DEL_DATE_CONFIRM) = range(16, 18)  # Використовуємо нові стани
