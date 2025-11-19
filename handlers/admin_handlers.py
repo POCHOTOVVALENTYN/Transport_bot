@@ -89,12 +89,17 @@ async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TY
     # Кнопка "Скасувати" веде в General Menu
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="general_admin_menu")]])
 
-    await query.edit_message_text(
+    # --- ЗМІНА: Зберігаємо результат (повідомлення) у змінну ---
+    sent_msg = await query.edit_message_text(
         "📢 <b>Режим розсилки новин</b>\n\n"
         "Надішліть повідомлення (текст, фото або відео), яке отримають <b>ВСІ</b> користувачі бота.",
         reply_markup=back_btn,
         parse_mode=ParseMode.HTML
     )
+
+    # --- ЗМІНА: Запам'ятовуємо ID цього повідомлення, щоб видалити пізніше ---
+    context.user_data['broadcast_start_msg_id'] = sent_msg.message_id
+
     return States.ADMIN_BROADCAST_TEXT
 
 
@@ -120,9 +125,19 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['broadcast_msg_id'] = msg.message_id
     context.user_data['broadcast_chat_id'] = msg.chat_id
 
-    # Список повідомлень для видалення (очищення чату)
-    # Почнемо з повідомлення, яке надіслав сам адмін
-    context.user_data['msgs_to_delete'] = [msg.message_id]
+    # --- ЗМІНА: Формуємо список видалення ---
+    msgs_to_delete = []
+
+    # а) Додаємо стартове повідомлення ("Режим розсилки..."), якщо воно є
+    start_msg_id = context.user_data.pop('broadcast_start_msg_id', None)
+    if start_msg_id:
+        msgs_to_delete.append(start_msg_id)
+
+    # б) Додаємо повідомлення, яке щойно надіслав адмін (текст/фото)
+    msgs_to_delete.append(msg.message_id)
+
+    # Зберігаємо список у контекст
+    context.user_data['msgs_to_delete'] = msgs_to_delete
 
     # 3. Робимо "Прев'ю" - копіюємо повідомлення адміну
     # ВИПРАВЛЕННЯ: Прибрали кнопку "Приховати" для адміна, вона тут зайва
