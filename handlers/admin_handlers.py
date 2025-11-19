@@ -144,16 +144,24 @@ async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # --- ІСНУЮЧА ФУНКЦІЯ: Меню Музею (Максим) ---
-async def admin_menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Меню тільки для Музею"""
-    keyboard = await get_admin_main_menu_keyboard() # Ця клавіатура вже налаштована для музею
+async def admin_museum_menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує меню музею"""
+    query = update.callback_query
+    if query: await query.answer()
+
+    # Перевірка на Максима
+    if update.effective_user.id != MUSEUM_ADMIN_ID:
+        return ConversationHandler.END
+
+    keyboard = await get_admin_main_menu_keyboard()
     text = "👋 Вітаю, Максиме! Ви в адмін-панелі Музею."
 
-    if update.callback_query:
-        await update.callback_query.answer()
-        await update.callback_query.edit_message_text(text=text, reply_markup=keyboard)
+    if query:
+        await query.edit_message_text(text, reply_markup=keyboard)
     else:
-        await update.effective_chat.send_message(text=text, reply_markup=keyboard)
+        await update.effective_chat.send_message(text, reply_markup=keyboard)
+
+    # ВАЖЛИВО: Ми завершуємо попередній діалог, щоб очистити стан
     return ConversationHandler.END
 
 
@@ -196,7 +204,7 @@ async def admin_add_date_start(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     # Клавіатура для скасування
-    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_menu_show")]]
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     text = (
@@ -290,7 +298,7 @@ async def admin_del_date_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if not dates_data:
             await query.edit_message_text("Немає дат для видалення.", reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_menu_show")]]))
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]))
             return ConversationHandler.END
 
         keyboard = []
@@ -300,7 +308,7 @@ async def admin_del_date_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
                 cell_ref = f"A{i + 1}"  # A1, A2, ...
                 keyboard.append([InlineKeyboardButton(f"❌ {date_str}", callback_data=f"admin_del_confirm:{cell_ref}")])
 
-        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_menu_show")])
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
         await query.edit_message_text("Оберіть дату, яку потрібно видалити:",
                                       reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -322,7 +330,7 @@ async def admin_del_date_confirm(update: Update, context: ContextTypes.DEFAULT_T
 
     # 1. Створюємо клавіатуру "Назад" ЗАЗДАЛЕГІДЬ
     keyboard_back = [
-        [InlineKeyboardButton("⬅️ Назад до адмін-панелі", callback_data="admin_menu_show")]
+        [InlineKeyboardButton("⬅️ Назад до адмін-панелі", callback_data="admin_museum_menu")]
     ]
     reply_markup_back = InlineKeyboardMarkup(keyboard_back)
 
@@ -375,7 +383,7 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not bookings_data or len(bookings_data) < 2: # Якщо є тільки заголовок
             await query.edit_message_text(
                 "📋 Наразі немає жодного бронювання.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="admin_menu_show")]])
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]])
             )
             return
 
@@ -397,7 +405,7 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
                     f"---------------------\n"
                 )
 
-        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_menu_show")]]
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
 
         # Використовуємо HTML для форматування
         await query.edit_message_text(

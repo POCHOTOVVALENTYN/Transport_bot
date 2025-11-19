@@ -25,9 +25,7 @@ async def get_main_menu_keyboard(user_id: int):
     ]
     # 1. Якщо це Максим -> Додаємо кнопку Музею
     if user_id == MUSEUM_ADMIN_ID:
-        keyboard.append(
-            [InlineKeyboardButton("🏛️ Адмін-панель (Музей)", callback_data="admin_menu_show")]
-        )
+        keyboard.append([InlineKeyboardButton("🏛️ Адмін-панель (Музей)", callback_data="admin_museum_menu")])
 
     # 2. Якщо це Ви або Тетяна -> Додаємо кнопку Загальної Адмінки
     if user_id in GENERAL_ADMIN_IDS:

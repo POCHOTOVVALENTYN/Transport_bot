@@ -61,7 +61,7 @@ from handlers.admin_handlers import (
     admin_del_date_menu, admin_del_date_confirm, admin_menu_show,
     admin_show_bookings, admin_sync_db,
     admin_broadcast_start, admin_broadcast_send, ADMIN_BROADCAST_TEXT,
-    show_general_admin_menu# Нова функція зі списком
+    show_general_admin_menu, admin_museum_menu_show # Нова функція зі списком
 )
 
 from utils.logger import logger
@@ -93,6 +93,38 @@ class TransportBot:
         self.app.add_handler(CommandHandler("start", cmd_start))
         self.app.add_handler(CommandHandler("help", cmd_help))
 
+        admin_conv = ConversationHandler(
+            entry_points=[
+                CommandHandler("admin_museum", admin_menu),
+                # ВХІД ЧЕРЕЗ НОВИЙ CALLBACK
+                CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$"),
+
+                # Кнопки дій теж є точками входу
+                CallbackQueryHandler(admin_add_date_start, pattern="^admin_add_date$"),
+                CallbackQueryHandler(admin_del_date_menu, pattern="^admin_del_date_menu$"),
+            ],
+            states={
+                States.ADMIN_STATE_ADD_DATE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_date_save),
+                    # Кнопка Назад
+                    CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
+                ],
+                States.ADMIN_STATE_DEL_DATE_CONFIRM: [
+                    CallbackQueryHandler(admin_del_date_confirm, pattern="^admin_del_confirm:"),
+                    CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
+                ]
+            },
+            fallbacks=[
+                CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$"),
+                CommandHandler("admin_museum", admin_menu)
+            ],
+            allow_reentry=True
+        )
+
+        self.app.add_handler(admin_conv)
+
+        # І додаємо хендлер для показу меню (якщо ми не в діалозі)
+        self.app.add_handler(CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$"))
         # --- СПОВІЩЕННЯ ---
         self.app.add_handler(CallbackQueryHandler(show_subscription_menu, pattern="^subscription_menu$"))
         self.app.add_handler(CallbackQueryHandler(handle_subscription_choice, pattern="^sub:"))
@@ -267,34 +299,8 @@ class TransportBot:
                 CallbackQueryHandler(main_menu, pattern="^main_menu$")
             ]
         )
-        # NEW CONVERSATION: АДМІН-ПАНЕЛЬ МУЗЕЮ
-        # NEW CONVERSATION: АДМІН-ПАНЕЛЬ МУЗЕЮ
-        admin_conv = ConversationHandler(
-            entry_points=[
-                # Точки входу - натискання кнопок у меню
-                CallbackQueryHandler(admin_add_date_start, pattern="^admin_add_date$"),
-                CallbackQueryHandler(admin_del_date_menu, pattern="^admin_del_date_menu$"),
-                # Команда теж може бути точкою входу (але вона веде в меню)
-                CommandHandler("admin_museum", admin_menu)
-            ],
-            states={
-                States.ADMIN_STATE_ADD_DATE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_date_save),
-                    # Додаємо кнопку "Назад" прямо в стані
-                    CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$")
-                ],
-                States.ADMIN_STATE_DEL_DATE_CONFIRM: [
-                    CallbackQueryHandler(admin_del_date_confirm, pattern="^admin_del_confirm:"),
-                    # Додаємо кнопку "Назад"
-                    CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$")
-                ]
-            },
-            fallbacks=[
-                CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"),
-                CommandHandler("admin_museum", admin_menu)
-            ],
-            # per_message=False (за замовчуванням True, для кнопок часто треба False, але тут краще залишити)
-        )
+
+
         accessible_conv = ConversationHandler(
             entry_points=[
                 # Вхід через кнопку "♿ Пошук інклюзивного транспорту" [cite: 16-17]
