@@ -98,11 +98,10 @@ async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TY
     return States.ADMIN_BROADCAST_TEXT
 
 
-# === ЗМІНЮЄМО ЦЮ ФУНКЦІЮ (Прев'ю) ===
 async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Отримує повідомлення від адміна, зберігає його ID
-    та показує прев'ю з кнопками підтвердження.
+    Отримує повідомлення від адміна, показує прев'ю (без зайвих кнопок)
+    та меню підтвердження. Зберігає ID повідомлень для подальшого видалення.
     """
     user_id = update.effective_user.id
     msg = update.message
@@ -110,24 +109,28 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
     # 1. Перевіряємо кількість підписників
     users = await user_service.get_subscribed_users_ids()
     if not users:
-        await msg.reply_text("🤷‍♂️ Немає підписаних користувачів для розсилки.",
-                             reply_markup=InlineKeyboardMarkup(
-                                 [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]]))
+        await msg.reply_text(
+            "🤷‍♂️ Немає підписаних користувачів для розсилки.",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]])
+        )
         return ConversationHandler.END
 
-    # 2. Зберігаємо ID повідомлення, яке треба розіслати
-    # Ми копіюватимемо його потім кожному користувачу
+    # 2. Зберігаємо дані для розсилки
     context.user_data['broadcast_msg_id'] = msg.message_id
-    context.user_data['broadcast_chat_id'] = msg.chat_id  # Це чат адміна
+    context.user_data['broadcast_chat_id'] = msg.chat_id
 
-    # 3. Робимо "Прев'ю" - надсилаємо копію адміну назад
-    await msg.reply_text("👁 <b>Попередній перегляд (так побачать користувачі):</b>", parse_mode=ParseMode.HTML)
+    # Список повідомлень для видалення (очищення чату)
+    # Почнемо з повідомлення, яке надіслав сам адмін
+    context.user_data['msgs_to_delete'] = [msg.message_id]
 
-    # Додаємо кнопку "Приховати", яка буде у користувачів
-    mock_close_btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗑 Зрозуміло (Приховати)", callback_data="broadcast_dismiss")]
-    ])
-    await msg.copy(chat_id=user_id, reply_markup=mock_close_btn)
+    # 3. Робимо "Прев'ю" - копіюємо повідомлення адміну
+    # ВИПРАВЛЕННЯ: Прибрали кнопку "Приховати" для адміна, вона тут зайва
+    await msg.reply_text("👁 <b>Попередній перегляд:</b>", parse_mode=ParseMode.HTML)
+
+    preview_msg = await msg.copy(chat_id=user_id)
+    # Зберігаємо ID прев'ю, щоб потім видалити
+    context.user_data['msgs_to_delete'].append(preview_msg.message_id)
 
     # 4. Клавіатура підтвердження
     confirm_keyboard = [
@@ -135,84 +138,108 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton("❌ Скасувати / Редагувати", callback_data="broadcast_cancel")]
     ]
 
-    await msg.reply_text(
+    menu_msg = await msg.reply_text(
         f"📢 <b>Підготовка до розсилки</b>\n\n"
         f"👥 Кількість отримувачів: <b>{len(users)}</b>\n"
-        f"⚠️ Перевірте текст та медіа вище. Якщо все гаразд — натисніть 'Надіслати'.\n"
-        f"Якщо є помилка — натисніть 'Скасувати' і спробуйте знову.",
+        f"⚠️ Перевірте вигляд повідомлення вище. \n"
+        f"Натисніть <b>Надіслати</b> для запуску або <b>Скасувати</b> для редагування.",
         reply_markup=InlineKeyboardMarkup(confirm_keyboard),
         parse_mode=ParseMode.HTML
     )
+    # Зберігаємо ID меню
+    context.user_data['msgs_to_delete'].append(menu_msg.message_id)
 
     # Переходимо до стану очікування підтвердження
     return States.ADMIN_BROADCAST_CONFIRM
 
 
-# === ДОДАЄМО НОВУ ФУНКЦІЮ (Фактична відправка) ===
 async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Виконує розсилку після підтвердження"""
+    """Виконує розсилку або скасування та очищає чат"""
     query = update.callback_query
     await query.answer()
 
     action = query.data
+    chat_id = update.effective_chat.id
 
-    # Якщо скасували
-    if action == "broadcast_cancel":
-        await query.edit_message_text("❌ Розсилку скасовано. Ви можете спробувати знову через меню.")
-        # Повертаємо в меню або завершуємо
-        # Можна викликати show_general_admin_menu(update, context)
-        keyboard = [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]]
-        await query.message.reply_text("Повернення в меню:", reply_markup=InlineKeyboardMarkup(keyboard))
-        context.user_data.pop('broadcast_msg_id', None)
-        return ConversationHandler.END
+    # Отримуємо список повідомлень для видалення
+    msgs_to_delete = context.user_data.get('msgs_to_delete', [])
+    # Додаємо поточне меню до списку видалення (щоб не висіло)
+    msgs_to_delete.append(query.message.message_id)
 
-    # Якщо підтвердили
-    await query.edit_message_text("🚀 Розсилка розпочалась... Будь ласка, не закривайте бота.")
-
-    # Отримуємо збережені дані
-    msg_id = context.user_data.get('broadcast_msg_id')
-    from_chat_id = context.user_data.get('broadcast_chat_id')
-
-    users = await user_service.get_subscribed_users_ids()
-
-    count = 0
-    blocked = 0
-
-    # Кнопка "Закрити" для користувачів
-    close_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗑 Зрозуміло (Приховати)", callback_data="broadcast_dismiss")]
-    ])
-
-    # Цикл розсилки
-    for user_id in users:
-        try:
-            # Використовуємо метод copy_message бота
-            await context.bot.copy_message(
-                chat_id=user_id,
-                from_chat_id=from_chat_id,
-                message_id=msg_id,
-                reply_markup=close_markup
+    try:
+        # --- ЛОГІКА СКАСУВАННЯ ---
+        if action == "broadcast_cancel":
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Розсилку скасовано. Ви можете спробувати знову.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]])
             )
-            count += 1
-            await asyncio.sleep(0.05)  # Анти-спам затримка
-        except Exception as e:
-            logger.warning(f"Failed to send broadcast to {user_id}: {e}")
-            blocked += 1
+            return ConversationHandler.END
 
-    # Звіт
-    back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]])
+        # --- ЛОГІКА ВІДПРАВКИ ---
+        status_msg = await query.message.reply_text("🚀 Розсилка розпочалась... Не закривайте бота.")
 
-    await query.message.reply_text(
-        f"✅ <b>Розсилка завершена!</b>\n\n"
-        f"📨 Успішно надіслано: <b>{count}</b>\n"
-        f"🚫 Не отримали (блокували): <b>{blocked}</b>",
-        reply_markup=back_btn,
-        parse_mode=ParseMode.HTML
-    )
+        msg_id = context.user_data.get('broadcast_msg_id')
+        from_chat_id = context.user_data.get('broadcast_chat_id')
+        users = await user_service.get_subscribed_users_ids()
 
-    # Очищення
-    context.user_data.pop('broadcast_msg_id', None)
-    context.user_data.pop('broadcast_chat_id', None)
+        count = 0
+        blocked = 0
+
+        # Кнопка "Закрити" ТІЛЬКИ для користувачів
+        user_close_btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🗑 Зрозуміло (Приховати)", callback_data="broadcast_dismiss")]
+        ])
+
+        # Цикл розсилки
+        for user_id in users:
+            try:
+                await context.bot.copy_message(
+                    chat_id=user_id,
+                    from_chat_id=from_chat_id,
+                    message_id=msg_id,
+                    reply_markup=user_close_btn  # Додаємо кнопку тільки тут
+                )
+                count += 1
+                await asyncio.sleep(0.05)
+            except Exception as e:
+                logger.warning(f"Failed to send broadcast to {user_id}: {e}")
+                blocked += 1
+
+        # Видаляємо повідомлення "Розсилка розпочалась..."
+        await status_msg.delete()
+
+        # Фінальний звіт
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"✅ <b>Розсилка завершена!</b>\n\n"
+                f"📨 Успішно надіслано: <b>{count}</b>\n"
+                f"🚫 Не отримали (блокували): <b>{blocked}</b>"
+            ),
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]]),
+            parse_mode=ParseMode.HTML
+        )
+
+    except Exception as e:
+        logger.error(f"Error in broadcast confirm: {e}")
+        await context.bot.send_message(chat_id=chat_id, text="⚠️ Виникла помилка при розсилці.")
+
+    finally:
+        # --- ОЧИЩЕННЯ ЧАТУ (Видалення технічних повідомлень) ---
+        for mid in msgs_to_delete:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+            except Exception as e:
+                # Повідомлення може бути вже видалене або застаріле
+                logger.debug(f"Could not delete message {mid}: {e}")
+
+        # Очищаємо дані сесії
+        context.user_data.pop('broadcast_msg_id', None)
+        context.user_data.pop('broadcast_chat_id', None)
+        context.user_data.pop('msgs_to_delete', None)
 
     return ConversationHandler.END
 
