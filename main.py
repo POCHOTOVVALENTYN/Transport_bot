@@ -5,6 +5,7 @@ from bot.bot import TransportBot
 from utils.logger import logger
 from handlers.accessible_transport_handlers import load_easyway_route_ids
 from database.db import init_db
+from services.monitoring_service import monitoring_service
 
 
 
@@ -27,6 +28,8 @@ async def main():
     logger.info("--- [MAIN] Викликаю load_easyway_route_ids ---")
     try:
         await load_easyway_route_ids(bot.app)
+        # ЗАПУСК МОНІТОРИНГУ (фонова задача)
+        asyncio.create_task(monitoring_service.start())
         logger.info("--- [MAIN] load_easyway_route_ids ЗАВЕРШЕНО ---")
     except Exception as e:
         logger.error(f"--- [MAIN] КРИТИЧНА ПОМИЛКА: {e} ---", exc_info=True)
