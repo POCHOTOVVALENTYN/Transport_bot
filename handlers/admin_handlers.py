@@ -4,8 +4,8 @@ import re
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler, \
-    filters
+from telegram.ext import (ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler,
+                          filters)
 from config.settings import MUSEUM_ADMIN_ID, GOOGLE_SHEETS_ID, GENERAL_ADMIN_IDS
 from integrations.google_sheets.client import GoogleSheetsClient
 from utils.logger import logger
@@ -15,6 +15,7 @@ from handlers.command_handlers import get_admin_main_menu_keyboard
 from services.user_service import UserService
 from services.tickets_service import TicketsService
 from config.settings import MUSEUM_ADMIN_ID
+
 
 user_service = UserService()
 tickets_service = TicketsService()
@@ -98,49 +99,123 @@ async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TY
     return ADMIN_BROADCAST_TEXT
 
 
-async def admin_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Відправка повідомлення ТІЛЬКИ ПІДПИСАНИМ з кнопкою закриття"""
+# === ЗМІНЮЄМО ЦЮ ФУНКЦІЮ (Прев'ю) ===
+async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Отримує повідомлення від адміна, зберігає його ID
+    та показує прев'ю з кнопками підтвердження.
+    """
+    user_id = update.effective_user.id
+    msg = update.message
 
-    # 1. Беремо тільки підписаних!
+    # 1. Перевіряємо кількість підписників
     users = await user_service.get_subscribed_users_ids()
-
     if not users:
-        await update.message.reply_text("🤷‍♂️ Немає підписаних користувачів для розсилки.")
+        await msg.reply_text("🤷‍♂️ Немає підписаних користувачів для розсилки.",
+                             reply_markup=InlineKeyboardMarkup(
+                                 [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]]))
         return ConversationHandler.END
+
+    # 2. Зберігаємо ID повідомлення, яке треба розіслати
+    # Ми копіюватимемо його потім кожному користувачу
+    context.user_data['broadcast_msg_id'] = msg.message_id
+    context.user_data['broadcast_chat_id'] = msg.chat_id  # Це чат адміна
+
+    # 3. Робимо "Прев'ю" - надсилаємо копію адміну назад
+    await msg.reply_text("👁 <b>Попередній перегляд (так побачать користувачі):</b>", parse_mode=ParseMode.HTML)
+
+    # Додаємо кнопку "Приховати", яка буде у користувачів
+    mock_close_btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗑 Зрозуміло (Приховати)", callback_data="broadcast_dismiss")]
+    ])
+    await msg.copy(chat_id=user_id, reply_markup=mock_close_btn)
+
+    # 4. Клавіатура підтвердження
+    confirm_keyboard = [
+        [InlineKeyboardButton(f"✅ Надіслати ({len(users)} кор.)", callback_data="broadcast_confirm")],
+        [InlineKeyboardButton("❌ Скасувати / Редагувати", callback_data="broadcast_cancel")]
+    ]
+
+    await msg.reply_text(
+        f"📢 <b>Підготовка до розсилки</b>\n\n"
+        f"👥 Кількість отримувачів: <b>{len(users)}</b>\n"
+        f"⚠️ Перевірте текст та медіа вище. Якщо все гаразд — натисніть 'Надіслати'.\n"
+        f"Якщо є помилка — натисніть 'Скасувати' і спробуйте знову.",
+        reply_markup=InlineKeyboardMarkup(confirm_keyboard),
+        parse_mode=ParseMode.HTML
+    )
+
+    # Переходимо до стану очікування підтвердження
+    return States.ADMIN_BROADCAST_CONFIRM
+
+
+# === ДОДАЄМО НОВУ ФУНКЦІЮ (Фактична відправка) ===
+async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Виконує розсилку після підтвердження"""
+    query = update.callback_query
+    await query.answer()
+
+    action = query.data
+
+    # Якщо скасували
+    if action == "broadcast_cancel":
+        await query.edit_message_text("❌ Розсилку скасовано. Ви можете спробувати знову через меню.")
+        # Повертаємо в меню або завершуємо
+        # Можна викликати show_general_admin_menu(update, context)
+        keyboard = [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]]
+        await query.message.reply_text("Повернення в меню:", reply_markup=InlineKeyboardMarkup(keyboard))
+        context.user_data.pop('broadcast_msg_id', None)
+        return ConversationHandler.END
+
+    # Якщо підтвердили
+    await query.edit_message_text("🚀 Розсилка розпочалась... Будь ласка, не закривайте бота.")
+
+    # Отримуємо збережені дані
+    msg_id = context.user_data.get('broadcast_msg_id')
+    from_chat_id = context.user_data.get('broadcast_chat_id')
+
+    users = await user_service.get_subscribed_users_ids()
 
     count = 0
     blocked = 0
-    msg = update.message
 
-    status_msg = await update.message.reply_text(f"🚀 Починаю розсилку на {len(users)} підписаних користувачів...")
-
-    # 2. Створюємо кнопку "Головне меню (Закрити)" для повідомлення
-    # Ця кнопка буде під кожним розісланим повідомленням
+    # Кнопка "Закрити" для користувачів
     close_markup = InlineKeyboardMarkup([
         [InlineKeyboardButton("🗑 Зрозуміло (Приховати)", callback_data="broadcast_dismiss")]
     ])
 
+    # Цикл розсилки
     for user_id in users:
         try:
-            # 3. Копіюємо повідомлення з нашою кнопкою
-            await msg.copy(chat_id=user_id, reply_markup=close_markup)
+            # Використовуємо метод copy_message бота
+            await context.bot.copy_message(
+                chat_id=user_id,
+                from_chat_id=from_chat_id,
+                message_id=msg_id,
+                reply_markup=close_markup
+            )
             count += 1
-            await asyncio.sleep(0.05)
-        except Exception:
+            await asyncio.sleep(0.05)  # Анти-спам затримка
+        except Exception as e:
+            logger.warning(f"Failed to send broadcast to {user_id}: {e}")
             blocked += 1
 
+    # Звіт
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]])
 
-    await status_msg.edit_text(
-        f"✅ Розсилка завершена!\n\n"
-        f"📨 Отримали: {count}\n"
-        f"🚫 Недоступні: {blocked}",
-        reply_markup=back_btn
+    await query.message.reply_text(
+        f"✅ <b>Розсилка завершена!</b>\n\n"
+        f"📨 Успішно надіслано: <b>{count}</b>\n"
+        f"🚫 Не отримали (блокували): <b>{blocked}</b>",
+        reply_markup=back_btn,
+        parse_mode=ParseMode.HTML
     )
+
+    # Очищення
+    context.user_data.pop('broadcast_msg_id', None)
+    context.user_data.pop('broadcast_chat_id', None)
+
     return ConversationHandler.END
-
-
-
 
 
 # --- ІСНУЮЧА ФУНКЦІЯ: Меню Музею (Максим) ---

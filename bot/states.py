@@ -26,6 +26,7 @@ class States:
     # Нові стани для Адмін-панелі Музею
     ADMIN_STATE_ADD_DATE = 16
     ADMIN_STATE_DEL_DATE_CONFIRM = 17  # <-- БУЛО 18
+    ADMIN_BROADCAST_CONFIRM = 51
 
     # Стани для подяк (продовження)
     THANKS_ASK_SPECIFIC = 18  # <-- ЗАЛИШАЄМО 18

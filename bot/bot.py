@@ -60,7 +60,8 @@ from handlers.admin_handlers import (
     admin_menu, admin_add_date_start, admin_add_date_save,
     admin_del_date_menu, admin_del_date_confirm, admin_menu_show,
     admin_show_bookings, admin_sync_db,
-    admin_broadcast_start, admin_broadcast_send, ADMIN_BROADCAST_TEXT,
+    admin_broadcast_start, admin_broadcast_preview,       # Нова функція прев'ю
+    admin_broadcast_send_confirm, ADMIN_BROADCAST_TEXT,
     show_general_admin_menu, admin_museum_menu_show # Нова функція зі списком
 )
 
@@ -132,32 +133,25 @@ class TransportBot:
         # --- ОБРОБКА КНОПКИ "ПРИХОВАТИ" (ПІД РОЗСИЛКОЮ) ---
         self.app.add_handler(CallbackQueryHandler(dismiss_broadcast_message, pattern="^broadcast_dismiss$"))
 
+        # bot/bot.py
 
-        # --- CONVERSATION HANDLERS ---
         # 1. Розсилка (Для Вас і Тетяни)
         broadcast_conv = ConversationHandler(
             entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast_start$")],
             states={
-                ADMIN_BROADCAST_TEXT: [
-                    MessageHandler(filters.ALL & ~filters.COMMAND, admin_broadcast_send)
+                # Етап 1: Очікуємо текст від адміна -> показуємо прев'ю
+                States.ADMIN_BROADCAST_TEXT: [
+                    MessageHandler(filters.ALL & ~filters.COMMAND, admin_broadcast_preview)
+                ],
+                # Етап 2: Очікуємо натискання кнопки (Надіслати / Скасувати)
+                States.ADMIN_BROADCAST_CONFIRM: [
+                    CallbackQueryHandler(admin_broadcast_send_confirm, pattern="^broadcast_confirm$"),
+                    CallbackQueryHandler(admin_broadcast_send_confirm, pattern="^broadcast_cancel$"),
                 ]
             },
-            # Якщо натиснути "Скасувати", повертаємось в General Admin Menu
+            # Fallbacks (вихід з будь-якого етапу)
             fallbacks=[CallbackQueryHandler(show_general_admin_menu, pattern="^general_admin_menu$")]
         )
-        self.app.add_handler(broadcast_conv)
-
-
-        broadcast_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast_start$")],
-            states={
-                ADMIN_BROADCAST_TEXT: [
-                    MessageHandler(filters.ALL & ~filters.COMMAND, admin_broadcast_send)
-                ]
-            },
-            fallbacks=[CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$")]
-        )
-
         self.app.add_handler(broadcast_conv)
 
         # Кнопка входу в Адмінку Новин (Валентин/Тетяна)
