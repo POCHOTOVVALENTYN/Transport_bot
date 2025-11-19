@@ -23,7 +23,7 @@ tickets_service = TicketsService()
 
 
 # Стани для адміна
-(ADMIN_STATE_ADD_DATE, ADMIN_STATE_DEL_DATE_CONFIRM) = range(16, 18)  # Використовуємо нові стани
+#(ADMIN_STATE_ADD_DATE, ADMIN_STATE_DEL_DATE_CONFIRM) = range(16, 18)  # Використовуємо нові стани
 
 
 # --- НОВА ФУНКЦІЯ: Меню Загального Адміна (Валентин і Тетяна) ---
@@ -95,7 +95,7 @@ async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup=back_btn,
         parse_mode=ParseMode.HTML
     )
-    return ADMIN_BROADCAST_TEXT
+    return States.ADMIN_BROADCAST_TEXT
 
 
 # === ЗМІНЮЄМО ЦЮ ФУНКЦІЮ (Прев'ю) ===
