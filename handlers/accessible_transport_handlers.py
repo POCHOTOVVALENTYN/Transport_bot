@@ -11,7 +11,7 @@ import asyncio
 import telegram.error
 import html
 from rapidfuzz import fuzz
-
+from services.monitoring_service import monitoring_service
 
 
 # Словник "синонімів" для виправлення поширених помилок пошуку
@@ -431,7 +431,7 @@ async def _show_stops_keyboard(update: Update, places: list):
         )
 
 
-async def _show_accessible_transport_results(query, stop_title: str, routes: list):
+async def _show_accessible_transport_results(query, stop_title: str, routes: list, route_titles: list = None):
     """
     Показує фінальні результати (список інклюзивного транспорту).Якщо пусто - підключає глобальний моніторинг.
 
