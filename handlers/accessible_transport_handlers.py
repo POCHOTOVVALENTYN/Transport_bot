@@ -107,8 +107,8 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Крок 1: Користувач запускає пошук. Одразу просимо ввести назву зупинки.
     """
-    #query = update.callback_query
-    #await query.answer()
+    query = update.callback_query
+    await query.answer()
 
     # Виконайте пошук "Ринок"
     #data = await easyway_service.get_places_by_name(search_term="Ринок Привоз")
