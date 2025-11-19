@@ -27,34 +27,40 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Could not delete message {msg_id} in main_menu: {e}")
         del context.user_data['media_message_ids']
 
-    # --- 2. НОВА ЛОГІКА: Перевірка типу update ---
-    if update.callback_query:
-        # --- 2.A. Це натискання кнопки (CallbackQuery) ---
-        query = update.callback_query
-        await query.answer()
+        # --- 2. НОВА ЛОГІКА: Перевірка типу update ---
+        if update.callback_query:
+            # --- 2.A. Це натискання кнопки (CallbackQuery) ---
+            query = update.callback_query
+            await query.answer()
 
-        if query.message and query.message.text:
-            # Якщо це було текстове повідомлення, просто редагуємо
-            try:
-                await query.edit_message_text(
+            if query.message and query.message.text:
+                # Якщо це було текстове повідомлення, просто редагуємо
+                try:
+                    await query.edit_message_text(
+                        text=text,
+                        reply_markup=keyboard
+                    )
+                except Exception as e:
+                    logger.warning(f"Error editing message in main_menu, sending new: {e}")
+                    # Якщо редагування не вдалося (напр., повідомлення те саме)
+                    await query.message.reply_text(text=text, reply_markup=keyboard)
+
+            elif query.message:
+                # Якщо це було повідомлення з фото/документом (АБО воно вже видалене)
+
+                # === 👇 ВИПРАВЛЕННЯ ТУТ 👇 ===
+                try:
+                    await query.message.delete()
+                except Exception:
+                    pass  # Ігноруємо помилку, якщо повідомлення вже видалене
+                # ==============================
+
+                await query.message.reply_text(
                     text=text,
                     reply_markup=keyboard
                 )
-            except Exception as e:
-                logger.warning(f"Error editing message in main_menu, sending new: {e}")
-                # Якщо редагування не вдалося (напр., повідомлення те саме)
-                await query.message.reply_text(text=text, reply_markup=keyboard)
-
-        elif query.message:
-            # Якщо це було повідомлення з фото/документом
-            await query.message.delete()
-            await query.message.reply_text(
-                text=text,
-                reply_markup=keyboard
-            )
-        else:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=keyboard)
-
+            else:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=keyboard)
     elif update.message:
         # --- 2.B. Це повідомлення (Message) ---
         # (Наприклад, після помилки в accessible_process_stub)

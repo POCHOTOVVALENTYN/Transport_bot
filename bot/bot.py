@@ -70,6 +70,8 @@ from utils.logger import logger
 from handlers.subscription_handlers import show_subscription_menu, handle_subscription_choice
 from handlers.common import dismiss_broadcast_message
 
+from handlers.common import handle_unexpected_message
+
 
 class TransportBot:
     """Головний клас бота"""
@@ -158,6 +160,11 @@ class TransportBot:
 
         # Кнопка входу в Адмінку Музею (Максим)
         self.app.add_handler(CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"))
+
+        # === 👇 ГЛОБАЛЬНИЙ ПЕРЕХОПЛЮВАЧ (Anti-Spam / Cleaner) 👇 ===
+        # Він спрацює ТІЛЬКИ якщо жоден інший хендлер вище не зреагував.
+        # filters.ALL & ~filters.COMMAND означає "Все (текст, фото, відео), крім команд (/start)"
+        self.app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_unexpected_message))
 
 
         # CONVERSATION: СКАРГИ (існуючий)
