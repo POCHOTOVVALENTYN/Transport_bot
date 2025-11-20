@@ -44,9 +44,14 @@ class MonitoringService:
 
     async def _update_data(self):
         headers = {'ApiKey': API_KEY}
-        async with aiohttp.ClientSession() as session:
+        # === ВИПРАВЛЕННЯ SSL ===
+        # Створюємо конектор, який ігнорує помилки сертифікатів
+        connector = aiohttp.TCPConnector(ssl=False)
+
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.get(REALTIME_URL, headers=headers) as resp:
                 if resp.status != 200:
+                    logger.warning(f"Monitoring API returned status: {resp.status}")
                     return
                 content = await resp.read()
 
