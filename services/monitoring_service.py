@@ -91,54 +91,63 @@ class MonitoringService:
     async def _update_data(self):
         """Оновлює дані про місцезнаходження транспорту"""
         headers = {'ApiKey': API_KEY}
-        # Вимикаємо SSL перевірку для цього хоста
+        # Використовуємо ігнорування SSL, бо сервер має проблеми з сертифікатом
         connector = aiohttp.TCPConnector(ssl=False)
 
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.get(REALTIME_URL, headers=headers) as resp:
-                if resp.status != 200:
-                    # logger.warning(f"Monitoring API status: {resp.status}")
-                    return
-                content = await resp.read()
+        try:
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get(REALTIME_URL, headers=headers) as resp:
+                    if resp.status != 200:
+                        return
+                    content = await resp.read()
 
-        feed = gtfs_realtime_pb2.FeedMessage()
-        feed.ParseFromString(content)
+            feed = gtfs_realtime_pb2.FeedMessage()
+            feed.ParseFromString(content)
 
-        new_data = {}
+            new_data = {}
 
-        for entity in feed.entity:
-            if not entity.HasField('vehicle'): continue
+            for entity in feed.entity:
+                if not entity.HasField('vehicle'): continue
 
-            veh = entity.vehicle
-            # Витягуємо бортовий номер
-            bort_number = veh.vehicle.label or veh.vehicle.id
+                veh = entity.vehicle
+                # Отримуємо бортовий номер
+                bort_number = str(veh.vehicle.label or veh.vehicle.id).strip()
 
-            # Витягуємо ID маршруту (це "системний" ID, напр. 113)
-            raw_route_id = veh.trip.route_id
+                # Отримуємо ID маршруту (це "системний" ID, напр. 113)
+                raw_route_id = str(veh.trip.route_id).strip()
 
-            # === ПЕРЕТВОРЕННЯ ID ===
-            # Перетворюємо системний ID в "людський" номер (напр. "5")
-            # Якщо мапи немає, використовуємо сирий ID
-            route_num = self.routes_map.get(raw_route_id, raw_route_id)
-            # =======================
+                # === КРИТИЧНО ВАЖЛИВО: ПЕРЕТВОРЕННЯ ID ===
+                # Ми намагаємося знайти "людський" номер ("5") у нашій мапі.
+                # Якщо мапи немає або ID там немає - використовуємо сирий ID.
+                route_num = self.routes_map.get(raw_route_id, raw_route_id)
+                # =========================================
 
-            # Перевірка "Білого списку"
-            is_accessible = (bort_number in ACCESSIBLE_TRAMS) or (bort_number in ACCESSIBLE_TROLS)
+                # Перевірка: чи є цей вагон у нашому списку доступних?
+                is_accessible = (bort_number in ACCESSIBLE_TRAMS) or (bort_number in ACCESSIBLE_TROLS)
 
-            if is_accessible:
-                lat = veh.position.latitude
-                lon = veh.position.longitude
-                stop_name = stop_matcher.find_nearest_stop_name(lat, lon)
+                if is_accessible:
+                    lat = veh.position.latitude
+                    lon = veh.position.longitude
 
-                # Формуємо інформацію
-                # Додаємо емодзі для краси
-                info = f"🚋 <b>{bort_number}</b> (біля: <i>{stop_name}</i>)"
+                    # Знаходимо назву найближчої зупинки
+                    stop_name = stop_matcher.find_nearest_stop_name(lat, lon)
 
-                if route_num not in new_data:
-                    new_data[route_num] = []
-                new_data[route_num].append(info)
+                    # Формуємо красивий рядок для виводу
+                    info = (
+                        f"🚋 <b>Борт №{bort_number}</b>\n"
+                        f"📍 <i>Зараз біля: {stop_name}</i>"
+                    )
 
-        self.data = new_data
+                    # Зберігаємо під "людським" номером (напр. "5")
+                    if route_num not in new_data:
+                        new_data[route_num] = []
+                    new_data[route_num].append(info)
+
+            self.data = new_data
+            # logger.info(f"Updated monitoring data. Routes found: {list(new_data.keys())}")
+
+        except Exception as e:
+            logger.error(f"Error in _update_data: {e}")
 
     def get_accessible_on_route(self, route_num: str) -> list:
         """
