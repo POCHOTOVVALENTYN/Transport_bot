@@ -26,9 +26,14 @@ class StopMatcher:
         url = "https://gw.x24.digital/api/od/gtfs/v1/download/static"
         headers = {'ApiKey': api_key}
 
+        # === ДОДАНО: Вимкнення попереджень SSL ===
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        # =========================================
+
         logger.info("🗺️ Завантаження бази зупинок (Static GTFS)...")
         try:
-            resp = requests.get(url, headers=headers, timeout=30)
+            resp = requests.get(url, headers=headers, timeout=30, verify=False)
             if resp.status_code != 200:
                 logger.error(f"Failed to download static GTFS: {resp.status_code}")
                 return

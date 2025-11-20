@@ -482,13 +482,19 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
 
                 if vehicles_info:
                     found_vehicles_count += len(vehicles_info)
-                    # Формуємо блок для маршруту
-                    # vehicles_info - це список вже відформатованих рядків з monitoring_service
-                    vh_str = "\n\n".join(vehicles_info)
+
+                    # Формуємо список рядків ТУТ, у хендлері
+                    vehicle_lines = []
+                    for v in vehicles_info:
+                        # v - це словник {'bort': '...', 'stop_name': '...'}
+                        line = f"🚋 <b>{v['bort']}</b> (біля: <i>{v['stop_name']}</i>)"
+                        vehicle_lines.append(line)
+
+                    vh_str = "\n".join(vehicle_lines)
 
                     monitoring_text += (
                         f"\n➖➖➖➖➖➖➖\n"
-                        f"🚩 <b>Маршрут №{route_key}:</b>\n\n"
+                        f"🚩 <b>Маршрут №{route_key}:</b>\n"
                         f"{vh_str}\n"
                     )
 
@@ -533,15 +539,15 @@ async def _show_accessible_transport_results(query, stop_title: str, routes: lis
 
     # Сценарій: Є низькопідлоговий транспорт
     #header = (
-        f"♿️ <b>Низькопідлоговий Транспорт</b>\n"
-        f"📍 Зупинка: <b>{stop_title}</b>\n"
-        f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n"
-        f"👋 Шановні пасажари!\n"
-        f"⏱️ Інформація про час прибуття \n\n<b>⚠️дійсна на момент запиту⚠️</b>\n\n"
-        f"📢 <b>Важливо!</b>\n"
-        f"⚠️ Під час <b>повітряної тривоги</b> 🚨 дані про рух трамваїв та тролейбусів можуть відображатися "
-        f"<b>некоректно</b> або із затримкою. 📡\n\n"
-        f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n\n"
+    #    f"♿️ <b>Низькопідлоговий Транспорт</b>\n"
+    #    f"📍 Зупинка: <b>{stop_title}</b>\n"
+    #    f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n"
+    #    f"👋 Шановні пасажари!\n"
+    #    f"⏱️ Інформація про час прибуття \n\n<b>⚠️дійсна на момент запиту⚠️</b>\n\n"
+    #    f"📢 <b>Важливо!</b>\n"
+    #    f"⚠️ Під час <b>повітряної тривоги</b> 🚨 дані про рух трамваїв та тролейбусів можуть відображатися "
+    #    f"<b>некоректно</b> або із затримкою. 📡\n\n"
+    #    f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n\n"
     #)
 
     routes_text = ""

@@ -139,13 +139,16 @@ class MonitoringService:
                     safe_bort = html.escape(str(bort_number))
 
                     # Формуємо інформацію
-                    info = f"🚋 <b>{safe_bort}</b> (біля: <i>{safe_stop_name}</i>)"
+                    vehicle_data = {
+                        "bort": safe_bort,
+                        "stop_name": safe_stop_name
+                    }
                     # =====================================
 
                     # Зберігаємо під "людським" номером (напр. "5")
                     if route_num not in new_data:
                         new_data[route_num] = []
-                    new_data[route_num].append(info)
+                    new_data[route_num].append(vehicle_data)
 
             self.data = new_data
             # logger.info(f"Updated monitoring data. Routes found: {list(new_data.keys())}")
