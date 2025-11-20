@@ -349,8 +349,15 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
 
         return States.ACCESSIBLE_SHOWING_RESULTS
 
+
     except telegram.error.BadRequest as br_error:
         logger.warning(f"BadRequest in accessible_stop_selected: {br_error}")
+        # Спробувати повідомити користувача про технічну проблему
+        try:
+            await query.edit_message_text("❌ Виникла технічна помилка при обробці даних. Спробуйте пізніше.")
+        except:
+            pass
+
         return ConversationHandler.END
 
     except Exception as e:
