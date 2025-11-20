@@ -51,16 +51,22 @@ class StopMatcher:
             logger.error(f"Error loading stops: {e}")
 
     def find_nearest_stop_name(self, lat: float, lon: float) -> str:
-        """Знаходить найближчу зупинку (найпростіший алгоритм)"""
+        """Знаходить найближчу зупинку (Оптимізовано)"""
         if not self.stops:
             return "Невизначено"
 
         closest_name = "Невідомо"
         min_dist = float('inf')
 
-        # Простий перебір (для 1000 зупинок це швидко - менше 0.01с)
         for stop in self.stops:
-            # Евклідова відстань (спрощено, без врахування кривизни Землі, для міста ок)
+            # === ОПТИМІЗАЦІЯ: Груба фільтрація ===
+            # Якщо зупинка далі ніж ~1км по широті/довготі, навіть не рахуємо точну відстань.
+            # 0.01 градуса ~ 1.1 км
+            if abs(stop['lat'] - lat) > 0.01 or abs(stop['lon'] - lon) > 0.01:
+                continue
+            # =====================================
+
+            # Точний розрахунок тільки для кандидатів поруч
             dist = math.sqrt((stop['lat'] - lat) ** 2 + (stop['lon'] - lon) ** 2)
             if dist < min_dist:
                 min_dist = dist

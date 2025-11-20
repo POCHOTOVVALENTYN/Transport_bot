@@ -37,12 +37,6 @@ class EasyWayService:
         self.password = EASYWAY_PASSWORD
         self.city = EASYWAY_CITY
 
-        self.stop_cache = TTLCache(maxsize=1000, ttl=30)
-
-        # ДОДАЄМО БЛОКУВАННЯ
-        self._lock = asyncio.Lock()
-        logger.info("✅ EasyWay Stop Cache initialized (TTL=30s)")
-
         self.transport_icons = {
             "bus": "🚌",
             "trol": "🚎",
@@ -50,9 +44,8 @@ class EasyWayService:
         }
         self.time_icons = TIME_SOURCE_ICONS
 
-        # === НАЛАШТУВАННЯ КЕШУ ===
-        # maxsize=1000: зберігаємо максимум 1000 запитів
-        # ttl=30: час життя запису - 30 секунд
+        # === ВИПРАВЛЕННЯ 1: Видалено self._lock ===
+        # Кеш залишаємо, він thread-safe для читання/запису в Python (GIL)
         self.stop_cache = TTLCache(maxsize=1000, ttl=30)
         logger.info("✅ EasyWay Stop Cache initialized (TTL=30s)")
 
@@ -67,7 +60,7 @@ class EasyWayService:
         }
 
         url = self._build_url(params)
-        timeout = aiohttp.ClientTimeout(total=45)  # Збільшений таймаут для важкого запиту
+        timeout = aiohttp.ClientTimeout(total=20)  # Збільшений таймаут для важкого запиту
 
         for attempt in range(3):
             try:
@@ -104,8 +97,8 @@ class EasyWayService:
         }
 
         url = self._build_url(params)
-        # Збільшуємо таймаут до 30 секунд
-        timeout = aiohttp.ClientTimeout(total=30)
+        # Збільшуємо таймаут до 10 секунд
+        timeout = aiohttp.ClientTimeout(total=10)
 
         # Робимо 3 спроби
         for attempt in range(3):
@@ -152,46 +145,41 @@ class EasyWayService:
             logger.info(f"💎 Cache HIT (Fast) for stop_id: {stop_id}")
             return self.stop_cache[stop_id]
 
-        # 2. Заходимо в критичну секцію
-        async with self._lock:
-            # 3. Перевіряємо знову (раптом хтось інший вже оновив кеш, поки ми чекали)
-            if stop_id in self.stop_cache:
-                logger.info(f"💎 Cache HIT (Wait) for stop_id: {stop_id}")
-                return self.stop_cache[stop_id]
 
-            # 4. Якщо кешу все ще немає - робимо запит
-            params = {
-                "login": self.config.LOGIN,
-                "password": self.config.PASSWORD,
-                "function": "stops.GetStopInfo",
-                "city": self.config.DEFAULT_CITY,
-                "id": stop_id,
-                "v": self.config.STOP_INFO_VERSION,
-                "format": self.config.DEFAULT_FORMAT,
-            }
 
-            url = self._build_url(params)
-            timeout = aiohttp.ClientTimeout(total=30)
+        # 4. Якщо кешу все ще немає - робимо запит
+        params = {
+            "login": self.config.LOGIN,
+            "password": self.config.PASSWORD,
+            "function": "stops.GetStopInfo",
+            "city": self.config.DEFAULT_CITY,
+            "id": stop_id,
+            "v": self.config.STOP_INFO_VERSION,
+            "format": self.config.DEFAULT_FORMAT,
+        }
 
-            for attempt in range(3):
-                try:
-                    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                        logger.info(f"EasyWay API Call v1.2 (REAL REQUEST): {url}")  # Логуємо тільки реальні запити
-                        async with session.get(url, timeout=timeout) as response:
-                            if response.status == 200:
-                                data = await response.json(content_type=None)
-                                parsed_data = self._parse_stop_info_v12(data)
+        url = self._build_url(params)
+        timeout = aiohttp.ClientTimeout(total=10)
 
-                                if not parsed_data.get("error"):
-                                    self.stop_cache[stop_id] = parsed_data
-                                    logger.info(f"💾 Saved to cache: stop_id {stop_id}")
+        for attempt in range(3):
+            try:
+                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+                    logger.info(f"EasyWay API Call v1.2 (REAL REQUEST): {url}")  # Логуємо тільки реальні запити
+                    async with session.get(url, timeout=timeout) as response:
+                        if response.status == 200:
+                            data = await response.json(content_type=None)
+                            parsed_data = self._parse_stop_info_v12(data)
 
-                                return parsed_data
-                except Exception as e:
-                    logger.warning(f"Error: {e}")
-                    if attempt < 2: await asyncio.sleep(1)
+                            if not parsed_data.get("error"):
+                                self.stop_cache[stop_id] = parsed_data
+                                logger.info(f"💾 Saved to cache: stop_id {stop_id}")
 
-            return {"error": "Сервер не відповів."}
+                            return parsed_data
+            except Exception as e:
+                logger.warning(f"Error: {e}")
+                if attempt < 2: await asyncio.sleep(0.5)
+
+        return {"error": "Сервер не відповів."}
 
     def _build_url(self, params: Dict) -> str:
         """Будує URL для API запиту"""

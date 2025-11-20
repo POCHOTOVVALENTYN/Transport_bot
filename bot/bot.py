@@ -151,7 +151,6 @@ class TransportBot:
         # --- ОБРОБКА КНОПКИ "ПРИХОВАТИ" (ПІД РОЗСИЛКОЮ) ---
         self.app.add_handler(CallbackQueryHandler(dismiss_broadcast_message, pattern="^broadcast_dismiss$"))
 
-
         # Кнопка входу в Адмінку Новин (Валентин/Тетяна)
         self.app.add_handler(CallbackQueryHandler(show_general_admin_menu, pattern="^general_admin_menu$"))
 
@@ -160,11 +159,6 @@ class TransportBot:
 
         # Кнопка входу в Адмінку Музею (Максим)
         self.app.add_handler(CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"))
-
-        # === 👇 ГЛОБАЛЬНИЙ ПЕРЕХОПЛЮВАЧ (Anti-Spam / Cleaner) 👇 ===
-        # Він спрацює ТІЛЬКИ якщо жоден інший хендлер вище не зреагував.
-        # filters.ALL & ~filters.COMMAND означає "Все (текст, фото, відео), крім команд (/start)"
-        self.app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_unexpected_message))
 
 
         # CONVERSATION: СКАРГИ (існуючий)
@@ -320,6 +314,9 @@ class TransportBot:
                 States.ACCESSIBLE_SELECT_STOP: [
                     # Користувач натискає кнопку "📍 ... (ID: 123)"
                     CallbackQueryHandler(accessible_stop_selected, pattern="^stop_[0-9]+$"),
+                    # 2. ДОДАНО: Якщо користувач пише текст (шукає нову зупинку),
+                    # ми повертаємо його на логіку пошуку.
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, accessible_search_stop),
                     # Додаємо кнопку "Назад" до пошуку
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
                 ],
@@ -330,6 +327,8 @@ class TransportBot:
                     # Обробники для кнопок "Пошук іншої" та "Головне меню"
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$"),
+                    #  новий пошук одразу з результатів
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, accessible_search_stop),
                 ],
             },
             fallbacks=[
@@ -388,6 +387,11 @@ class TransportBot:
 
         # Обробник "Загублені речі"
         self.app.add_handler(CallbackQueryHandler(lost_items, pattern="^lost_items$"))
+
+        # === 👇 ГЛОБАЛЬНИЙ ПЕРЕХОПЛЮВАЧ (Anti-Spam / Cleaner) 👇 ===
+        # Він спрацює ТІЛЬКИ якщо жоден інший хендлер вище не зреагував.
+        # filters.ALL & ~filters.COMMAND означає "Все (текст, фото, відео), крім команд (/start)"
+        self.app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_unexpected_message))
 
 
 
