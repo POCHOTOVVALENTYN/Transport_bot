@@ -53,13 +53,22 @@ class MonitoringService:
         """Завантажує routes.txt та stops.txt"""
         logger.info("🔄 Loading GTFS Static data...")
 
+        # === ДОДАНО: Вимкнення попереджень SSL для requests ===
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        # ======================================================
+
         # 1. Завантажуємо зупинки (через існуючий stop_matcher)
+        # stop_matcher теж використовує requests, йому теж треба verify=False,
+        # але поки виправимо тут завантаження маршрутів, яке є критичним для мапінгу.
         stop_matcher.load_stops_from_static(API_KEY)
 
         # 2. Завантажуємо мапу маршрутів (ID -> Назва)
         try:
             headers = {'ApiKey': API_KEY}
-            resp = requests.get(STATIC_URL, headers=headers, timeout=30)
+            # === ВИПРАВЛЕННЯ ТУТ: додано verify=False ===
+            resp = requests.get(STATIC_URL, headers=headers, timeout=30, verify=False)
+
             if resp.status_code == 200:
                 with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
                     # Парсимо routes.txt
@@ -69,8 +78,11 @@ class MonitoringService:
                             r_id = row.get('route_id')
                             r_name = row.get('route_short_name')  # Це номер маршруту ("5", "10")
                             if r_id and r_name:
-                                self.routes_map[r_id] = r_name
-                logger.info(f"✅ Routes map loaded: {len(self.routes_map)} routes.")
+                                self.routes_map[str(r_id)] = str(r_name).strip()  # Гарантуємо рядки
+
+                logger.info(f"✅ Routes map loaded: {len(self.routes_map)} routes mapped.")
+                # Для налагодження можна розкоментувати:
+                # logger.info(f"Sample mapping: {list(self.routes_map.items())[:5]}")
             else:
                 logger.warning(f"Failed to load routes.txt: {resp.status_code}")
         except Exception as e:
@@ -131,10 +143,21 @@ class MonitoringService:
     def get_accessible_on_route(self, route_num: str) -> list:
         """
         Повертає список вагонів.
-        route_num - це вже 'людський' номер (напр. '5'), який приходить з EasyWay.
+        route_num - це вже 'людський' номер (напр. '5').
         """
-        # Приводимо до рядка про всяк випадок
-        return self.data.get(str(route_num), [])
+        # Нормалізація ключа: видаляємо пробіли, приводимо до рядка
+        search_key = str(route_num).strip()
+
+        # Спробуємо знайти прямий збіг
+        result = self.data.get(search_key)
+
+        if result:
+            return result
+
+        # Якщо не знайдено, спробуємо пошукати серед ключів, які можуть містити цей номер
+        # (наприклад, якщо в базі '5а', а ми шукаємо '5')
+        # Але для початку достатньо точного збігу після strip()
+        return []
 
 
 monitoring_service = MonitoringService()
