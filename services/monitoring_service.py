@@ -6,6 +6,7 @@ import io
 import csv
 import zipfile
 import requests  # Використовуємо requests для синхронного завантаження static (в окремому потоці)
+import html
 from google.transit import gtfs_realtime_pb2
 from config.accessible_vehicles import ACCESSIBLE_TRAMS, ACCESSIBLE_TROLS
 from services.stop_matcher import stop_matcher
@@ -132,11 +133,14 @@ class MonitoringService:
                     # Знаходимо назву найближчої зупинки
                     stop_name = stop_matcher.find_nearest_stop_name(lat, lon)
 
-                    # Формуємо красивий рядок для виводу
-                    info = (
-                        f"🚋 <b>Борт №{bort_number}</b>\n"
-                        f"📍 <i>Зараз біля: {stop_name}</i>"
-                    )
+                    # === ВИПРАВЛЕННЯ: Екранування HTML ===
+                    # Це захистить від помилок, якщо у назві є "&", "<", ">"
+                    safe_stop_name = html.escape(stop_name)
+                    safe_bort = html.escape(str(bort_number))
+
+                    # Формуємо інформацію
+                    info = f"🚋 <b>{safe_bort}</b> (біля: <i>{safe_stop_name}</i>)"
+                    # =====================================
 
                     # Зберігаємо під "людським" номером (напр. "5")
                     if route_num not in new_data:
