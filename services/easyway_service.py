@@ -10,6 +10,9 @@ from config.settings import (
     EASYWAY_API_URL, EASYWAY_LOGIN, EASYWAY_PASSWORD, EASYWAY_CITY,
     EASYWAY_STOP_INFO_VERSION, TIME_SOURCE_ICONS
 )
+# === 👇 ДОДАНО ІМПОРТ РЕЄСТРУ 👇 ===
+from config.accessible_vehicles import ACCESSIBLE_TRAMS, ACCESSIBLE_TROLS
+
 
 try:
     from config.easyway_config import EasyWayConfig
@@ -275,6 +278,24 @@ class EasyWayService:
                 transports = [transports]
 
             for route in transports:
+                # Отримуємо дані про транспорт
+                bort_number = str(route.get("bortNumber", ""))  # Гарантуємо, що це рядок
+                transport_key = route.get("transportKey")  # 'tram' або 'trol' або 'bus'
+
+                # === ЛОГІКА ПРІОРИТЕТНОЇ ПЕРЕВІРКИ ===
+                # 1. Перевіряємо, що каже API
+                is_api_handicapped = route.get("handicapped", False)
+
+                # 2. Перевіряємо наш локальний реєстр
+                is_local_handicapped = False
+                if transport_key == 'tram' and bort_number in ACCESSIBLE_TRAMS:
+                    is_local_handicapped = True
+                elif transport_key == 'trol' and bort_number in ACCESSIBLE_TROLS:
+                    is_local_handicapped = True
+
+                # 3. Фінальне рішення: Якщо ХОЧА Б ОДНЕ джерело підтверджує - це інклюзивний транспорт
+                final_handicapped_status = is_api_handicapped or is_local_handicapped
+                # =====================================
                 parsed_route = {
                     "id": route.get("id"),
                     "title": route.get("title"),
