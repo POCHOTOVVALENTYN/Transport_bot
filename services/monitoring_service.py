@@ -84,9 +84,9 @@ class MonitoringService:
                             fieldnames = reader.fieldnames if reader.fieldnames else []
                             has_accessibility_info = 'wheelchair_accessible' in fieldnames
 
-                            if not has_accessibility_info:
-                                logger.warning(
-                                    "⚠️ 'wheelchair_accessible' column NOT FOUND in trips.txt! All trips will be treated as unknown.")
+                            #if not has_accessibility_info:
+                                #logger.warning(
+                            #        "⚠️ 'wheelchair_accessible' column NOT FOUND in trips.txt! All trips will be treated as unknown.")
 
                             count_accessible = 0
                             for row in reader:
@@ -99,8 +99,8 @@ class MonitoringService:
                                     if str(wheelchair) == '1':
                                         count_accessible += 1
 
-                        logger.info(
-                            f"✅ Trips map loaded: {len(self.trips_accessibility)} trips. (Accessible marked: {count_accessible})")
+                        #logger.info(
+                        #    f"✅ Trips map loaded: {len(self.trips_accessibility)} trips. (Accessible marked: {count_accessible})")
                     else:
                         logger.warning("⚠️ 'trips.txt' not found.")
 
@@ -159,10 +159,10 @@ class MonitoringService:
                 bort_number = label if label else (plate if plate else raw_id)
 
                 # ЛОГ ДІАГНОСТИКИ (Перші 5 елементів)
-                if debug_log_counter < 5:
-                    logger.info(
-                        f"🔍 TRIP CHECK: Route {route_num} | TripID='{trip_id}' -> Acc='{accessibility_status}' -> IsAcc? {is_accessible}")
-                    debug_log_counter += 1
+                #if debug_log_counter < 5:
+                   # logger.info(
+                   #     f"🔍 TRIP CHECK: Route {route_num} | TripID='{trip_id}' -> Acc='{accessibility_status}' -> IsAcc? {is_accessible}")
+                    #debug_log_counter += 1
 
                 if is_accessible:
                     lat = veh.position.latitude

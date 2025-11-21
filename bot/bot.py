@@ -320,14 +320,20 @@ class TransportBot:
                     # Додаємо кнопку "Назад" до пошуку
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$")
                 ],
-                # --- ПОЧАТОК НОВОГО БЛОКУ ---
+                # НОВИЙ КОД (ПРАВИЛЬНИЙ):
                 States.ACCESSIBLE_SHOWING_RESULTS: [
+                    # ✅ НОВИЙ РЯДОК: Обробник для кнопки "Оновити"
+                    # Це дозволяє перезавантажити дані зупинки
+                    CallbackQueryHandler(accessible_stop_selected, pattern="^stop_[0-9]+$"),
+
                     # Обробник для нашої нової кнопки "Назад до списку"
                     CallbackQueryHandler(accessible_back_to_list, pattern="^accessible_back_to_list$"),
+
                     # Обробники для кнопок "Пошук іншої" та "Головне меню"
                     CallbackQueryHandler(accessible_start, pattern="^accessible_start$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$"),
-                    #  новий пошук одразу з результатів
+
+                    # новий пошук одразу з результатів
                     MessageHandler(filters.TEXT & ~filters.COMMAND, accessible_search_stop),
                 ],
             },

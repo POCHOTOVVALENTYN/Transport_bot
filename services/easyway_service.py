@@ -13,11 +13,12 @@ from config.settings import (
 # === 👇 ДОДАНО ІМПОРТ РЕЄСТРУ 👇 ===
 from config.accessible_vehicles import ACCESSIBLE_TRAMS, ACCESSIBLE_TROLS
 
-
 try:
     from config.easyway_config import EasyWayConfig
 except ImportError:
     logging.warning("config/easyway_config.py не знайдено")
+
+
     class EasyWayConfig:
         BASE_URL = EASYWAY_API_URL
         LOGIN = EASYWAY_LOGIN
@@ -87,7 +88,6 @@ class EasyWayService:
 
         return {"error": "Не вдалося завантажити список маршрутів після 3 спроб."}
 
-
     async def get_places_by_name(self, search_term: str) -> dict:
         """Пошук зупинок за назвою (з авто-повтором)"""
         params = {
@@ -148,8 +148,6 @@ class EasyWayService:
             logger.info(f"💎 Cache HIT (Fast) for stop_id: {stop_id}")
             return self.stop_cache[stop_id]
 
-
-
         # 4. Якщо кешу все ще немає - робимо запит
         params = {
             "login": self.config.LOGIN,
@@ -189,7 +187,6 @@ class EasyWayService:
         base = self.base_url
         query_string = "&".join(f"{k}={v}" for k, v in params.items())
         return f"{base}/?{query_string}"
-
 
     def _parse_places_response(self, data: dict, root_key: str = "item") -> dict:
         """Парсить відповідь cities.GetPlacesByName"""
@@ -278,31 +275,53 @@ class EasyWayService:
                 transports = [transports]
 
             for route in transports:
-                # Отримуємо дані про транспорт
-                bort_number = str(route.get("bortNumber", ""))  # Гарантуємо, що це рядок
-                transport_key = route.get("transportKey")  # 'tram' або 'trol' або 'bus'
+                # === КРОК 2: ЛОГІКА ЗЛИТТЯ (MERGE) ===
 
-                # === ЛОГІКА ПРІОРИТЕТНОЇ ПЕРЕВІРКИ ===
-                # 1. Перевіряємо, що каже API
+                # Отримуємо бортовий номер та тип транспорту
+                bort_number = str(route.get("bortNumber", "")).strip()
+                transport_key = route.get("transportKey")  # 'tram', 'trol', 'bus' або 'marshrutka'
+
+
+                # 1. Отримуємо статус з API
                 is_api_handicapped = route.get("handicapped", False)
 
-                # 2. Перевіряємо наш локальний реєстр
+
+
+                # 2. Перевіряємо у локальному реєстрі
                 is_local_handicapped = False
                 if transport_key == 'tram' and bort_number in ACCESSIBLE_TRAMS:
                     is_local_handicapped = True
+                    logger.info(f"✅ Tram {bort_number} found in LOCAL registry (ACCESSIBLE_TRAMS)")
                 elif transport_key == 'trol' and bort_number in ACCESSIBLE_TROLS:
                     is_local_handicapped = True
+                    logger.info(f"✅ Trolleybus {bort_number} found in LOCAL registry (ACCESSIBLE_TROLS)")
 
-                # 3. Фінальне рішення: Якщо ХОЧА Б ОДНЕ джерело підтверджує - це інклюзивний транспорт
+                # 3. Фінальне рішення: "АБО" логіка
+                # Транспорт вважається інклюзивним, якщо він позначений як такий в API АБО у локальному реєстрі
                 final_handicapped_status = is_api_handicapped or is_local_handicapped
-                # =====================================
+
+                # --- РОЗШИРЕНЕ ЛОГУВАННЯ (ДЛЯ ВСІХ маршрутів) ---
+                logger.info(
+                    f"🚋 Route {route.get('title')} | Bort: {bort_number} | Type: {transport_key} | "
+                    f"API: {is_api_handicapped} | Local: {is_local_handicapped} | FINAL: {final_handicapped_status}"
+                )
+
+                # Логування для діагностики
+                if final_handicapped_status:
+                    logger.info(
+                        f"🚋 Route: {route.get('title')} (Bort: {bort_number}, Type: {transport_key}) "
+                        f"-> API: {is_api_handicapped}, Local: {is_local_handicapped} -> FINAL: {final_handicapped_status}"
+                    )
+
+                # === КОНЕЦЬ ЛОГІКИ ЗЛИТТЯ ===
+
                 parsed_route = {
                     "id": route.get("id"),
                     "title": route.get("title"),
                     "direction": route.get("directionTitle"),
                     "transport_name": route.get("transportName"),
                     "transport_key": route.get("transportKey"),
-                    "handicapped": route.get("handicapped", False),
+                    "handicapped": final_handicapped_status,  # Використовуємо результат злиття
                     "bort_number": route.get("bortNumber"),
                     "time_left": float(route.get("timeLeft", 9999)),
                     "time_left_formatted": route.get("timeLeftFormatted", ""),
@@ -317,6 +336,88 @@ class EasyWayService:
         except Exception as e:
             logger.error(f"Error parsing stop info v1.2: {e}")
             return {"error": f"Error parsing stop info v1.2: {e}"}
+
+    async def get_vehicles_on_route(self, route_id: int) -> List[dict]:
+        """
+        Отримує список низькопідлогових вагонів на маршруті через EasyWay API.
+        Використовується для Fallback-сценарію.
+        """
+        params = {
+            "login": self.config.LOGIN,
+            "password": self.config.PASSWORD,
+            "function": "routes.GetRouteInfo",
+            "city": self.config.DEFAULT_CITY,
+            "id": route_id,
+            "format": self.config.DEFAULT_FORMAT,
+        }
+
+        url = self._build_url(params)
+
+        # Робимо один запит (без складних ретраїв, бо це fallback)
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+                logger.info(f"EasyWay API Call (RouteInfo): {url}")
+                async with session.get(url, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json(content_type=None)
+                        # Парсимо відповідь
+                        return self._parse_route_vehicles(data)
+                    else:
+                        logger.warning(f"API returned status {response.status} for GetRouteInfo")
+        except Exception as e:
+            logger.error(f"Error getting route info: {e}")
+
+        return []
+
+    def _parse_route_vehicles(self, data: dict) -> List[dict]:
+        """Парсить транспорт з відповіді routes.GetRouteInfo"""
+        accessible_vehicles = []
+
+        try:
+            route_data = data.get("routes", {})
+            if not route_data:
+                return []
+
+            # Отримуємо список транспорту
+            vehicles = route_data.get("vehicles", {}).get("vehicle", [])
+            if not isinstance(vehicles, list):
+                vehicles = [vehicles]
+
+            for v in vehicles:
+                if not v: continue
+
+                # Отримуємо дані
+                bort_number = str(v.get("name", "")).strip()  # У цьому методі номер часто в полі name
+                lat = float(v.get("lat", 0))
+                lng = float(v.get("lng", 0))
+
+                # === ПЕРЕВІРКА НА ІНКЛЮЗИВНІСТЬ ===
+                # У цьому методі API іноді не повертає поле handicapped явно,
+                # тому покладаємось на наші списки та логіку
+
+                is_accessible = False
+
+                # 1. Спробуємо знайти тип транспорту з контексту (але API тут його не дає чітко)
+                # Тому перевіряємо по наших списках бортів
+                if bort_number in ACCESSIBLE_TRAMS or bort_number in ACCESSIBLE_TROLS:
+                    is_accessible = True
+
+                # 2. Якщо API все ж повернуло атрибут (перевіряємо про всяк випадок)
+                if v.get("handicapped"):
+                    is_accessible = True
+
+                if is_accessible:
+                    accessible_vehicles.append({
+                        "bort": bort_number,
+                        "lat": lat,
+                        "lng": lng
+                    })
+
+        except Exception as e:
+            logger.error(f"Error parsing route vehicles: {e}")
+
+        return accessible_vehicles
+
 
     def filter_handicapped_routes(self, stop_info: dict) -> List[dict]:
         """Фільтрує тільки низькопідлоговий транспорт"""
