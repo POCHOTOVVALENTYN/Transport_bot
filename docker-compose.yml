@@ -1,0 +1,41 @@
+services:
+  # --- СЕРВІС БОТА ---
+  bot:
+    build: .
+    container_name: transport_bot_app
+    restart: always  # Автоматичний перезапуск, якщо бот впаде
+    depends_on:
+      - db
+    env_file:
+      - .env  # Читаємо секрети з файлу .env
+    volumes:
+      # Прокидаємо папку з логами (якщо пишете в файл)
+      - ./logs:/app/logs
+      # !!! ВАЖЛИВО: Прокидаємо файл ключів Google !!!
+      # Переконайтесь, що шлях до файлу на сервері правильний
+      - ./config/google_credentials.json:/app/config/google_credentials.json
+      # Якщо у вас є локальні файли (картинки, PDF), які змінюються
+      - ./assets:/app/assets
+      - ./documents:/app/documents
+
+  # --- СЕРВІС БАЗИ ДАНИХ (PostgreSQL) ---
+  db:
+    image: postgres:15-alpine
+    container_name: transport_bot_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      # Зберігаємо дані БД на диску сервера, щоб не зникли при рестарті
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Відкриваємо порт 5432 тільки для локалхоста (з міркувань безпеки)
+      - "127.0.0.1:5432:5432"
+
+volumes:
+  postgres_data:
+
+environment:
+  TZ=Europe/Kyiv

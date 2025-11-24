@@ -4,6 +4,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# --- НАЛАШТУВАННЯ БД ---
+# Якщо ми в Docker, хост БД буде називатися "db" (як у docker-compose), інакше localhost
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_USER = os.getenv("DB_USER", "bot_user")
+DB_PASS = os.getenv("DB_PASS", "secure_pass")
+DB_NAME = os.getenv("DB_NAME", "transport_bot_db")
+DB_PORT = os.getenv("DB_PORT", "5432")
+
+# Формуємо URL для SQLAlchemy
+DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+# --- ІНШІ НАЛАШТУВАННЯ ---
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Шлях до Google Credentials (має збігатися з тим, куди ми монтуємо volume в docker-compose)
+CREDENTIALS_PATH = BASE_DIR / "config" / "google_credentials.json"
+
 # Основні
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = os.getenv("DEBUG", "False") == "True"
@@ -21,8 +39,16 @@ GENERAL_ADMIN_IDS = [
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID")
 CREDENTIALS_PATH = BASE_DIR / "integrations/google_sheets/credentials.json"
 
-# Database
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./transport_bot.db")
+
+# Налаштування для Docker контейнера на порту 5433
+DB_USER = os.getenv("DB_USER", "bot_user")
+DB_PASS = os.getenv("DB_PASS", "secure_pass")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5433")  # <--- ВАЖЛИВО: ЗМІНИЛИ ТУТ НА 5433
+DB_NAME = os.getenv("DB_NAME", "transport_bot_db")
+
+# Postgres URL
+DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

@@ -5,10 +5,8 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Column, Integer, String, DateTime, func, Boolean
 from config.settings import BASE_DIR
 from sqlalchemy import Column, Integer, String, DateTime, func, BigInteger # <-- Додали BigInteger
+from config.settings import DATABASE_URL
 
-
-# Шлях до файлу БД (буде створено автоматично)
-DATABASE_URL = f"sqlite+aiosqlite:///{BASE_DIR}/bot_database.db"
 
 Base = declarative_base()
 
