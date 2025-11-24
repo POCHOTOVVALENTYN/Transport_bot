@@ -309,9 +309,12 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
         return States.ACCESSIBLE_SEARCH_STOP
 
 
+# === 🔄 НОВА ЛОГІКА ЗБОРУ ДАНИХ 🔄 ===
+
 async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Крок 3: Користувач обрав зупинку. Робимо виклик.
+    Крок 3: Користувач обрав зупинку.
+    Виконуємо "Потік А" (Прибуття) та "Потік Б" (Глобальний моніторинг маршрутів).
     """
     query = update.callback_query
     await query.answer()
@@ -319,64 +322,226 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
     try:
         stop_id = int(query.data.split("stop_")[-1])
         user_id = query.from_user.id
-        logger.info(f"User {user_id} selected stop_id: {stop_id}")
+        logger.info(f"User {user_id} selected stop_id: {stop_id} (Enhanced Mode)")
 
-        # ✅ ДОДАЙТЕ ЦІ 2 РЯДКА ДЛЯ ДІАГНОСТИКИ:
-        logger.info(f"🔄 User {user_id} executing: accessible_stop_selected with stop_id={stop_id}")
-        logger.info(f"   Query data: {query.data}, Current state might be ACCESSIBLE_SHOWING_RESULTS")
+        await query.edit_message_text("🔄 Збираю інформацію про весь низькопідлоговий транспорт...")
 
-        await query.edit_message_text("🔄 Отримую інформацію про прибуття...")
-
-        # Отримуємо дані від EasyWay
+        # --- КРОК 1: Потік А (Stop Info) ---
         stop_info = await easyway_service.get_stop_info_v12(stop_id=stop_id)
-
         if stop_info.get("error"):
             await query.edit_message_text(f"❌ Помилка API-даних: {stop_info['error']}")
             return States.ACCESSIBLE_SEARCH_STOP
 
-        stop_title = stop_info.get("title", f"Зупинка ID: {stop_id}")
-        stop_title_safe = html.escape(stop_title)
+        stop_title = html.escape(stop_info.get("title", f"Зупинка {stop_id}"))
 
-        # 1. Фільтруємо транспорт, що прибуває (для звичайного відображення)
-        handicapped_routes = easyway_service.filter_handicapped_routes(stop_info)
+        # --- КРОК 2: Визначення маршрутів для Потоку Б ---
+        # Отримуємо список унікальних маршрутів, що проходять через зупинку
+        route_map = context.bot_data.get('easyway_structured_map', {})
+        name_to_id = {}
+        for kind in ['tram', 'trolley']:
+            for r in route_map.get(kind, []):
+                name_to_id[str(r['name'])] = r['id']
 
-        # 2. === НОВЕ: Збираємо список ВСІХ маршрутів на цій зупинці ===
-        # Ми беремо 'title' (номер маршруту: "5", "7"), а не 'id', бо це надійніше для пошуку.
-        # Використовуємо set, щоб прибрати дублікати.
-        route_titles = list(set(
-            r.get('title') for r in stop_info.get('routes', [])
-            if r.get('title') # Пропускаємо пусті
-        ))
-        # ==============================================================
+        # Збираємо ID маршрутів для сканування
+        scan_tasks = []
+        scan_routes_meta = []  # (Назва, Тип)
 
-        # Передаємо route_titles у функцію відображення
-        await _show_accessible_transport_results(query, context, stop_title_safe, handicapped_routes, route_titles)
+        # Проходимо по маршрутах, які повернув GetStopInfo
+        for r in stop_info.get('routes', []):
+            r_title = str(r.get('title', ''))
+            # Шукаємо ID в нашій базі
+            if r_title in name_to_id:
+                r_id = name_to_id[r_title]
+                # Перевіряємо, чи ми вже не додали цей маршрут (щоб не дублювати)
+                if not any(x[1] == r_id for x in scan_tasks):
+                    scan_tasks.append((r_title, r_id))
+
+        # --- КРОК 3: Потік Б (Route Info - Паралельно) ---
+        # Створюємо асинхронні задачі
+        async_tasks = [easyway_service.get_vehicles_on_route(r_id) for _, r_id in scan_tasks]
+
+        # Виконуємо запити
+        global_vehicles_results = []
+        if async_tasks:
+            global_vehicles_results = await asyncio.gather(*async_tasks)
+
+        # Формуємо словник: { "5": [List of Vehicles], "28": [...] }
+        global_route_data = {}
+        for i, (r_name, _) in enumerate(scan_tasks):
+            global_route_data[r_name] = global_vehicles_results[i] if i < len(global_vehicles_results) else []
+
+        # --- КРОК 4: Передача на відображення ---
+        # Передаємо "сирі" дані прибуття (stop_info) та "сирі" дані маршрутів (global_route_data)
+        await _render_accessible_response(query, stop_title, stop_info, global_route_data)
 
         return States.ACCESSIBLE_SHOWING_RESULTS
-
-
-    except telegram.error.BadRequest as br_error:
-        logger.warning(f"BadRequest in accessible_stop_selected: {br_error}")
-        # Спробувати повідомити користувача про технічну проблему
-        try:
-            await query.edit_message_text("❌ Виникла технічна помилка при обробці даних. Спробуйте пізніше.")
-        except:
-            pass
-
-        return ConversationHandler.END
 
     except Exception as e:
         logger.error(f"Critical error in accessible_stop_selected: {e}", exc_info=True)
         try:
-            await query.edit_message_text(
-                f"❌ Критична помилка: {str(e)}",
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("⬅️ Пошук іншої зупинки", callback_data="accessible_start")]]
-                )
-            )
-        except Exception:
+            await query.edit_message_text(f"❌ Виникла помилка: {str(e)}")
+        except:
             pass
         return States.ACCESSIBLE_SEARCH_STOP
+
+
+# === 🔄 НОВА ЛОГІКА ВІДОБРАЖЕННЯ (TEMPLATE) 🔄 ===
+
+async def _render_accessible_response(query, stop_title: str, stop_info: dict, global_route_data: dict):
+    """
+    Формує повідомлення згідно з жорстким шаблоном:
+    Header -> Loop (Summary -> Nearest -> Others) -> Footer
+    """
+
+    # 1. HEADER
+    message = (
+        f"♿️ <b>Низькопідлоговий Транспорт</b>\n"
+        f"📍 Зупинка: <b>{stop_title}</b>\n"
+        f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n"
+        f"👋 Шановні пасажари!\n"
+        f"⏱️ Інформація про час прибуття\n\n"
+        f"⚠️дійсна на момент запиту⚠️\n\n"
+        f"📢 <b>Важливо!</b>\n"
+        f"⚠️ Під час <b>повітряної тривоги</b> 🚨 дані про рух трамваїв та тролейбусів можуть відображатися "
+        f"некоректно або із затримкою. 📡\n\n"
+        f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n"
+    )
+
+    # 2. ПІДГОТОВКА ДАНИХ (Фільтрація та Сортування)
+    # Нам потрібно для кожного маршруту мати:
+    # - arrival_obj (об'єкт з GetStopInfo, якщо є прибуття)
+    # - other_vehicles (список об'єктів з GetRouteInfo)
+    # - total_count (загальна кількість)
+
+    # Отримуємо інклюзивні прибуття
+    handicapped_arrivals = easyway_service.filter_handicapped_routes(stop_info)
+
+    # Групуємо прибуття по маршруту: { "5": [Arrival1, Arrival2] }
+    arrivals_by_route = {}
+    for arr in handicapped_arrivals:
+        r_title = str(arr.get('title'))
+        if r_title not in arrivals_by_route:
+            arrivals_by_route[r_title] = []
+        arrivals_by_route[r_title].append(arr)
+
+    # Сортуємо маршрути (спочатку числа, потім літери)
+    all_route_names = set(global_route_data.keys()) | set(arrivals_by_route.keys())
+    sorted_routes = sorted(list(all_route_names),
+                           key=lambda x: int(re.sub(r'\D', '', x)) if re.sub(r'\D', '', x) else 999)
+
+    has_any_data = False
+
+    for r_name in sorted_routes:
+        # Дані з глобального моніторингу (GetRouteInfo)
+        vehicles_on_line = global_route_data.get(r_name, [])
+        # Дані про прибуття (GetStopInfo)
+        arrivals = arrivals_by_route.get(r_name, [])
+
+        # Загальна кількість (беремо з global, бо там повніші дані, або сумуємо унікальні)
+        # Оскільки ми фільтрували GetRouteInfo у сервісі, там ТІЛЬКИ низькопідлогові.
+        count = len(vehicles_on_line)
+
+        # Якщо немає даних ні там, ні там - пропускаємо (або пишемо "немає")
+        # Якщо в global 0, але в arrivals є (рідкісний випадок лагу API) - показуємо arrival count
+        if count == 0 and len(arrivals) > 0:
+            count = len(arrivals)
+
+        # -- ФОРМУВАННЯ БЛОКУ МАРШРУТУ --
+
+        # 1. Рядок зведення
+        suffix = "ів"
+        if count == 1:
+            suffix = ""
+        elif 2 <= count <= 4:
+            suffix = "и"
+
+        if count > 0:
+            message += f"На маршруті №{r_name}: на лінії <b>{count}</b> низькопідлогов{html.escape('ий' if count == 1 else 'і')} вагон{suffix}.\n"
+            has_any_data = True
+        else:
+            # Можна пропустити маршрути, де 0 вагонів, щоб не спамити.
+            # Але якщо цей маршрут ходить через зупинку, краще показати.
+            # Зробимо перевірку: показуємо тільки якщо маршрут є в arrivals (навіть звичайний) або в global.
+            pass
+
+        if count == 0:
+            continue  # Пропускаємо пусті маршрути для компактності
+
+        # 2. Секція "НАЙБЛИЖЧИЙ ДО ВАС"
+        # Шукаємо найкращий варіант прибуття
+        nearest_bort = None
+
+        if arrivals:
+            nearest = arrivals[0]  # Беремо перший (вони відсортовані по часу)
+            nearest_bort = str(nearest.get('bort_number'))
+
+            icon = easyway_service.get_transport_icon(nearest.get("transport_key"))
+            time_icon = easyway_service.get_time_source_icon(nearest.get("time_source"))
+
+            message += "👇 НАЙБЛИЖЧИЙ ДО ВАС:\n"
+            message += (
+                f"   {icon} {html.escape(nearest.get('transport_name', 'Транспорт'))} №{r_name}\n"
+                f"   → (напрямок: {html.escape(nearest.get('direction', 'Невідомо'))})\n"
+                f"   Борт: <b>{html.escape(nearest_bort)}</b>\n"
+                f"   Прибуття: {time_icon} <b>{html.escape(nearest.get('time_left_formatted', '??'))}</b>\n"
+            )
+
+        # 3. Секція "ІНШІ" (або просто список, якщо немає прибуття)
+        other_vehicles = []
+        for v in vehicles_on_line:
+            # Перевіряємо, чи це не той самий вагон, що в "Найближчому"
+            v_bort = str(v.get('bort'))
+            if nearest_bort and v_bort == nearest_bort:
+                continue  # Пропускаємо, бо вже показали
+            other_vehicles.append(v)
+
+        if other_vehicles:
+            if arrivals:
+                message += "👇 ІНШІ НА ЛІНІЇ:\n"
+            else:
+                # Якщо прибуття немає, але вагони є
+                message += "👇 НА ЛІНІЇ (далеко або інший напрямок):\n"
+
+            for v in other_vehicles:
+                v_bort = html.escape(str(v.get('bort', 'Б/н')))
+                # Геокодування
+                lat, lng = v.get('lat'), v.get('lng')
+                loc_name = stop_matcher.find_nearest_stop_name(lat, lng)
+
+                # Напрямок для global vehicles часто невідомий або треба вираховувати.
+                # EasyWay GetRouteInfo не дає напрямку для точок.
+                # Тому пишемо просто локацію.
+
+                message += f"   🚋 - № <b>{v_bort}</b> (біля: <i>{html.escape(loc_name)}</i>)\n"
+
+        message += "\n"  # Відступ між маршрутами
+
+    # 3. FOOTER & EMPTY STATE
+    if not has_any_data:
+        message += "😕 На жаль, на маршрутах через цю зупинку наразі не виявлено низькопідлогових вагонів.\n\n"
+
+    message += (
+        "🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n"
+        "Умовні позначення:\n"
+        f"{easyway_service.time_icons['gps']} = час за GPS\n"
+    )
+
+    # 4. SEND/EDIT
+    # Обрізка повідомлення
+    if len(message) > 4096:
+        message = message[:4000] + "\n\n...(повідомлення скорочено)..."
+
+    keyboard = [
+        [InlineKeyboardButton("🔄 Оновити дані", callback_data=f"stop_{query.data.split('_')[-1]}")],
+        [InlineKeyboardButton("⬅️ До списку зупинок", callback_data="accessible_back_to_list")],
+        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+    ]
+
+    await query.edit_message_text(
+        text=message,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.HTML
+    )
 
 
 async def _show_stops_keyboard(update: Update, places: list):
