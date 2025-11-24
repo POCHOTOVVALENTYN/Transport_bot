@@ -10,7 +10,6 @@ from config.settings import (
     EASYWAY_API_URL, EASYWAY_LOGIN, EASYWAY_PASSWORD, EASYWAY_CITY,
     EASYWAY_STOP_INFO_VERSION, TIME_SOURCE_ICONS
 )
-# === 👇 ДОДАНО ІМПОРТ РЕЄСТРУ 👇 ===
 from config.accessible_vehicles import ACCESSIBLE_TRAMS, ACCESSIBLE_TROLS
 
 try:
@@ -44,17 +43,14 @@ class EasyWayService:
         self.transport_icons = {
             "bus": "🚌",
             "trol": "🚎",
-            "tram": "🚊",
+            "tram": "🚋",
         }
         self.time_icons = TIME_SOURCE_ICONS
-
-        # === ВИПРАВЛЕННЯ 1: Видалено self._lock ===
-        # Кеш залишаємо, він thread-safe для читання/запису в Python (GIL)
         self.stop_cache = TTLCache(maxsize=1000, ttl=30)
         logger.info("✅ EasyWay Stop Cache initialized (TTL=30s)")
 
     async def get_routes_list(self) -> dict:
-        """Отримує список маршрутів (з авто-повтором)"""
+        """Отримує список маршрутів"""
         params = {
             "login": self.login,
             "password": self.password,
@@ -62,34 +58,22 @@ class EasyWayService:
             "city": self.city,
             "format": self.config.DEFAULT_FORMAT
         }
-
         url = self._build_url(params)
-        timeout = aiohttp.ClientTimeout(total=20)  # Збільшений таймаут для важкого запиту
+        timeout = aiohttp.ClientTimeout(total=20)
 
         for attempt in range(3):
             try:
                 async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                    logger.info(f"EasyWay API Call (RoutesList) Attempt {attempt + 1}/3: {url}")
-
                     async with session.get(url, timeout=timeout) as response:
                         if response.status == 200:
-                            data = await response.json(content_type=None)
-                            return data
-                        else:
-                            # Логуємо помилку, але не падаємо одразу
-                            logger.warning(f"API returned status {response.status} for GetRoutesList")
-
-            except (asyncio.TimeoutError, Exception) as e:
-                logger.warning(f"GetRoutesList error (Attempt {attempt + 1}/3): {e}")
-
-            # Чекаємо перед наступною спробою
-            if attempt < 2:
-                await asyncio.sleep(2)
-
-        return {"error": "Не вдалося завантажити список маршрутів після 3 спроб."}
+                            return await response.json(content_type=None)
+            except Exception as e:
+                logger.warning(f"GetRoutesList error: {e}")
+                if attempt < 2: await asyncio.sleep(2)
+        return {"error": "Не вдалося завантажити список маршрутів."}
 
     async def get_places_by_name(self, search_term: str) -> dict:
-        """Пошук зупинок за назвою (з авто-повтором)"""
+        """Пошук зупинок за назвою"""
         params = {
             "login": self.config.LOGIN,
             "password": self.config.PASSWORD,
@@ -98,57 +82,25 @@ class EasyWayService:
             "term": search_term,
             "format": self.config.DEFAULT_FORMAT,
         }
-
         url = self._build_url(params)
-        # Збільшуємо таймаут до 10 секунд
         timeout = aiohttp.ClientTimeout(total=10)
 
-        # Робимо 3 спроби
         for attempt in range(3):
             try:
                 async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                    logger.info(f"EasyWay API Call (Attempt {attempt + 1}/3): {url}")
-
                     async with session.get(url, timeout=timeout) as response:
                         if response.status == 200:
-                            data = await response.json(content_type=None)
-
-                            # --- ДІАГНОСТИЧНИЙ ЛОГ (залишаємо, як було) ---
-                            try:
-                                import json
-                                raw_json_data = json.dumps(data, indent=2, ensure_ascii=False)
-                                logger.info(f"===== RAW API RESPONSE for term '{search_term}' =====")
-                                logger.info(raw_json_data)
-                                logger.info(f"=====================================================")
-                            except Exception:
-                                pass
-                            # -----------------------------------------------
-
-                            return self._parse_places_response(data, root_key="item")
-                        else:
-                            logger.warning(f"API returned status {response.status}, retrying...")
-
-            except asyncio.TimeoutError:
-                logger.warning(f"Request timed out (Attempt {attempt + 1}/3). Retrying...")
+                            return self._parse_places_response(await response.json(content_type=None))
             except Exception as e:
-                logger.error(f"Request error (Attempt {attempt + 1}/3): {e}")
-
-            # Чекаємо 1 секунду перед наступною спробою (крім останньої)
-            if attempt < 2:
-                await asyncio.sleep(1)
-
-        # Якщо всі спроби вичерпано
-        return {"error": "Сервер не відповів вчасно. Спробуємо ще раз."}
+                logger.warning(f"Search error: {e}")
+                if attempt < 2: await asyncio.sleep(1)
+        return {"error": "Сервер не відповів."}
 
     async def get_stop_info_v12(self, stop_id: int) -> dict:
-        """Отримання інформації v1.2 про зупинку (з блокуванням)"""
-
-        # 1. Швидка перевірка (без блокування)
+        """Отримання інформації про зупинку"""
         if stop_id in self.stop_cache:
-            logger.info(f"💎 Cache HIT (Fast) for stop_id: {stop_id}")
             return self.stop_cache[stop_id]
 
-        # 4. Якщо кешу все ще немає - робимо запит
         params = {
             "login": self.config.LOGIN,
             "password": self.config.PASSWORD,
@@ -158,108 +110,144 @@ class EasyWayService:
             "v": self.config.STOP_INFO_VERSION,
             "format": self.config.DEFAULT_FORMAT,
         }
-
         url = self._build_url(params)
         timeout = aiohttp.ClientTimeout(total=10)
 
         for attempt in range(3):
             try:
                 async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                    logger.info(f"EasyWay API Call v1.2 (REAL REQUEST): {url}")  # Логуємо тільки реальні запити
+                    logger.info(f"EasyWay API Call v1.2 (REAL REQUEST): {url}")
                     async with session.get(url, timeout=timeout) as response:
                         if response.status == 200:
-                            data = await response.json(content_type=None)
-                            parsed_data = self._parse_stop_info_v12(data)
-
-                            if not parsed_data.get("error"):
-                                self.stop_cache[stop_id] = parsed_data
-                                logger.info(f"💾 Saved to cache: stop_id {stop_id}")
-
-                            return parsed_data
+                            parsed = self._parse_stop_info_v12(await response.json(content_type=None))
+                            if not parsed.get("error"):
+                                self.stop_cache[stop_id] = parsed
+                            return parsed
             except Exception as e:
-                logger.warning(f"Error: {e}")
+                logger.warning(f"StopInfo error: {e}")
                 if attempt < 2: await asyncio.sleep(0.5)
-
         return {"error": "Сервер не відповів."}
 
+    # === ОНОВЛЕНИЙ МЕТОД ДЛЯ ОТРИМАННЯ ТРАНСПОРТУ ===
+    async def get_vehicles_on_route(self, route_id: int) -> List[dict]:
+        """
+        Отримує список низькопідлогових вагонів на маршруті через routes.GetRouteGPS.
+        Це дозволяє бачити весь транспорт на лінії.
+        """
+        params = {
+            "login": self.config.LOGIN,
+            "password": self.config.PASSWORD,
+            "function": "routes.GetRouteGPS",  # <--- ЗМІНЕНО З GetRouteInfo
+            "city": self.config.DEFAULT_CITY,
+            "id": route_id,
+            "format": self.config.DEFAULT_FORMAT,
+        }
+
+        url = self._build_url(params)
+
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+                async with session.get(url, timeout=8) as response:
+                    if response.status == 200:
+                        data = await response.json(content_type=None)
+                        return self._parse_route_gps(data)
+                    else:
+                        logger.warning(f"API returned status {response.status} for GetRouteGPS")
+        except Exception as e:
+            logger.error(f"Error getting route GPS: {e}")
+
+        return []
+
+    def _parse_route_gps(self, data: dict) -> List[dict]:
+        """Парсить відповідь routes.GetRouteGPS"""
+        accessible_vehicles = []
+
+        try:
+            # API може повернути список у полі 'vehicle'
+            vehicles = data.get("vehicle", [])
+            if isinstance(vehicles, dict):  # Якщо один об'єкт
+                vehicles = [vehicles]
+            elif not isinstance(vehicles, list):
+                vehicles = []
+
+            for v in vehicles:
+                # Перевіряємо актуальність даних (data_relevance = 1 - свіжі)
+                # Якщо ключа немає, припускаємо, що дані ок, але краще перевірити
+                if v.get('data_relevance') == 0:
+                    continue
+
+                    # Отримуємо бортовий номер
+                # В GetRouteGPS він може бути в 'name' або 'bort_number'
+                bort_number = str(v.get("name") or v.get("bort_number") or "").strip()
+
+                lat = float(v.get("lat", 0))
+                lng = float(v.get("lng", 0))
+                direction = int(v.get("direction", 0))  # 1 або 2
+
+                # === ПЕРЕВІРКА НА ІНКЛЮЗИВНІСТЬ ===
+                is_accessible = False
+
+                # 1. Перевірка по базі бортів
+                if bort_number in ACCESSIBLE_TRAMS or bort_number in ACCESSIBLE_TROLS:
+                    is_accessible = True
+
+                # 2. Якщо API має прапорець (рідко для цієї функції, але буває)
+                if v.get("handicapped"):
+                    is_accessible = True
+
+                if is_accessible:
+                    accessible_vehicles.append({
+                        "bort": bort_number,
+                        "lat": lat,
+                        "lng": lng,
+                        "direction": direction  # Зберігаємо напрямок для фільтрації
+                    })
+
+        except Exception as e:
+            logger.error(f"Error parsing route GPS: {e}")
+
+        return accessible_vehicles
+
     def _build_url(self, params: Dict) -> str:
-        """Будує URL для API запиту"""
         base = self.base_url
         query_string = "&".join(f"{k}={v}" for k, v in params.items())
         return f"{base}/?{query_string}"
 
     def _parse_places_response(self, data: dict, root_key: str = "item") -> dict:
-        """Парсить відповідь cities.GetPlacesByName"""
+        # (Логіка парсингу пошуку залишається старою, вона працює)
         try:
             items = data.get(root_key, [])
-            if not isinstance(items, list):
-                items = [items]
-
+            if not isinstance(items, list): items = [items]
             parsed_stops = []
             for item in items:
-                # Отримуємо вкладений словник "@attributes"
-                attributes = item.get("@attributes", {})
-                # Шукаємо "type"
-                item_type = attributes.get("type")
-
-                # Якщо це зупинка (або вузол)
-                if item_type == "stop":
+                if item.get("@attributes", {}).get("type") == "stop":
                     trams = []
                     trols = []
-
-                    # Парсинг маршрутів
                     routes_data = item.get("routes", {}).get("route", [])
-                    if not isinstance(routes_data, list):
-                        routes_data = [routes_data] if routes_data else []
-
+                    if not isinstance(routes_data, list): routes_data = [routes_data]
                     for route in routes_data:
-                        if not route: continue
                         title = route.get("title")
-
-                        # Отримуємо тип маршруту
-                        attrs = route.get("@attributes", {})
-                        rtype = attrs.get("type") or route.get("type")
-
-                        if not title: continue
-
+                        rtype = route.get("@attributes", {}).get("type") or route.get("type")
                         if rtype == "tram":
                             trams.append(title)
                         elif rtype == "trol":
                             trols.append(title)
-                        # Можна додати логування, якщо тип невідомий, для відладки
-                        # else:
-                        #    logger.info(f"Unknown route type: {rtype}")
-
-                    # Формуємо рядок опису
                     summary_parts = []
-                    if trams:
-                        summary_parts.append(f"{self.transport_icons['tram']} {', '.join(trams)}")
-                    if trols:
-                        summary_parts.append(f"{self.transport_icons['trol']} {', '.join(trols)}")
-
+                    if trams: summary_parts.append(f"🚋 {', '.join(trams)}")
+                    if trols: summary_parts.append(f"🚎 {', '.join(trols)}")
                     routes_summary = " | ".join(summary_parts)
-
-                    # === 👇 ЗМІНА ТУТ: Фільтруємо "пусті" зупинки 👇 ===
-                    # Якщо на зупинці немає ні трамваїв, ні тролейбусів (рядок пустий) - пропускаємо її
                     if routes_summary:
                         parsed_stops.append({
                             "id": int(item.get("id", 0)),
                             "title": item.get("title", ""),
-                            "lat": float(item.get("lat", 0)),
-                            "lng": float(item.get("lng", 0)),
                             "routes_summary": routes_summary
                         })
-                    # ===================================================
-
-            logger.info(f"Parsed {len(parsed_stops)} stops")
             return {"stops": parsed_stops}
-
         except Exception as e:
-            logger.error(f"Error parsing places response: {e}", exc_info=True)
-            return {"error": f"Error parsing places response: {e}"}
+            return {"error": str(e)}
 
     def _parse_stop_info_v12(self, data: Dict) -> Dict:
-        """Парсить відповідь stops.GetStopInfo v1.2"""
+        """Парсинг GetStopInfo v1.2 з витягуванням direction"""
         try:
             stop = data
             parsed = {
@@ -269,60 +257,47 @@ class EasyWayService:
                 "lng": float(stop.get("lng", 0)),
                 "routes": [],
             }
+            # Обробка структури transports (v1.2)
+            # API може повертати як список 'transports', так і плоский 'routes' в залежності від міста
+            # Але для v1.2 в Одесі часто використовується 'routes' прямо в корені або вкладено
 
-            transports = stop.get("routes", [])
-            if not isinstance(transports, list):
-                transports = [transports]
+            # Спробуємо знайти маршрути
+            raw_routes = stop.get("routes", [])
+            if not raw_routes:
+                # Спробуємо через transports, якщо структура складніша
+                transports = stop.get("transports", [])
+                if isinstance(transports, list):
+                    for t in transports:
+                        t_routes = t.get("routes", [])
+                        if isinstance(t_routes, list):
+                            raw_routes.extend(t_routes)
+                        elif isinstance(t_routes, dict):
+                            raw_routes.append(t_routes)
 
-            for route in transports:
-                # === КРОК 2: ЛОГІКА ЗЛИТТЯ (MERGE) ===
+            if not isinstance(raw_routes, list):
+                raw_routes = [raw_routes]
 
-                # Отримуємо бортовий номер та тип транспорту
+            for route in raw_routes:
                 bort_number = str(route.get("bortNumber", "")).strip()
-                transport_key = route.get("transportKey")  # 'tram', 'trol', 'bus' або 'marshrutka'
+                transport_key = route.get("transportKey")
 
-
-                # 1. Отримуємо статус з API
+                # Визначаємо інклюзивність
                 is_api_handicapped = route.get("handicapped", False)
-
-
-
-                # 2. Перевіряємо у локальному реєстрі
                 is_local_handicapped = False
                 if transport_key == 'tram' and bort_number in ACCESSIBLE_TRAMS:
                     is_local_handicapped = True
-                    logger.info(f"✅ Tram {bort_number} found in LOCAL registry (ACCESSIBLE_TRAMS)")
                 elif transport_key == 'trol' and bort_number in ACCESSIBLE_TROLS:
                     is_local_handicapped = True
-                    logger.info(f"✅ Trolleybus {bort_number} found in LOCAL registry (ACCESSIBLE_TROLS)")
-
-                # 3. Фінальне рішення: "АБО" логіка
-                # Транспорт вважається інклюзивним, якщо він позначений як такий в API АБО у локальному реєстрі
-                final_handicapped_status = is_api_handicapped or is_local_handicapped
-
-                # --- РОЗШИРЕНЕ ЛОГУВАННЯ (ДЛЯ ВСІХ маршрутів) ---
-                logger.info(
-                    f"🚋 Route {route.get('title')} | Bort: {bort_number} | Type: {transport_key} | "
-                    f"API: {is_api_handicapped} | Local: {is_local_handicapped} | FINAL: {final_handicapped_status}"
-                )
-
-                # Логування для діагностики
-                if final_handicapped_status:
-                    logger.info(
-                        f"🚋 Route: {route.get('title')} (Bort: {bort_number}, Type: {transport_key}) "
-                        f"-> API: {is_api_handicapped}, Local: {is_local_handicapped} -> FINAL: {final_handicapped_status}"
-                    )
-
-                # === КОНЕЦЬ ЛОГІКИ ЗЛИТТЯ ===
 
                 parsed_route = {
                     "id": route.get("id"),
                     "title": route.get("title"),
-                    "direction": route.get("directionTitle"),
+                    "direction": int(route.get("direction", 0)),  # <--- ЗБЕРІГАЄМО НАПРЯМОК (1/2)
+                    "direction_title": route.get("directionTitle"),  # Текстовий напрямок
                     "transport_name": route.get("transportName"),
-                    "transport_key": route.get("transportKey"),
-                    "handicapped": final_handicapped_status,  # Використовуємо результат злиття
-                    "bort_number": route.get("bortNumber"),
+                    "transport_key": transport_key,
+                    "handicapped": is_api_handicapped or is_local_handicapped,
+                    "bort_number": bort_number,
                     "time_left": float(route.get("timeLeft", 9999)),
                     "time_left_formatted": route.get("timeLeftFormatted", ""),
                     "time_source": route.get("timeSource", "unknown"),
@@ -330,114 +305,20 @@ class EasyWayService:
                     "aircond": route.get("aircond", False),
                 }
                 parsed["routes"].append(parsed_route)
-
-            logger.info(f"Parsed {len(parsed['routes'])} routes")
             return parsed
         except Exception as e:
-            logger.error(f"Error parsing stop info v1.2: {e}")
-            return {"error": f"Error parsing stop info v1.2: {e}"}
-
-    async def get_vehicles_on_route(self, route_id: int) -> List[dict]:
-        """
-        Отримує список низькопідлогових вагонів на маршруті через EasyWay API.
-        Використовується для Fallback-сценарію.
-        """
-        params = {
-            "login": self.config.LOGIN,
-            "password": self.config.PASSWORD,
-            "function": "routes.GetRouteInfo",
-            "city": self.config.DEFAULT_CITY,
-            "id": route_id,
-            "format": self.config.DEFAULT_FORMAT,
-        }
-
-        url = self._build_url(params)
-
-        # Робимо один запит (без складних ретраїв, бо це fallback)
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                logger.info(f"EasyWay API Call (RouteInfo): {url}")
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json(content_type=None)
-                        # Парсимо відповідь
-                        return self._parse_route_vehicles(data)
-                    else:
-                        logger.warning(f"API returned status {response.status} for GetRouteInfo")
-        except Exception as e:
-            logger.error(f"Error getting route info: {e}")
-
-        return []
-
-    def _parse_route_vehicles(self, data: dict) -> List[dict]:
-        """Парсить транспорт з відповіді routes.GetRouteInfo"""
-        accessible_vehicles = []
-
-        try:
-            route_data = data.get("routes", {})
-            if not route_data:
-                return []
-
-            # Отримуємо список транспорту
-            vehicles = route_data.get("vehicles", {}).get("vehicle", [])
-            if not isinstance(vehicles, list):
-                vehicles = [vehicles]
-
-            for v in vehicles:
-                if not v: continue
-
-                # Отримуємо дані
-                bort_number = str(v.get("name", "")).strip()  # У цьому методі номер часто в полі name
-                lat = float(v.get("lat", 0))
-                lng = float(v.get("lng", 0))
-
-                # === ПЕРЕВІРКА НА ІНКЛЮЗИВНІСТЬ ===
-                # У цьому методі API іноді не повертає поле handicapped явно,
-                # тому покладаємось на наші списки та логіку
-
-                is_accessible = False
-
-                # 1. Спробуємо знайти тип транспорту з контексту (але API тут його не дає чітко)
-                # Тому перевіряємо по наших списках бортів
-                if bort_number in ACCESSIBLE_TRAMS or bort_number in ACCESSIBLE_TROLS:
-                    is_accessible = True
-
-                # 2. Якщо API все ж повернуло атрибут (перевіряємо про всяк випадок)
-                if v.get("handicapped"):
-                    is_accessible = True
-
-                if is_accessible:
-                    accessible_vehicles.append({
-                        "bort": bort_number,
-                        "lat": lat,
-                        "lng": lng
-                    })
-
-        except Exception as e:
-            logger.error(f"Error parsing route vehicles: {e}")
-
-        return accessible_vehicles
-
+            logger.error(f"Error parsing stop info: {e}")
+            return {"error": str(e)}
 
     def filter_handicapped_routes(self, stop_info: dict) -> List[dict]:
-        """Фільтрує тільки низькопідлоговий транспорт"""
-        handicapped_routes = []
-        for route in stop_info.get("routes", []):
-            if route.get("handicapped"):
-                if route.get("transport_key") != "marshrutka":
-                    handicapped_routes.append(route)
+        return [r for r in stop_info.get("routes", []) if
+                r.get("handicapped") and r.get("transport_key") != "marshrutka"]
 
-        handicapped_routes.sort(key=lambda r: r["time_left"])
-        return handicapped_routes
+    def get_transport_icon(self, key: str) -> str:
+        return self.transport_icons.get(key, "❓")
 
-    def get_transport_icon(self, transport_key: str) -> str:
-        """Отримує іконку для типу транспорту"""
-        return self.transport_icons.get(transport_key, "❓")
-
-    def get_time_source_icon(self, time_source: str) -> str:
-        """Отримує іконку для джерела часу"""
-        return self.time_icons.get(time_source, "❓")
+    def get_time_source_icon(self, key: str) -> str:
+        return self.time_icons.get(key, "❓")
 
 
-# Глобальний екземпляр сервісу
 easyway_service = EasyWayService()
