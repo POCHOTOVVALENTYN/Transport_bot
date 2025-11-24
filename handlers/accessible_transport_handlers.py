@@ -332,8 +332,8 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
                                       routes_meta: dict):
     """
     Формує повідомлення.
-    - Якщо є прогноз прибуття: показує чисто (без кількості на лінії).
-    - Якщо немає прогнозу, але є вагони в правильному напрямку: показує список з локаціями.
+    - Сценарій А: Є прогноз -> показуємо час.
+    - Сценарій Б: Немає прогнозу -> показуємо список транспорту з локацією (Нова логіка).
     """
 
     message = (
@@ -357,19 +357,18 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             arrivals_by_route[r_title] = []
         arrivals_by_route[r_title].append(arr)
 
-    # 2. Складаємо повний список маршрутів (Arrivals + Global)
+    # 2. Складаємо повний список маршрутів
     all_routes = set(global_route_data.keys()) | set(arrivals_by_route.keys())
+    # Сортування: спочатку цифрові, потім буквені
     sorted_routes = sorted(list(all_routes), key=lambda x: int(re.sub(r'\D', '', x)) if re.sub(r'\D', '', x) else 999)
 
     has_data = False
 
     for r_name in sorted_routes:
-        # Дані з джерел
-        # global_vehicles - це вже відфільтровані по напрямку вагони
         global_vehicles = global_route_data.get(r_name, [])
         arrivals = arrivals_by_route.get(r_name, [])
 
-        # Тип транспорту
+        # Визначаємо тип транспорту (трам/трол)
         r_meta = routes_meta.get(r_name, {})
         r_type = r_meta.get('type', 'tram')
         if not r_type and arrivals: r_type = arrivals[0].get('transport_key', 'tram')
@@ -377,7 +376,7 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
         icon = '🚎' if r_type == 'trol' else '🚋'
         transport_name = 'Тролейбус' if r_type == 'trol' else 'Трамвай'
 
-        # 3. Збираємо УНІКАЛЬНІ вагони з обох джерел
+        # Збираємо унікальні борти
         unique_borts = set()
         for arr in arrivals:
             if arr.get('bort_number'): unique_borts.add(str(arr.get('bort_number')))
@@ -385,22 +384,22 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             if gv.get('bort'): unique_borts.add(str(gv.get('bort')))
 
         total_count = len(unique_borts)
+        has_data = True
 
-        # Якщо на маршруті ПУСТО (ні прибуття, ні в GPS)
+        # === ЛОГІКА ВІДОБРАЖЕННЯ ===
+
+        # Якщо ВЗАГАЛІ нікого немає
         if total_count == 0:
             message += (
                 f"⚠️ <b>Маршрут №{r_name}:</b>\n"
-                f"<i>На жаль, інформація про найближчий низькопідлоговий транспорт наразі відсутня 🤷‍</i>️\n\n"
-                f"<b>🔍 Можливі причини:</b>\n"
+                f"На жаль, інформація про найближчий низькопідлоговий транспорт наразі відсутня 🤷‍♂️\n\n"
+                f"🔍 <b>Можливі причини:</b>\n"
                 f"▫️ Транспорт вже проїхав Вашу зупинку 💨\n"
                 f"▫️ Вагон/тролейбус знаходиться на кінцевій та ще не розпочав рух 🏁\n\n"
             )
-            has_data = True
             continue
 
-        has_data = True
-
-        # --- СЦЕНАРІЙ А: Є ПРОГНОЗ ПРИБУТТЯ ---
+        # СЦЕНАРІЙ А: Є ПРОГНОЗ ПРИБУТТЯ (Все добре)
         if arrivals:
             message += f"✅ <b>Маршрут №{r_name}:</b>\n"
 
@@ -409,131 +408,54 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             nearest_bort = str(nearest.get('bort_number'))
             time_icon = easyway_service.get_time_source_icon(nearest.get("time_source"))
 
+            # Намагаємось знайти красиву назву напрямку
+            direction_str = html.escape(nearest.get('direction_title') or nearest.get('direction', 'Невідомо'))
+
             message += "👇 НАЙБЛИЖЧИЙ ДО ВАС:\n"
             message += (
                 f"   {icon} {transport_name} №{r_name}\n"
-                f"   → (напрямок: {html.escape(nearest.get('direction_title') or nearest.get('direction', 'Невідомо'))})\n"
+                f"   → (напрямок: {direction_str})\n"
                 f"   Борт: <b>{html.escape(nearest_bort)}</b>\n"
                 f"   Прибуття: {time_icon} <b>{html.escape(nearest.get('time_left_formatted', '??'))}</b>\n\n"
             )
+            # Тут можна додати блок "ІНШІ НА ЛІНІЇ", якщо потрібно, як в попередній версії
 
-            # Інші на лінії (у тому ж напрямку)
-            other_list = []
-            shown_borts = {nearest_bort}
-
-            # Додаємо з Global (вже відфільтровані по напрямку)
-            for v in global_vehicles:
-                v_bort = str(v.get('bort', ''))
-                if v_bort and v_bort not in shown_borts:
-                    other_list.append(v)
-                    shown_borts.add(v_bort)
-
-            # Додаємо з Arrivals (якщо раптом Global пропустив)
-            for arr in arrivals:
-                v_bort = str(arr.get('bort_number', ''))
-                if v_bort and v_bort not in shown_borts:
-                    other_list.append({
-                        'bort': v_bort,
-                        'is_arrival_fallback': True,
-                        'direction': arr.get('direction')
-                    })
-                    shown_borts.add(v_bort)
-
-            if other_list:
-                message += "👇 ІНШІ НА ЛІНІЇ:\n"
-                for v in other_list:
-                    v_bort = html.escape(str(v.get('bort', 'Б/н')))
-                    loc_str = ""
-                    if v.get('is_arrival_fallback'):
-                        # Якщо з Arrivals - напрямок
-                        # loc_str = f"(напрямок: ...)" - прибираємо, щоб не захаращувати, або залишаємо якщо треба
-                        pass
-                    else:
-                        # Якщо з Global - локація
-                        lat, lng = v.get('lat'), v.get('lng')
-                        if lat and lng:
-                            loc_name = stop_matcher.find_nearest_stop_name(lat, lng)
-                            loc_str = f"(біля: <i>{html.escape(loc_name)}</i>)"
-                        else:
-                            loc_str = "(локація невідома)"
-                    message += f"   {icon} - № <b>{v_bort}</b> {loc_str}\n"
-
-        # --- СЦЕНАРІЙ Б: ПРИБУТТЯ НЕМАЄ, АЛЕ Є ВАГОНИ В GPS (FALLBACK) ---
+        # СЦЕНАРІЙ Б: НЕМАЄ ПРОГНОЗУ, АЛЕ Є GPS (Ваша нова логіка)
         elif not arrivals and total_count > 0:
+            message += f"⚠️ <b>Маршрут №{r_name}:</b>\n"
 
-            suffix = "ів"
-            if total_count == 1:
-                suffix = ""
-            elif 2 <= total_count <= 4:
-                suffix = "и"
+            # 1. Заголовок із кількістю
+            message += f"На даному маршруті (на лінії) працює <b>{total_count}</b> од. низькопідлогового електротранспорту:\n"
 
-            # --- НОВА ЛОГІКА СТАТУСІВ ---
-            passed_vehicles = []
-            coming_vehicles = []
-
-            # Координати зупинки користувача
-            user_lat = stop_info.get('lat')
-            user_lon = stop_info.get('lng')
-
+            # 2. Перелік вагонів з локацією
             for v in global_vehicles:
-                v_bort = str(v.get('bort', 'Б/н'))
-                v_lat = v.get('lat')
-                v_lon = v.get('lng')
-                v_dir = v.get('direction', 1)
+                v_bort = html.escape(str(v.get('bort', 'Б/н')))
+                lat, lng = v.get('lat'), v.get('lng')
+                direction_code = v.get('direction')  # 1 або 2
 
-                # Перевіряємо статус
-                status = "unknown"
-                if user_lat and v_lat:
-                    status = gtfs_service.get_vehicle_status(
-                        route_name=r_name,
-                        ew_direction=v_dir,
-                        vehicle_lat=v_lat,
-                        vehicle_lon=v_lon,
-                        user_lat=user_lat,
-                        user_lon=user_lon
-                    )
+                # Визначаємо локацію через StopMatcher
+                loc_str = "місцезнаходження невідоме"
+                if lat and lng:
+                    stop_name = stop_matcher.find_nearest_stop_name(lat, lng)
+                    if stop_name:
+                        loc_str = f"біля: {html.escape(stop_name)}"
 
-                # Формуємо рядок локації
-                loc_str = ""
-                if v_lat and v_lon:
-                    loc_name = stop_matcher.find_nearest_stop_name(v_lat, v_lon)
-                    loc_str = f"біля: <i>{html.escape(loc_name)}</i>"
-                else:
-                    loc_str = "локація невідома"
+                # Визначаємо напрямок (спроба)
+                # Якщо напрямок вагона співпадає з напрямком зупинки, ми можемо взяти назву з stop_info
+                # Але оскільки тут loop по всіх вагонах, напрямок може бути різний.
+                # Виведемо просто стрілку або код, якщо назва невідома.
+                dir_str = ""
+                if direction_code == 1:
+                    dir_str = ", (напрямок: ▶️)"
+                elif direction_code == 2:
+                    dir_str = ", (напрямок: ◀️)"
 
-                vehicle_info = {
-                    "bort": v_bort,
-                    "loc": loc_str,
-                    "status": status
-                }
+                # Формуємо рядок
+                message += f"▫️ № <b>{v_bort}</b> - {loc_str}{dir_str}\n"
 
-                if status == "passed":
-                    passed_vehicles.append(vehicle_info)
-                else:
-                    coming_vehicles.append(vehicle_info)
+            message += "\n"  # Відступ
 
-            # --- ФОРМУВАННЯ ПОВІДОМЛЕННЯ ---
-
-            message += f"⚠️ <b>Маршрут №{r_name}:</b> (точний час невідомий)\n"
-
-            # 1. Ті, що наближаються (або статус невідомий)
-            if coming_vehicles:
-                message += f"На лінії (в цьому напрямку) є {len(coming_vehicles)} низькопідлогових. {transport_name.lower()}{suffix}:\n"
-                for v in coming_vehicles:
-                    icon_status = "🏃" if v['status'] == 'arriving' else icon
-                    message += f"   {icon_status} № <b>{v['bort']}</b> ({v['loc']})\n"
-            else:
-                message += f"🚫 На лінії немає активних вагонів, що прямують до вас.\n"
-
-            # 2. Ті, що ВЖЕ ПРОЇХАЛИ (Це те, що просив користувач!)
-            if passed_vehicles:
-                message += f"\n💨 <i>Вже проїхали вашу зупинку:</i>\n"
-                for v in passed_vehicles:
-                    message += f"   🔙 № <b>{v['bort']}</b> ({v['loc']})\n"
-
-            message += "\n"
-
-    # Підвал
+    # Підвал повідомлення
     if not has_data:
         message += "😕 Інформація про маршрути на цій зупинці тимчасово недоступна.\n\n"
 
