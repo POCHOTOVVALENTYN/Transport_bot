@@ -12,6 +12,8 @@ from config.settings import (
 )
 from config.accessible_vehicles import ACCESSIBLE_TRAMS, ACCESSIBLE_TROLS
 
+from geopy.distance import geodesic
+
 try:
     from config.easyway_config import EasyWayConfig
 except ImportError:
@@ -95,6 +97,7 @@ class EasyWayService:
                 logger.warning(f"Search error: {e}")
                 if attempt < 2: await asyncio.sleep(1)
         return {"error": "Сервер не відповів."}
+
 
     async def get_stop_info_v12(self, stop_id: int) -> dict:
         """Отримання інформації про зупинку"""
@@ -319,6 +322,69 @@ class EasyWayService:
 
     def get_time_source_icon(self, key: str) -> str:
         return self.time_icons.get(key, "❓")
+
+    async def check_vehicle_status_relative_to_stop(self, route_id: int, user_stop_id: int, direction: int) -> dict:
+        """
+        Перевіряє, де знаходиться транспорт відносно зупинки користувача.
+        Повертає статус: 'approaching', 'passed' або 'unknown'.
+        """
+
+        # 1. Отримуємо весь транспорт на маршруті
+        vehicles = await self.get_vehicles_on_route(route_id)
+
+        # Фільтруємо транспорт тільки потрібного напрямку (щоб не рахувати зустрічні)
+        relevant_vehicles = [v for v in vehicles if v['direction'] == direction]
+
+        if not relevant_vehicles:
+            return {"status": "no_vehicles"}
+
+        # 2. Отримуємо послідовність зупинок (Це треба реалізувати окремо, або брати з GTFS)
+        # Припустимо, у нас є закешований список зупинок для цього маршруту і напрямку
+        route_stops = await self.get_route_stops_sequence(route_id, direction)
+
+        if not route_stops:
+            return {"status": "unknown_route_path"}
+
+        # Знаходимо індекс зупинки користувача в цьому списку
+        user_stop_index = next((i for i, s in enumerate(route_stops) if s['id'] == user_stop_id), None)
+
+        if user_stop_index is None:
+            return {"status": "stop_not_on_route"}
+
+        # 3. Аналізуємо найближчий транспорт
+        # Для спрощення беремо перший (або єдиний) транспорт
+        target_vehicle = relevant_vehicles[0]
+
+        # Знаходимо, біля якої зупинки зараз цей транспорт
+        vehicle_loc = (target_vehicle['lat'], target_vehicle['lng'])
+
+        closest_stop_index = -1
+        min_dist = float('inf')
+
+        for i, stop in enumerate(route_stops):
+            stop_loc = (stop['lat'], stop['lng'])
+            dist = geodesic(vehicle_loc, stop_loc).meters
+            if dist < min_dist:
+                min_dist = dist
+                closest_stop_index = i
+
+        # 4. Порівнюємо індекси
+        # Додаємо невеликий буфер (наприклад, якщо транспорт в 50 метрах ЗА зупинкою, то він проїхав)
+
+        status_info = {
+            "vehicle_bort": target_vehicle.get('bort', 'Unknown'),
+            "near_stop": route_stops[closest_stop_index]['title']
+        }
+
+        if closest_stop_index > user_stop_index:
+            return {**status_info, "status": "passed"}
+        elif closest_stop_index == user_stop_index:
+            # Якщо індекси рівні, треба дивитися точніше по відстані,
+            # але для початку можна сказати "прибуває"
+            return {**status_info, "status": "arriving"}
+        else:
+            stops_left = user_stop_index - closest_stop_index
+            return {**status_info, "status": "approaching", "stops_left": stops_left}
 
 
 easyway_service = EasyWayService()

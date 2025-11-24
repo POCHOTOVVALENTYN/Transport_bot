@@ -1,4 +1,4 @@
-# main.py
+
 import asyncio
 from config.settings import TELEGRAM_BOT_TOKEN
 from bot.bot import TransportBot
@@ -6,6 +6,7 @@ from utils.logger import logger
 from handlers.accessible_transport_handlers import load_easyway_route_ids
 from database.db import init_db
 from services.monitoring_service import monitoring_service
+from services.gtfs_service import gtfs_service
 
 
 
@@ -19,6 +20,12 @@ async def main():
 
     logger.info("🚀 Запуск Telegram бота...")
     bot = TransportBot(TELEGRAM_BOT_TOKEN)
+
+
+    # Завантаження GTFS
+    # Переконайтеся, що папка gtfs_static_data існує і містить файли
+    logger.info("🚀 Запуск GTFS Service...")
+    gtfs_service.load_data()  # Це синхронний виклик, але швидкий.
 
     # Ініціалізація Бази Даних
     logger.info("📂 Ініціалізація бази даних SQLite...")

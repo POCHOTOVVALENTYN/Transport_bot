@@ -12,6 +12,7 @@ from rapidfuzz import fuzz
 from bot.states import States
 from services.easyway_service import easyway_service
 from services.stop_matcher import stop_matcher
+from services.gtfs_service import gtfs_service
 
 # === КОНФІГУРАЦІЯ ПОШУКУ ===
 
@@ -413,7 +414,7 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
                 f"   {icon} {transport_name} №{r_name}\n"
                 f"   → (напрямок: {html.escape(nearest.get('direction_title') or nearest.get('direction', 'Невідомо'))})\n"
                 f"   Борт: <b>{html.escape(nearest_bort)}</b>\n"
-                f"   Прибуття: {time_icon} <b>{html.escape(nearest.get('time_left_formatted', '??'))}</b>\n"
+                f"   Прибуття: {time_icon} <b>{html.escape(nearest.get('time_left_formatted', '??'))}</b>\n\n"
             )
 
             # Інші на лінії (у тому ж напрямку)
@@ -457,7 +458,6 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
                             loc_str = "(локація невідома)"
                     message += f"   {icon} - № <b>{v_bort}</b> {loc_str}\n"
 
-
         # --- СЦЕНАРІЙ Б: ПРИБУТТЯ НЕМАЄ, АЛЕ Є ВАГОНИ В GPS (FALLBACK) ---
         elif not arrivals and total_count > 0:
 
@@ -467,23 +467,71 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             elif 2 <= total_count <= 4:
                 suffix = "и"
 
-            message += f"⚠️ <b>Маршрут №{r_name}:</b> (точний час прибуття невідомий)\n"
-            message += f"Зараз на маршруті (в цьому напрямку) працюють <b>{total_count}</b> низькопідлогов{html.escape('ий' if total_count == 1 else 'і')} {transport_name.lower()}{suffix}:\n"
+            # --- НОВА ЛОГІКА СТАТУСІВ ---
+            passed_vehicles = []
+            coming_vehicles = []
+
+            # Координати зупинки користувача
+            user_lat = stop_info.get('lat')
+            user_lon = stop_info.get('lng')
 
             for v in global_vehicles:
-                v_bort = html.escape(str(v.get('bort', 'Б/н')))
-                lat, lng = v.get('lat'), v.get('lng')
+                v_bort = str(v.get('bort', 'Б/н'))
+                v_lat = v.get('lat')
+                v_lon = v.get('lng')
+                v_dir = v.get('direction', 1)
 
+                # Перевіряємо статус
+                status = "unknown"
+                if user_lat and v_lat:
+                    status = gtfs_service.get_vehicle_status(
+                        route_name=r_name,
+                        ew_direction=v_dir,
+                        vehicle_lat=v_lat,
+                        vehicle_lon=v_lon,
+                        user_lat=user_lat,
+                        user_lon=user_lon
+                    )
+
+                # Формуємо рядок локації
                 loc_str = ""
-                if lat and lng:
-                    loc_name = stop_matcher.find_nearest_stop_name(lat, lng)
-                    loc_str = f"(біля: <i>{html.escape(loc_name)}</i>)"
+                if v_lat and v_lon:
+                    loc_name = stop_matcher.find_nearest_stop_name(v_lat, v_lon)
+                    loc_str = f"біля: <i>{html.escape(loc_name)}</i>"
                 else:
-                    loc_str = "(локація невідома)"
+                    loc_str = "локація невідома"
 
-                message += f"   {icon} - № <b>{v_bort}</b> {loc_str}\n"
+                vehicle_info = {
+                    "bort": v_bort,
+                    "loc": loc_str,
+                    "status": status
+                }
 
-        message += "\n"  # Відступ
+                if status == "passed":
+                    passed_vehicles.append(vehicle_info)
+                else:
+                    coming_vehicles.append(vehicle_info)
+
+            # --- ФОРМУВАННЯ ПОВІДОМЛЕННЯ ---
+
+            message += f"⚠️ <b>Маршрут №{r_name}:</b> (точний час невідомий)\n"
+
+            # 1. Ті, що наближаються (або статус невідомий)
+            if coming_vehicles:
+                message += f"На лінії (в цьому напрямку) є {len(coming_vehicles)} низькопідлогових. {transport_name.lower()}{suffix}:\n"
+                for v in coming_vehicles:
+                    icon_status = "🏃" if v['status'] == 'arriving' else icon
+                    message += f"   {icon_status} № <b>{v['bort']}</b> ({v['loc']})\n"
+            else:
+                message += f"🚫 На лінії немає активних вагонів, що прямують до вас.\n"
+
+            # 2. Ті, що ВЖЕ ПРОЇХАЛИ (Це те, що просив користувач!)
+            if passed_vehicles:
+                message += f"\n💨 <i>Вже проїхали вашу зупинку:</i>\n"
+                for v in passed_vehicles:
+                    message += f"   🔙 № <b>{v['bort']}</b> ({v['loc']})\n"
+
+            message += "\n"
 
     # Підвал
     if not has_data:
