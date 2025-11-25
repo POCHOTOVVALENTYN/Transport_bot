@@ -161,6 +161,45 @@ class GTFSService:
         else:
             return "approaching"  # Він ще не доїхав (індекс менше)
 
+    def get_closest_stop_name(self, route_name: str, ew_direction: int, lat: float, lon: float) -> Optional[str]:
+        """
+        Повертає назву найближчої зупинки, але ТІЛЬКИ зі списку зупинок цього маршруту.
+        Це відсіює 'ліві' зупинки інших видів транспорту.
+        """
+        if not self.is_loaded or route_name not in self.routes_db:
+            return None
+
+        # Мапінг напрямків (EW 1/2 -> GTFS 0/1)
+        gtfs_dir = 0 if ew_direction == 1 else 1
+
+        # Спробуємо знайти в основному напрямку
+        stops_seq = self.routes_db[route_name].get(gtfs_dir)
+
+        # Якщо немає, спробуємо зворотній (іноді мапінг не співпадає)
+        if not stops_seq:
+            stops_seq = self.routes_db[route_name].get(1 - gtfs_dir)
+
+        if not stops_seq:
+            return None
+
+        # Шукаємо індекс найближчої
+        idx = self._find_nearest_index(stops_seq, lat, lon)
+
+        # Якщо знайшли в цьому напрямку
+        if idx != -1:
+            return stops_seq[idx][2]  # Повертаємо name (lat, lon, name)
+
+        # Якщо не знайшли, даємо останній шанс протилежному напрямку
+        # (на випадок якщо вагон їде назад, а direction в API завис)
+        stops_seq_rev = self.routes_db[route_name].get(1 - gtfs_dir)
+        if stops_seq_rev:
+            idx_rev = self._find_nearest_index(stops_seq_rev, lat, lon)
+            if idx_rev != -1:
+                return stops_seq_rev[idx_rev][2]
+
+        return None
+
+
     def _find_nearest_index(self, sequence: List[Tuple[float, float, str]], lat: float, lon: float) -> int:
         """Знаходить індекс найближчої координат в списку."""
         best_idx = -1

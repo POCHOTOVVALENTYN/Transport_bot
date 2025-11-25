@@ -14,6 +14,7 @@ from services.easyway_service import easyway_service
 from services.stop_matcher import stop_matcher
 from services.gtfs_service import gtfs_service
 
+
 # === КОНФІГУРАЦІЯ ПОШУКУ ===
 
 SEARCH_SYNONYMS = {
@@ -439,13 +440,22 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
                 lat, lng = v.get('lat'), v.get('lng')
                 v_dir = v.get('direction')
 
-                # Локація
+                # === НОВА ЛОГІКА ЛОКАЦІЇ ===
                 loc_str = "місцезнаходження невідоме"
+                stop_name = None
+
                 if lat and lng:
-                    stop_name = stop_matcher.find_nearest_stop_name(lat, lng)
+                    # 1. СПРОБА №1: Шукаємо зупинку САМЕ ЦЬОГО маршруту (через GTFS)
+                    # Це точно дасть трамвайну зупинку, а не випадкову автобусну поруч.
+                    stop_name = gtfs_service.get_closest_stop_name(r_name, v_dir, lat, lng)
+
+                    # 2. СПРОБА №2: Якщо GTFS не знає цього маршруту, використовуємо старий метод (найближчу геометрично)
+                    if not stop_name:
+                        stop_name = stop_matcher.find_nearest_stop_name(lat, lng)
+
                     if stop_name:
                         loc_str = f"біля: {html.escape(stop_name)}"
-
+                # ============================
                 # Напрямок
                 dir_info = ""
                 if target_dir is not None and v_dir is not None:
