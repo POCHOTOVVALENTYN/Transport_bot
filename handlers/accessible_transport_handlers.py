@@ -11,7 +11,6 @@ from rapidfuzz import fuzz
 
 from bot.states import States
 from services.easyway_service import easyway_service
-from services.stop_matcher import stop_matcher
 from services.gtfs_service import gtfs_service
 
 # === КОНФІГУРАЦІЯ ПОШУКУ ===
@@ -213,7 +212,6 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
 async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Крок 3: Отримання даних.
-    ВИПРАВЛЕНО: Примусово використовуємо Головний ID маршруту для пошуку GPS.
     """
     query = update.callback_query
     await query.answer()
@@ -287,6 +285,13 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
 
             for i, (r_name, r_id, r_type, target_dir) in enumerate(routes_to_scan):
                 raw_vehicles = global_results[i] if i < len(global_results) else []
+
+                # --- [DEBUG LOG] ---
+                # Цей лог покаже, що САМЕ повернув сервіс у бот.
+                # Якщо тут 0, а в логах сервісу "Всі ID...", значить сервіс фільтрує перед поверненням.
+                logger.info(
+                    f"[DEBUG] Route {r_name} ({r_type}): Service returned {len(raw_vehicles) if raw_vehicles else 0} items")
+
                 unique_key = f"{r_name}_{r_type}"
                 global_route_data[unique_key] = raw_vehicles
                 routes_meta_info[unique_key] = {
@@ -311,14 +316,13 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
         return States.ACCESSIBLE_SEARCH_STOP
 
 
-# === ЛОГІКА ВІДОБРАЖЕННЯ (Оновлено) ===
+# === ЛОГІКА ВІДОБРАЖЕННЯ (ФІНАЛЬНА) ===
 
 async def _render_accessible_response(query, stop_title: str, stop_info: dict, global_route_data: dict,
                                       routes_meta: dict):
     """
     Формує повідомлення.
-    Сценарій А (Arrivals): Є прогноз -> показуємо прогноз.
-    Сценарій Б (Only GPS): Немає прогнозу -> показуємо кількість машин і просимо чекати.
+    Тепер гарантовано показує маршрут, якщо global_vehicles не порожній.
     """
 
     message = (
@@ -364,7 +368,8 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             r_name = r_meta.get('name')
             r_type = r_meta.get('type')
 
-        global_vehicles = global_route_data.get(key, [])
+        # Отримуємо список машин. Якщо None -> порожній список.
+        global_vehicles = global_route_data.get(key) or []
         arrivals = arrivals_by_key.get(key, [])
 
         icon = '🚎' if r_type == 'trol' else '🚋'
@@ -389,27 +394,21 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             )
             continue
 
-        # === СЦЕНАРІЙ Б: НЕМАЄ ПРОГНОЗУ, АЛЕ Є МАШИНИ НА ЛІНІЇ ===
-        # Якщо ми тут, значить API не дало прогнозу (вагон далеко, їде в депо або API глючить).
-        # Але сканер GPS знайшов машини (global_vehicles).
-        # Ми просто показуємо їх кількість, щоб заспокоїти користувача.
-
-        elif not arrivals and global_vehicles:
+        # === СЦЕНАРІЙ Б: НЕМАЄ ПРОГНОЗУ, АЛЕ Є GPS ===
+        # Якщо список global_vehicles не порожній - ми ЗОБОВ'ЯЗАНІ показати дані.
+        elif global_vehicles:
             vehicles_count = len(global_vehicles)
 
-            # Якщо машин 0 - пропускаємо, в кінці виведеться загальне "Інформація відсутня"
-            if vehicles_count == 0:
-                continue
+            # Подвійна перевірка, про всяк випадок
+            if vehicles_count > 0:
+                has_data = True
+                message += f"⚠️ <b>Маршрут №{r_name}:</b>\n"
+                message += f"⚡️ На даному маршруті працює <b>{vehicles_count}</b> од. електротранспорту \n"
 
-            has_data = True
-            message += f"⚠️ <b>Маршрут №{r_name}:</b>\n"
-            message += f"На маршруті працює <b>{vehicles_count}</b> од. транспорту.\n"
-
-            # Текст про те, що треба почекати
-            message += (
-                f"ℹ️ <i>Транспорт вже проїхав Вашу зупинку або рухається в іншому напрямку.\n"
-                f"Будь ласка, зачекайте, поки він завершить коло та почне рух до Вас.</i>\n\n"
-            )
+                message += (
+                    f"ℹ️ <i>Електротранспорт вже проїхав Вашу зупинку або рухається в іншому напрямку ↩️ (якщо на маршруті 1 од.)\n"
+                    f"⏳ Будь ласка, зачекайте, поки він завершить коло та почне рух до Вас.</i>\n\n"
+                )
 
     # Підвал
     if not has_data:

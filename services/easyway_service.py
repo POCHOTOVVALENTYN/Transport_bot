@@ -100,7 +100,6 @@ class EasyWayService:
                 if attempt < 2: await asyncio.sleep(1)
         return {"error": "Сервер не відповів."}
 
-
     async def get_stop_info_v12(self, stop_id: int) -> dict:
         """Отримання інформації про зупинку"""
         if stop_id in self.stop_cache:
@@ -142,7 +141,7 @@ class EasyWayService:
         params = {
             "login": self.config.LOGIN,
             "password": self.config.PASSWORD,
-            "function": "routes.GetRouteGPS",  # <--- ЗМІНЕНО З GetRouteInfo
+            "function": "routes.GetRouteGPS",
             "city": self.config.DEFAULT_CITY,
             "id": route_id,
             "format": self.config.DEFAULT_FORMAT,
@@ -163,8 +162,6 @@ class EasyWayService:
 
         return []
 
-
-
     def _parse_route_gps(self, data: dict) -> List[dict]:
         """Парсить відповідь routes.GetRouteGPS з використанням мапінгу"""
         accessible_vehicles = []
@@ -176,11 +173,11 @@ class EasyWayService:
             elif not isinstance(vehicles, list):
                 vehicles = []
 
-            # Лог залишаємо, щоб ви могли "виловити" ID справжнього вагона 3218
+            # Лог для відладки
             if vehicles:
                 logger.info(f"🔍 RAW VEHICLE DATA (First item): {vehicles[0]}")
 
-            # Тимчасовий лог для відладки
+            # Тимчасовий лог
             all_ids = [str(v.get("id")) for v in vehicles]
             logger.info(f"📋 Всі ID на маршруті: {all_ids}")
 
@@ -190,7 +187,7 @@ class EasyWayService:
                 # 1. Отримуємо сирий ID
                 raw_id = str(v.get("id") or v.get("bortNumber") or "").strip()
 
-                # 2. Мапінг (ID -> Реальний номер)
+                # 2. Мапінг (ID -> Реальний номер) - тепер майже не використовується через динамічні ID
                 real_bort = VEHICLE_ID_MAP.get(raw_id)
                 bort_number = real_bort if real_bort else raw_id
 
@@ -198,17 +195,18 @@ class EasyWayService:
                 lng = float(v.get("lng", 0))
                 direction = int(v.get("direction", 0))
 
-                # === СУВОРА ПЕРЕВІРКА (STRICT MODE) ===
+                # === ЛОГІКА ВИЗНАЧЕННЯ ІНКЛЮЗИВНОСТІ ===
                 is_accessible = False
 
-                # а) ТІЛЬКИ якщо номер є в нашому білому списку
+                # а) Якщо номер випадково співпав з білим списком (для статичних ID)
                 if bort_number in ACCESSIBLE_TRAMS or bort_number in ACCESSIBLE_TROLS:
                     is_accessible = True
 
-                # б) ПРИБИРАЄМО ЦЕЙ БЛОК!
-                # Ми більше не віримо API, бо воно бреше про 7 вагонів.
-                # if v.get("handicapped"):
-                #    is_accessible = True
+                # б) ПОВЕРТАЄМО ДОВІРУ ДО API (Fix для динамічних ID)
+                # Якщо API каже, що транспорт низькопідлоговий (handicapped=1), ми віримо.
+                # Це єдиний спосіб побачити транспорт, коли ID щодня змінюються.
+                elif v.get("handicapped"):
+                    is_accessible = True
 
                 if is_accessible:
                     accessible_vehicles.append({
@@ -230,7 +228,6 @@ class EasyWayService:
         return f"{base}/?{query_string}"
 
     def _parse_places_response(self, data: dict, root_key: str = "item") -> dict:
-        # (Логіка парсингу пошуку залишається старою, вона працює)
         try:
             items = data.get(root_key, [])
             if not isinstance(items, list): items = [items]
@@ -273,14 +270,9 @@ class EasyWayService:
                 "lng": float(stop.get("lng", 0)),
                 "routes": [],
             }
-            # Обробка структури transports (v1.2)
-            # API може повертати як список 'transports', так і плоский 'routes' в залежності від міста
-            # Але для v1.2 в Одесі часто використовується 'routes' прямо в корені або вкладено
 
-            # Спробуємо знайти маршрути
             raw_routes = stop.get("routes", [])
             if not raw_routes:
-                # Спробуємо через transports, якщо структура складніша
                 transports = stop.get("transports", [])
                 if isinstance(transports, list):
                     for t in transports:
@@ -294,14 +286,9 @@ class EasyWayService:
                 raw_routes = [raw_routes]
 
             for route in raw_routes:
-                # === ВСТАВИТИ ЦЕЙ РЯДОК ТУТ ===
-                logger.info(f"🔍 Arrival Raw Data: {route}")
-                # ==============================
-
                 bort_number = str(route.get("bortNumber", "")).strip()
                 transport_key = route.get("transportKey")
 
-                # Визначаємо інклюзивність
                 is_api_handicapped = route.get("handicapped", False)
                 is_local_handicapped = False
                 if transport_key == 'tram' and bort_number in ACCESSIBLE_TRAMS:
@@ -312,8 +299,8 @@ class EasyWayService:
                 parsed_route = {
                     "id": route.get("id"),
                     "title": route.get("title"),
-                    "direction": int(route.get("direction", 0)),  # <--- ЗБЕРІГАЄМО НАПРЯМОК (1/2)
-                    "direction_title": route.get("directionTitle"),  # Текстовий напрямок
+                    "direction": int(route.get("direction", 0)),
+                    "direction_title": route.get("directionTitle"),
                     "transport_name": route.get("transportName"),
                     "transport_key": transport_key,
                     "handicapped": is_api_handicapped or is_local_handicapped,
@@ -341,67 +328,8 @@ class EasyWayService:
         return self.time_icons.get(key, "❓")
 
     async def check_vehicle_status_relative_to_stop(self, route_id: int, user_stop_id: int, direction: int) -> dict:
-        """
-        Перевіряє, де знаходиться транспорт відносно зупинки користувача.
-        Повертає статус: 'approaching', 'passed' або 'unknown'.
-        """
-
-        # 1. Отримуємо весь транспорт на маршруті
-        vehicles = await self.get_vehicles_on_route(route_id)
-
-        # Фільтруємо транспорт тільки потрібного напрямку (щоб не рахувати зустрічні)
-        relevant_vehicles = [v for v in vehicles if v['direction'] == direction]
-
-        if not relevant_vehicles:
-            return {"status": "no_vehicles"}
-
-        # 2. Отримуємо послідовність зупинок (Це треба реалізувати окремо, або брати з GTFS)
-        # Припустимо, у нас є закешований список зупинок для цього маршруту і напрямку
-        route_stops = await self.get_route_stops_sequence(route_id, direction)
-
-        if not route_stops:
-            return {"status": "unknown_route_path"}
-
-        # Знаходимо індекс зупинки користувача в цьому списку
-        user_stop_index = next((i for i, s in enumerate(route_stops) if s['id'] == user_stop_id), None)
-
-        if user_stop_index is None:
-            return {"status": "stop_not_on_route"}
-
-        # 3. Аналізуємо найближчий транспорт
-        # Для спрощення беремо перший (або єдиний) транспорт
-        target_vehicle = relevant_vehicles[0]
-
-        # Знаходимо, біля якої зупинки зараз цей транспорт
-        vehicle_loc = (target_vehicle['lat'], target_vehicle['lng'])
-
-        closest_stop_index = -1
-        min_dist = float('inf')
-
-        for i, stop in enumerate(route_stops):
-            stop_loc = (stop['lat'], stop['lng'])
-            dist = geodesic(vehicle_loc, stop_loc).meters
-            if dist < min_dist:
-                min_dist = dist
-                closest_stop_index = i
-
-        # 4. Порівнюємо індекси
-        # Додаємо невеликий буфер (наприклад, якщо транспорт в 50 метрах ЗА зупинкою, то він проїхав)
-
-        status_info = {
-            "vehicle_bort": target_vehicle.get('bort', 'Unknown'),
-            "near_stop": route_stops[closest_stop_index]['title']
-        }
-
-        if closest_stop_index > user_stop_index:
-            return {**status_info, "status": "passed"}
-        elif closest_stop_index == user_stop_index:
-            # Якщо індекси рівні, треба дивитися точніше по відстані,
-            # але для початку можна сказати "прибуває"
-            return {**status_info, "status": "arriving"}
-        else:
-            stops_left = user_stop_index - closest_stop_index
-            return {**status_info, "status": "approaching", "stops_left": stops_left}
+        # Цей метод можна залишити як є або доопрацювати пізніше
+        return {"status": "unknown"}
 
 
 easyway_service = EasyWayService()
