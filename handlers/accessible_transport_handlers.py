@@ -445,11 +445,9 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
                 stop_name = None
 
                 if lat and lng:
-                    # 1. СПРОБА №1: Шукаємо зупинку САМЕ ЦЬОГО маршруту (через GTFS)
-                    # Це точно дасть трамвайну зупинку, а не випадкову автобусну поруч.
-                    stop_name = gtfs_service.get_closest_stop_name(r_name, v_dir, lat, lng)
+                    # Передаємо r_type!
+                    stop_name = gtfs_service.get_closest_stop_name(r_name, r_type, v_dir, lat, lng)
 
-                    # 2. СПРОБА №2: Якщо GTFS не знає цього маршруту, використовуємо старий метод (найближчу геометрично)
                     if not stop_name:
                         stop_name = stop_matcher.find_nearest_stop_name(lat, lng)
 
