@@ -128,14 +128,13 @@ class GTFSService:
     def get_closest_stop_name(self, route_name: str, transport_type: str, ew_direction: int, lat: float, lon: float) -> \
     Optional[str]:
         """
-        Шукає найближчу зупинку серед УСІХ відомих варіантів руху даного маршруту.
-        Ігнорує direction, бо він ненадійний.
+        Шукає найближчу зупинку.
+        ПОВЕРТАЄ None, якщо вагон занадто далеко від маршруту (> 500м).
+        Це фільтрує сміття з інших маршрутів.
         """
         if not self.is_loaded: return None
 
         route_name = str(route_name).strip()
-
-        # Нормалізація типу
         if 'trol' in transport_type:
             transport_type = 'trol'
         elif 'tram' in transport_type:
@@ -143,30 +142,36 @@ class GTFSService:
 
         db_key = (route_name, transport_type)
 
-        # Fallback: якщо не знайшли ('10', 'tram'), пробуємо знайти хоч щось
         if db_key not in self.routes_db:
-            # Лог для діагностики
-            # logger.warning(f"Route key {db_key} not found in GTFS DB.")
-            return None
+            # Fallback
+            if (route_name, 'tram') in self.routes_db:
+                db_key = (route_name, 'tram')
+            elif (route_name, 'trol') in self.routes_db:
+                db_key = (route_name, 'trol')
+            else:
+                return None
 
-        # Отримуємо список усіх варіантів руху (наприклад: [послідовність_туди, послідовність_назад])
         all_sequences = self.routes_db[db_key]
 
         best_stop_name = None
         global_min_dist = float('inf')
 
-        # Перебираємо ВСІ варіанти маршруту
+        # Перебираємо всі варіанти руху
         for seq in all_sequences:
             idx, dist = self._find_nearest_in_seq(seq, lat, lon)
             if idx != -1 and dist < global_min_dist:
                 global_min_dist = dist
                 best_stop_name = seq[idx][2]
 
-        # Якщо знайшли щось адекватне (ближче 1 км, щоб не мапити на інший кінець міста)
-        # Але для трамваїв іноді GPS стрибає, тому поріг м'який.
-        if best_stop_name:
+        # === ГОЛОВНА ЗМІНА: ФІЛЬТР ВІДСТАНІ ===
+        # 0.005 градусів ~= 500-600 метрів.
+        # Якщо найближча зупинка далі, значить вагон не на цьому маршруті.
+        MAX_DISTANCE_THRESHOLD = 0.005
+
+        if best_stop_name and global_min_dist <= MAX_DISTANCE_THRESHOLD:
             return best_stop_name
 
+        # Якщо далеко - повертаємо None, щоб хендлер його приховав
         return None
 
     def _find_nearest_in_seq(self, sequence: List[Tuple[float, float, str]], lat: float, lon: float) -> Tuple[

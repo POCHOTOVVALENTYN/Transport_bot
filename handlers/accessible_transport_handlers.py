@@ -451,40 +451,52 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
                 f"   Прибуття: {time_icon} <b>{html.escape(nearest.get('time_left_formatted', '??'))}</b>\n\n"
             )
 
-        # СЦЕНАРІЙ Б: НЕМАЄ ПРОГНОЗУ, АЛЕ Є ТРАНСПОРТ (Включаючи зустрічний)
-        elif not arrivals and total_count > 0:
-            message += f"⚠️ <b>Маршрут №{r_name}:</b>\n"
-            message += f"На маршруті працює <b>{total_count}</b> од. низькопідлогового транспорту:\n"
+            # ... (всередині for key in sorted_keys) ...
+
+        # СЦЕНАРІЙ Б: НЕМАЄ ПРОГНОЗУ, АЛЕ Є GPS
+        elif not arrivals and global_vehicles:
+
+            # 1. Спочатку фільтруємо "фантомів" (далеко від маршруту)
+            valid_vehicles = []
 
             for v in global_vehicles:
+                lat, lng = v.get('lat'), v.get('lng')
+                if not lat or not lng: continue
+
+                # Перевіряємо, чи вагон на маршруті
+                stop_name = gtfs_service.get_closest_stop_name(r_name, r_type, v.get('direction'), lat, lng)
+
+                if stop_name:
+                    # Зберігаємо знайдену назву прямо в об'єкт, щоб не шукати двічі
+                    v['matched_stop'] = stop_name
+                    valid_vehicles.append(v)
+
+            # Якщо після фільтрації нікого не лишилось - показуємо "немає даних"
+            if not valid_vehicles:
+                message += (
+                    f"⚠️ <b>Маршрут №{r_name}:</b>\n"
+                    f"На жаль, інформація про найближчий низькопідлоговий транспорт наразі відсутня 🤷‍♂️\n"
+                    f"🔍 <i>Можливо, транспорт знаходиться в депо або на іншому маршруті.</i>\n\n"
+                )
+                continue
+
+            # 2. Формуємо список
+            message += f"⚠️ <b>Маршрут №{r_name}:</b>\n"
+            message += f"На маршруті працює <b>{len(valid_vehicles)}</b> од. низькопідлогового транспорту:\n"
+
+            for v in valid_vehicles:
                 v_bort = html.escape(str(v.get('bort', 'Б/н')))
                 raw_id = str(v.get('raw_id', ''))
 
-                # Якщо номер довгий (4+ цифри для Одеси це зазвичай ID) і не схожий на звичайний борт
-                # І при цьому він співпадає з raw_id (тобто ми не зробили заміну по мапінгу)
                 if len(v_bort) > 4 and v_bort == raw_id:
-                    display_label = f"ID трекера: {v_bort}"
+                    display_label = f"ID: {v_bort}"
                 else:
                     display_label = f"№ <b>{v_bort}</b>"
 
-                lat, lng = v.get('lat'), v.get('lng')
-                v_dir = v.get('direction')
+                loc_str = f"біля: {html.escape(v['matched_stop'])}"
 
-                # === НОВА ЛОГІКА ЛОКАЦІЇ ===
-                loc_str = "місцезнаходження невідоме"
-                stop_name = None
-
-                if lat and lng:
-                    # Передаємо r_type!
-                    stop_name = gtfs_service.get_closest_stop_name(r_name, r_type, v_dir, lat, lng)
-
-                    if not stop_name:
-                        stop_name = stop_matcher.find_nearest_stop_name(lat, lng)
-
-                    if stop_name:
-                        loc_str = f"біля: {html.escape(stop_name)}"
-                # ============================
                 # Напрямок
+                v_dir = v.get('direction')
                 dir_info = ""
                 if target_dir is not None and v_dir is not None:
                     if v_dir == target_dir:
@@ -493,7 +505,7 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
                         dir_info = " (↩️ зустрічний)"
                 else:
                     dir_icon = "▶️" if v_dir == 1 else "◀️"
-                    dir_info = f" (напр. {dir_icon})"
+                    dir_info = f" ({dir_icon})"
 
                 message += f"▫️ {display_label} - {loc_str}{dir_info}\n"
 
