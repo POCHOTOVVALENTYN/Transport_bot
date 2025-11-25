@@ -234,57 +234,61 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
 
         stop_title = html.escape(stop_info.get("title", f"Зупинка {stop_id}"))
 
-        # 2. Підготовка мапи Головних ID (з main.py)
-        # Це наша база знань: "Маршрут 28" -> ID 123 (де є GPS)
-        route_map = context.bot_data.get('easyway_structured_map', {})
+        # 2. Підготовка мапи Головних ID
+        # РОЗДІЛЯЄМО Трамваї та Тролейбуси!
+        # name_to_main_id = { ("10", "tram"): 123, ("10", "trol"): 456 }
         name_to_main_id = {}
         name_meta = {}
 
-        # Створюємо словник: "28" -> 309 (головний ID)
+        route_map = context.bot_data.get('easyway_structured_map', {})
+
         for kind in ['tram', 'trolley']:
             transport_type_code = 'tram' if kind == 'tram' else 'trol'
             for r in route_map.get(kind, []):
                 clean_name = str(r['name']).strip()
-                name_to_main_id[clean_name] = r['id']
-                name_meta[clean_name] = transport_type_code
+                # Ключ тепер кортеж: (Назва, Тип)
+                name_to_main_id[(clean_name, transport_type_code)] = r['id']
+                # Також зберігаємо просто за назвою як fallback (але це небезпечно для №10)
+                # name_meta[clean_name] = transport_type_code
 
         routes_to_scan = []
-        seen_route_names = set()
+        seen_routes = set()  # Зберігаємо пари (назва, тип), щоб не дублювати
 
-        # 3. Перебираємо маршрути, які проходять через цю зупинку
+        # 3. Перебираємо маршрути зупинки
         found_routes = stop_info.get('routes', [])
-        if not found_routes:
-            logger.warning(f"Stop {stop_id} returned NO routes structure.")
 
         for r in found_routes:
             r_title = str(r.get('title', '')).strip()
             local_id = r.get('id')
             r_direction = r.get('direction')
 
-            # --- ГОЛОВНА ЗМІНА ---
-            # Ми шукаємо Головний ID для цієї назви маршруту.
-            # Якщо він є в нашій базі - беремо його. Якщо ні - беремо той, що дала зупинка.
-            target_id = name_to_main_id.get(r_title, local_id)
+            # Визначаємо тип з API (transportKey)
+            api_transport_key = r.get('transportKey', '')
+            if api_transport_key == 'trolley': api_transport_key = 'trol'
 
-            # Визначаємо тип
-            transport_key = r.get('transportKey')
-            if not transport_key and r_title in name_meta:
-                transport_key = name_meta[r_title]
+            # Якщо API не дало типу, пробуємо вгадати (але це ризиковано для №10)
+            if not api_transport_key:
+                # Тут ми не можемо просто взяти з name_meta, бо там може бути конфлікт.
+                # Спробуємо знайти в name_to_main_id обидва варіанти
+                if (r_title, 'tram') in name_to_main_id:
+                    api_transport_key = 'tram'
+                elif (r_title, 'trol') in name_to_main_id:
+                    api_transport_key = 'trol'
 
-            # Нормалізуємо 'trolley' -> 'trol'
-            if transport_key == 'trolley': transport_key = 'trol'
+            is_electric = (api_transport_key in ['tram', 'trol'])
 
-            # Перевіряємо, чи це електротранспорт
-            is_electric = (transport_key in ['tram', 'trol'])
+            if is_electric:
+                # Ключ для унікальності
+                unique_key = (r_title, api_transport_key)
 
-            # Додаємо до сканування, якщо ще не додавали цю назву
-            # (щоб не сканувати один маршрут двічі, якщо зупинка дає дублі)
-            if is_electric and r_title not in seen_route_names:
-                # Логуємо, щоб бачити в консолі, що відбувається
-                logger.info(f"🔎 Scanning Route: {r_title} (Main ID: {target_id}, Local ID: {local_id})")
+                if unique_key not in seen_routes:
+                    # Шукаємо Головний ID саме для цього ТИПУ
+                    target_id = name_to_main_id.get(unique_key, local_id)
 
-                routes_to_scan.append((r_title, target_id, transport_key, r_direction))
-                seen_route_names.add(r_title)
+                    logger.info(f"🔎 Scanning {api_transport_key.upper()} {r_title} (ID: {target_id})")
+
+                    routes_to_scan.append((r_title, target_id, api_transport_key, r_direction))
+                    seen_routes.add(unique_key)
 
         # 4. Скануємо GPS (паралельно)
         # Використовуємо target_id, який має бути Головним
@@ -294,22 +298,30 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
         if tasks:
             global_results = await asyncio.gather(*tasks)
 
-        # 5. Групуємо результати
-        global_route_data = {}
-        routes_meta_info = {}
+            # 5. Групуємо результати
+            # global_route_data: { "10": [vehicles...], "5": [...] } -> ТУТ КОНФЛІКТ!
+            # Ми повинні змінити ключ на унікальний, наприклад "10_tram"
 
-        for i, (r_name, r_id, r_type, target_dir) in enumerate(routes_to_scan):
-            raw_vehicles = global_results[i] if i < len(global_results) else []
+            global_route_data = {}
+            routes_meta_info = {}
 
-            # Лог кількості знайдених машин
-            if len(raw_vehicles) > 0:
-                logger.info(f"✅ Found {len(raw_vehicles)} vehicles on route {r_name}")
+            for i, (r_name, r_id, r_type, target_dir) in enumerate(routes_to_scan):
+                raw_vehicles = global_results[i] if i < len(global_results) else []
 
-            global_route_data[r_name] = raw_vehicles
-            routes_meta_info[r_name] = {'type': r_type, 'stop_direction': target_dir}
+                # Унікальний ключ для словника даних
+                unique_key = f"{r_name}_{r_type}"
 
-        # 6. Рендеримо відповідь
-        await _render_accessible_response(query, stop_title, stop_info, global_route_data, routes_meta_info)
+                global_route_data[unique_key] = raw_vehicles
+
+                # Зберігаємо метадані
+                routes_meta_info[unique_key] = {
+                    'name': r_name,  # Чиста назва для відображення ("10")
+                    'type': r_type,
+                    'stop_direction': target_dir
+                }
+
+            # 6. Рендеримо
+            await _render_accessible_response(query, stop_title, stop_info, global_route_data, routes_meta_info)
 
         return States.ACCESSIBLE_SHOWING_RESULTS
 
@@ -344,31 +356,49 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
         f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n"
     )
 
-    # 1. Обробляємо прибуття
+    # 1. Обробляємо прибуття (Arrivals)
     handicapped_arrivals = easyway_service.filter_handicapped_routes(stop_info)
-    arrivals_by_route = {}
+    arrivals_by_key = {}
+
     for arr in handicapped_arrivals:
         r_title = str(arr.get('title')).strip()
-        if r_title not in arrivals_by_route:
-            arrivals_by_route[r_title] = []
-        arrivals_by_route[r_title].append(arr)
+        r_key = arr.get('transport_key')
+        if r_key == 'trolley': r_key = 'trol'
 
-    # 2. Складаємо повний список маршрутів
-    all_routes = set(global_route_data.keys()) | set(arrivals_by_route.keys())
-    sorted_routes = sorted(list(all_routes), key=lambda x: int(re.sub(r'\D', '', x)) if re.sub(r'\D', '', x) else 999)
+        # Формуємо такий самий унікальний ключ: "10_tram"
+        unique_key = f"{r_title}_{r_key}"
+
+        if unique_key not in arrivals_by_key:
+            arrivals_by_key[unique_key] = []
+        arrivals_by_key[unique_key].append(arr)
+
+    # 2. Складаємо список всіх маршрутів (ключі тепер типу "10_tram", "5_trol")
+    all_keys = set(global_route_data.keys()) | set(arrivals_by_key.keys())
+
+    # Сортуємо. x.split('_')[0] дасть номер ("10")
+    sorted_keys = sorted(list(all_keys), key=lambda x: int(re.sub(r'\D', '', x.split('_')[0])) if re.sub(r'\D', '',
+                                                                                                         x.split('_')[
+                                                                                                             0]) else 999)
 
     has_data = False
 
-    for r_name in sorted_routes:
-        global_vehicles = global_route_data.get(r_name, [])
-        arrivals = arrivals_by_route.get(r_name, [])
-        r_meta = routes_meta.get(r_name, {})
+    for key in sorted_keys:
+        # Отримуємо чисті дані з метаданих (або парсимо з ключа)
+        r_meta = routes_meta.get(key, {})
 
-        # Наш напрямок (напрямок зупинки)
+        # Якщо в meta немає (наприклад, є тільки прибуття, а сканування не було), відновлюємо з ключа
+        if not r_meta:
+            parts = key.split('_')
+            r_name = parts[0]
+            r_type = parts[1] if len(parts) > 1 else 'tram'
+        else:
+            r_name = r_meta.get('name')
+            r_type = r_meta.get('type')
+
         target_dir = r_meta.get('stop_direction')
 
-        r_type = r_meta.get('type', 'tram')
-        if not r_type and arrivals: r_type = arrivals[0].get('transport_key', 'tram')
+        global_vehicles = global_route_data.get(key, [])
+        arrivals = arrivals_by_key.get(key, [])
 
         icon = '🚎' if r_type == 'trol' else '🚋'
         transport_name = 'Тролейбус' if r_type == 'trol' else 'Трамвай'
