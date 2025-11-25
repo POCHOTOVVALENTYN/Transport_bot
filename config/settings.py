@@ -21,6 +21,9 @@ DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{D
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 # Шлях до Google Credentials (має збігатися з тим, куди ми монтуємо volume в docker-compose)
 CREDENTIALS_PATH = BASE_DIR / "config" / "google_credentials.json"
+# ID вашої таблиці (можна взяти з URL таблиці: docs.google.com/spreadsheets/d/ТУТ_ВАШ_ID/edit)
+GOOGLE_SHEET_ID = '1kbQ_WuZy79xwGRXgCSIp-unBiGY42YQLH9V3zbqnoXo'
+
 
 # Основні
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -37,8 +40,9 @@ GENERAL_ADMIN_IDS = [
 
 # Google Sheets
 GOOGLE_SHEETS_ID = os.getenv("GOOGLE_SHEETS_ID")
-CREDENTIALS_PATH = BASE_DIR / "integrations/google_sheets/credentials.json"
-
+#CREDENTIALS_PATH = BASE_DIR / "integrations/google_sheets/credentials.json"
+# Шлях до JSON-файлу ключа сервісного акаунту
+GOOGLE_SHEETS_CREDENTIALS_FILE = BASE_DIR / "integrations/google_sheets/credentials.json"
 
 # Налаштування для Docker контейнера на порту 5433
 DB_USER = os.getenv("DB_USER", "bot_user")
