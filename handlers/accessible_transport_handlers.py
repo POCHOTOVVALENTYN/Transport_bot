@@ -213,7 +213,7 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
 async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Крок 3: Отримання даних.
-    Ми аналізуємо УСІ маршрути і передаємо ВЕСЬ транспорт (навіть зустрічний).
+    ВИПРАВЛЕНО: Примусово використовуємо Головний ID маршруту для пошуку GPS.
     """
     query = update.callback_query
     await query.answer()
@@ -222,7 +222,7 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
         stop_id = int(query.data.split("stop_")[-1])
         logger.info(f"User {query.from_user.id} selected stop_id: {stop_id}")
 
-        await query.edit_message_text("🔄 Сканую маршрути...")
+        await query.edit_message_text("🔄 Сканую маршрути та шукаю транспорт...")
 
         # 1. Отримуємо дані про зупинку
         stop_info = await easyway_service.get_stop_info_v12(stop_id=stop_id)
@@ -233,66 +233,81 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
 
         stop_title = html.escape(stop_info.get("title", f"Зупинка {stop_id}"))
 
-        # 2. Підготовка до мапінгу ID
+        # 2. Підготовка мапи Головних ID (з main.py)
+        # Це наша база знань: "Маршрут 28" -> ID 123 (де є GPS)
         route_map = context.bot_data.get('easyway_structured_map', {})
-        name_to_id = {}
+        name_to_main_id = {}
         name_meta = {}
 
+        # Створюємо словник: "28" -> 309 (головний ID)
         for kind in ['tram', 'trolley']:
             transport_type_code = 'tram' if kind == 'tram' else 'trol'
             for r in route_map.get(kind, []):
                 clean_name = str(r['name']).strip()
-                name_to_id[clean_name] = r['id']
+                name_to_main_id[clean_name] = r['id']
                 name_meta[clean_name] = transport_type_code
 
         routes_to_scan = []
+        seen_route_names = set()
 
-        for r in stop_info.get('routes', []):
+        # 3. Перебираємо маршрути, які проходять через цю зупинку
+        found_routes = stop_info.get('routes', [])
+        if not found_routes:
+            logger.warning(f"Stop {stop_id} returned NO routes structure.")
+
+        for r in found_routes:
             r_title = str(r.get('title', '')).strip()
-            r_id = r.get('id')
-            r_direction = r.get('direction')  # Напрямок зупинки (1 або 2)
+            local_id = r.get('id')
+            r_direction = r.get('direction')
 
-            if not r_id or int(r_id) == 0:
-                if r_title in name_to_id:
-                    r_id = name_to_id[r_title]
-                else:
-                    continue
+            # --- ГОЛОВНА ЗМІНА ---
+            # Ми шукаємо Головний ID для цієї назви маршруту.
+            # Якщо він є в нашій базі - беремо його. Якщо ні - беремо той, що дала зупинка.
+            target_id = name_to_main_id.get(r_title, local_id)
 
+            # Визначаємо тип
             transport_key = r.get('transportKey')
             if not transport_key and r_title in name_meta:
                 transport_key = name_meta[r_title]
+
+            # Нормалізуємо 'trolley' -> 'trol'
             if transport_key == 'trolley': transport_key = 'trol'
 
+            # Перевіряємо, чи це електротранспорт
             is_electric = (transport_key in ['tram', 'trol'])
 
-            if is_electric:
-                if not any(x[1] == r_id for x in routes_to_scan):
-                    routes_to_scan.append((r_title, r_id, transport_key, r_direction))
+            # Додаємо до сканування, якщо ще не додавали цю назву
+            # (щоб не сканувати один маршрут двічі, якщо зупинка дає дублі)
+            if is_electric and r_title not in seen_route_names:
+                # Логуємо, щоб бачити в консолі, що відбувається
+                logger.info(f"🔎 Scanning Route: {r_title} (Main ID: {target_id}, Local ID: {local_id})")
 
-        # 3. Скануємо маршрути
+                routes_to_scan.append((r_title, target_id, transport_key, r_direction))
+                seen_route_names.add(r_title)
+
+        # 4. Скануємо GPS (паралельно)
+        # Використовуємо target_id, який має бути Головним
         tasks = [easyway_service.get_vehicles_on_route(r_id) for _, r_id, _, _ in routes_to_scan]
 
         global_results = []
         if tasks:
             global_results = await asyncio.gather(*tasks)
 
-        # Групуємо результати
+        # 5. Групуємо результати
         global_route_data = {}
         routes_meta_info = {}
 
         for i, (r_name, r_id, r_type, target_dir) in enumerate(routes_to_scan):
             raw_vehicles = global_results[i] if i < len(global_results) else []
 
-            # === ЗМІНА: ПРИБРАЛИ ФІЛЬТРАЦІЮ ===
-            # Ми беремо ВСІ вагони (raw_vehicles), незалежно від напрямку.
-            # Фільтрувати будемо візуально у функції відображення.
+            # Лог кількості знайдених машин
+            if len(raw_vehicles) > 0:
+                logger.info(f"✅ Found {len(raw_vehicles)} vehicles on route {r_name}")
 
             global_route_data[r_name] = raw_vehicles
-
-            # Зберігаємо target_dir, щоб знати, який напрямок є "нашим"
             routes_meta_info[r_name] = {'type': r_type, 'stop_direction': target_dir}
 
-        # 4. Передаємо дані
+        # 6. Рендеримо відповідь
         await _render_accessible_response(query, stop_title, stop_info, global_route_data, routes_meta_info)
 
         return States.ACCESSIBLE_SHOWING_RESULTS
@@ -357,14 +372,23 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
         icon = '🚎' if r_type == 'trol' else '🚋'
         transport_name = 'Тролейбус' if r_type == 'trol' else 'Трамвай'
 
-        # Унікальні борти
         unique_borts = set()
         for arr in arrivals:
             if arr.get('bort_number'): unique_borts.add(str(arr.get('bort_number')))
-        for gv in global_vehicles:
-            if gv.get('bort'): unique_borts.add(str(gv.get('bort')))
 
+        # Рахуємо всі машини з GPS, навіть якщо борт не розпізнано
+        gps_count = 0
+        for gv in global_vehicles:
+            bort = str(gv.get('bort') or '').strip()
+            if bort:
+                unique_borts.add(bort)
+            gps_count += 1
+
+        # Якщо є хоч якісь дані (прогноз або GPS), то count > 0
         total_count = len(unique_borts)
+        if total_count == 0 and gps_count > 0:
+            total_count = gps_count  # Фоллбек, якщо бортів немає, але машини є
+
         has_data = True
 
         # === ЛОГІКА ВІДОБРАЖЕННЯ ===
@@ -403,8 +427,17 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
 
             for v in global_vehicles:
                 v_bort = html.escape(str(v.get('bort', 'Б/н')))
+                raw_id = str(v.get('raw_id', ''))
+
+                # Якщо номер довгий (4+ цифри для Одеси це зазвичай ID) і не схожий на звичайний борт
+                # І при цьому він співпадає з raw_id (тобто ми не зробили заміну по мапінгу)
+                if len(v_bort) > 4 and v_bort == raw_id:
+                    display_label = f"ID трекера: {v_bort}"
+                else:
+                    display_label = f"№ <b>{v_bort}</b>"
+
                 lat, lng = v.get('lat'), v.get('lng')
-                v_dir = v.get('direction')  # 1 або 2
+                v_dir = v.get('direction')
 
                 # Локація
                 loc_str = "місцезнаходження невідоме"
@@ -421,11 +454,10 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
                     else:
                         dir_info = " (↩️ зустрічний)"
                 else:
-                    # Якщо не знаємо, який "наш", просто покажемо стрілку
                     dir_icon = "▶️" if v_dir == 1 else "◀️"
                     dir_info = f" (напр. {dir_icon})"
 
-                message += f"▫️ № <b>{v_bort}</b> - {loc_str}{dir_info}\n"
+                message += f"▫️ {display_label} - {loc_str}{dir_info}\n"
 
             message += "\n"
 

@@ -14,6 +14,8 @@ from config.accessible_vehicles import ACCESSIBLE_TRAMS, ACCESSIBLE_TROLS
 
 from geopy.distance import geodesic
 
+from config.vehicle_mapping import VEHICLE_ID_MAP
+
 try:
     from config.easyway_config import EasyWayConfig
 except ImportError:
@@ -162,48 +164,54 @@ class EasyWayService:
         return []
 
     def _parse_route_gps(self, data: dict) -> List[dict]:
-        """Парсить відповідь routes.GetRouteGPS"""
+        """Парсить відповідь routes.GetRouteGPS з використанням мапінгу"""
         accessible_vehicles = []
 
         try:
-            # API може повернути список у полі 'vehicle'
             vehicles = data.get("vehicle", [])
-            if isinstance(vehicles, dict):  # Якщо один об'єкт
+            if isinstance(vehicles, dict):
                 vehicles = [vehicles]
             elif not isinstance(vehicles, list):
                 vehicles = []
 
-            for v in vehicles:
-                # Перевіряємо актуальність даних (data_relevance = 1 - свіжі)
-                # Якщо ключа немає, припускаємо, що дані ок, але краще перевірити
-                if v.get('data_relevance') == 0:
-                    continue
+            # Лог для відладки нових ID
+            if vehicles:
+                logger.info(f"🔍 RAW VEHICLE DATA (First item): {vehicles[0]}")
 
-                    # Отримуємо бортовий номер
-                # В GetRouteGPS він може бути в 'name' або 'bort_number'
-                bort_number = str(v.get("name") or v.get("bort_number") or "").strip()
+            for v in vehicles:
+                if v.get('data_relevance') == 0: continue
+
+                # 1. Отримуємо сирий ID або номер
+                raw_id = str(v.get("id") or v.get("bortNumber") or "").strip()
+
+                # 2. Спробуємо знайти реальний номер через мапінг
+                real_bort = VEHICLE_ID_MAP.get(raw_id)
+
+                # Якщо знайшли в мапінгу - беремо його, якщо ні - залишаємо як є
+                bort_number = real_bort if real_bort else raw_id
 
                 lat = float(v.get("lat", 0))
                 lng = float(v.get("lng", 0))
-                direction = int(v.get("direction", 0))  # 1 або 2
+                direction = int(v.get("direction", 0))
 
                 # === ПЕРЕВІРКА НА ІНКЛЮЗИВНІСТЬ ===
                 is_accessible = False
 
-                # 1. Перевірка по базі бортів
+                # а) Перевірка реального номера по базі
                 if bort_number in ACCESSIBLE_TRAMS or bort_number in ACCESSIBLE_TROLS:
                     is_accessible = True
 
-                # 2. Якщо API має прапорець (рідко для цієї функції, але буває)
+                # б) Перевірка прапорця API
                 if v.get("handicapped"):
                     is_accessible = True
 
                 if is_accessible:
                     accessible_vehicles.append({
                         "bort": bort_number,
+                        "raw_id": raw_id,  # Зберігаємо оригінал про всяк випадок
                         "lat": lat,
                         "lng": lng,
-                        "direction": direction  # Зберігаємо напрямок для фільтрації
+                        "direction": direction
                     })
 
         except Exception as e:
