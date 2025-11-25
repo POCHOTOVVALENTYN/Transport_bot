@@ -3,46 +3,41 @@
 class States:
     """Стани для ConversationHandlers"""
 
-    # Стани для скарг (оновлені, 1, 2, 3, 4, 5 + 15)
+    # Стани для скарг
     COMPLAINT_AWAIT_TEXT = 1
 
-    # Стани для подяк (існуючі)
-    THANKS_PROBLEM = 6
+    # --- ОНОВЛЕНІ СТАНИ ДЛЯ ПОДЯК ---
+    # Ми використовуємо ці назви у handlers/thanks_handlers.py
+    THANKS_TEXT = 6  # Було THANKS_PROBLEM
     THANKS_ROUTE = 7
     THANKS_BOARD = 8
+    THANKS_NAME = 19  # Новий стан для імені (замість старих 18/19/20)
 
     # Нові стани для пропозицій
     SUGGESTION_TEXT = 9
 
-    # Нові стани для реєстрації в музей
+    # Реєстрація в музей
     MUSEUM_DATE = 11
     MUSEUM_PEOPLE_COUNT = 12
     MUSEUM_NAME = 13
     MUSEUM_PHONE = 14
 
-    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
-    # Перенумеруємо стани, щоб уникнути конфлікту
-
-    # Нові стани для Адмін-панелі Музею
+    # Адмін-панель Музею
     ADMIN_STATE_ADD_DATE = 16
-    ADMIN_STATE_DEL_DATE_CONFIRM = 17  # <-- БУЛО 18
+    ADMIN_STATE_DEL_DATE_CONFIRM = 17
     ADMIN_BROADCAST_TEXT = 50
     ADMIN_BROADCAST_CONFIRM = 51
 
-    # Стани для подяк (продовження)
-    THANKS_ASK_SPECIFIC = 18  # <-- ЗАЛИШАЄМО 18
-    THANKS_ASK_NAME = 19
-    THANKS_GET_NAME = 20
+    # Старі стани подяк (THANKS_ASK_SPECIFIC і т.д.) можна видалити або залишити,
+    # але ми їх більше не використовуємо в коді.
 
-    # Стани для пропозицій (продовження)
+    # Пропозиції (продовження)
     SUGGESTION_GET_NAME = 22
     SUGGESTION_GET_PHONE = 23
     COMPLAINT_EMAIL = 24
     SUGGESTION_EMAIL = 25
 
-    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
-
-    # Нові стани для Пошуку Інклюзивного Транспорту
-    ACCESSIBLE_SEARCH_STOP = 30  # Крок 1: Очікування назви зупинки
-    ACCESSIBLE_SELECT_STOP = 31  # Крок 2: Очікування вибору зупинки зі списку
+    # Пошук Інклюзивного Транспорту
+    ACCESSIBLE_SEARCH_STOP = 30
+    ACCESSIBLE_SELECT_STOP = 31
     ACCESSIBLE_SHOWING_RESULTS = 32

@@ -44,9 +44,10 @@ from handlers.museum_handlers import (
     museum_get_date, museum_get_people_count, museum_get_name,
     museum_get_phone_and_save, show_museum_info
 )
+
 from handlers.thanks_handlers import (
-    thanks_start, thanks_ask_specific, thanks_get_route,
-    thanks_get_board, thanks_ask_name, thanks_get_name, thanks_save
+    thanks_start, thanks_text, thanks_route, thanks_board,
+    thanks_name, skip_route, skip_board, thanks_cancel
 )
 
 from handlers.suggestion_handlers import (
@@ -178,46 +179,41 @@ class TransportBot:
             ]
         )
 
-
-        # CONVERSATION: ПОДЯКИ (ОНОВЛЕНО)
+        # CONVERSATION: ПОДЯКИ (ОНОВЛЕНО ПІД НОВУ ЛОГІКУ)
         thanks_conv = ConversationHandler(
             entry_points=[CallbackQueryHandler(thanks_start, pattern="^thanks$", block=False)],
             states={
-                States.THANKS_PROBLEM: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_ask_specific),
+                # 1. Чекаємо текст подяки
+                States.THANKS_TEXT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_text),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
-                States.THANKS_ASK_SPECIFIC: [
-                    CallbackQueryHandler(thanks_get_route, pattern="^thanks_specific:yes$"),
-                    CallbackQueryHandler(thanks_ask_name, pattern="^thanks_specific:no$"),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
+                # 2. Чекаємо маршрут (або пропуск)
                 States.THANKS_ROUTE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_get_board),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_route),
+                    CallbackQueryHandler(skip_route, pattern="^skip_route$"),  # Кнопка "Не знаю"
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
+                # 3. Чекаємо бортовий номер (або пропуск)
                 States.THANKS_BOARD: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_ask_name),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_board),
+                    CallbackQueryHandler(skip_board, pattern="^skip_board$"),  # Кнопка "Не знаю"
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
-                States.THANKS_ASK_NAME: [
-                    CallbackQueryHandler(thanks_get_name, pattern="^thanks_name:yes$"),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                States.THANKS_GET_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_save),  # Зберегти з ім'ям
+                # 4. Чекаємо ім'я (фінал)
+                States.THANKS_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_name),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
             },
             fallbacks=[
                 CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                CallbackQueryHandler(main_menu, pattern="^main_menu$"),
+                CommandHandler("cancel", thanks_cancel)  # Можна додати команду скасування
             ]
         )
 

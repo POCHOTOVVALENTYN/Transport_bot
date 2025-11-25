@@ -1,8 +1,8 @@
-# services/museum_service.py
+
 from sqlalchemy import select
 from database.db import AsyncSessionLocal, MuseumBooking
 from integrations.google_sheets.client import GoogleSheetsClient
-from config.settings import GOOGLE_SHEETS_ID
+
 from utils.logger import logger
 import asyncio
 import time
@@ -10,7 +10,7 @@ import time
 
 class MuseumService:
     def __init__(self):
-        self.sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
+        self.sheets = GoogleSheetsClient()
         self._dates_cache = []
         self._last_cache_update = 0
         self._cache_ttl = 300  # Кеш живе 5 хвилин (300 сек)
