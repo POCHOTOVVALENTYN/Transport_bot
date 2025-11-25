@@ -132,11 +132,10 @@ class EasyWayService:
                 if attempt < 2: await asyncio.sleep(0.5)
         return {"error": "Сервер не відповів."}
 
-    # === ОНОВЛЕНИЙ МЕТОД ДЛЯ ОТРИМАННЯ ТРАНСПОРТУ ===
     async def get_vehicles_on_route(self, route_id: int) -> List[dict]:
         """
-        Отримує список низькопідлогових вагонів на маршруті через routes.GetRouteGPS.
-        Це дозволяє бачити весь транспорт на лінії.
+        Отримує список ВСЬОГО транспорту на маршруті.
+        Ми прибрали фільтрацію, щоб показувати реальну кількість машин.
         """
         params = {
             "login": self.config.LOGIN,
@@ -163,7 +162,7 @@ class EasyWayService:
         return []
 
     def _parse_route_gps(self, data: dict) -> List[dict]:
-        """Парсить відповідь routes.GetRouteGPS з використанням мапінгу"""
+        """Парсить відповідь routes.GetRouteGPS. Повертає ВСІ активні машини."""
         accessible_vehicles = []
 
         try:
@@ -177,17 +176,15 @@ class EasyWayService:
             if vehicles:
                 logger.info(f"🔍 RAW VEHICLE DATA (First item): {vehicles[0]}")
 
-            # Тимчасовий лог
             all_ids = [str(v.get("id")) for v in vehicles]
             logger.info(f"📋 Всі ID на маршруті: {all_ids}")
 
             for v in vehicles:
                 if v.get('data_relevance') == 0: continue
 
-                # 1. Отримуємо сирий ID
                 raw_id = str(v.get("id") or v.get("bortNumber") or "").strip()
 
-                # 2. Мапінг (ID -> Реальний номер) - тепер майже не використовується через динамічні ID
+                # Спробуємо знайти мапінг, але використовуємо raw_id як основний
                 real_bort = VEHICLE_ID_MAP.get(raw_id)
                 bort_number = real_bort if real_bort else raw_id
 
@@ -195,27 +192,18 @@ class EasyWayService:
                 lng = float(v.get("lng", 0))
                 direction = int(v.get("direction", 0))
 
-                # === ЛОГІКА ВИЗНАЧЕННЯ ІНКЛЮЗИВНОСТІ ===
-                is_accessible = False
+                # Зберігаємо флаг handicapped про всяк випадок, але додаємо ВСІХ
+                is_accessible_api = v.get("handicapped", False)
 
-                # а) Якщо номер випадково співпав з білим списком (для статичних ID)
-                if bort_number in ACCESSIBLE_TRAMS or bort_number in ACCESSIBLE_TROLS:
-                    is_accessible = True
-
-                # б) ПОВЕРТАЄМО ДОВІРУ ДО API (Fix для динамічних ID)
-                # Якщо API каже, що транспорт низькопідлоговий (handicapped=1), ми віримо.
-                # Це єдиний спосіб побачити транспорт, коли ID щодня змінюються.
-                elif v.get("handicapped"):
-                    is_accessible = True
-
-                if is_accessible:
-                    accessible_vehicles.append({
-                        "bort": bort_number,
-                        "raw_id": raw_id,
-                        "lat": lat,
-                        "lng": lng,
-                        "direction": direction
-                    })
+                # ВИПРАВЛЕННЯ: Додаємо в список ВСІ машини, щоб лічильник був правильний
+                accessible_vehicles.append({
+                    "bort": bort_number,
+                    "raw_id": raw_id,
+                    "lat": lat,
+                    "lng": lng,
+                    "direction": direction,
+                    "is_accessible_api": is_accessible_api  # Може знадобитись в майбутньому
+                })
 
         except Exception as e:
             logger.error(f"Error parsing route GPS: {e}")
@@ -260,7 +248,6 @@ class EasyWayService:
             return {"error": str(e)}
 
     def _parse_stop_info_v12(self, data: Dict) -> Dict:
-        """Парсинг GetStopInfo v1.2 з витягуванням direction"""
         try:
             stop = data
             parsed = {
@@ -328,7 +315,6 @@ class EasyWayService:
         return self.time_icons.get(key, "❓")
 
     async def check_vehicle_status_relative_to_stop(self, route_id: int, user_stop_id: int, direction: int) -> dict:
-        # Цей метод можна залишити як є або доопрацювати пізніше
         return {"status": "unknown"}
 
 

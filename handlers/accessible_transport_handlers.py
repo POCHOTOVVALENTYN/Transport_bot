@@ -287,8 +287,6 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
                 raw_vehicles = global_results[i] if i < len(global_results) else []
 
                 # --- [DEBUG LOG] ---
-                # Цей лог покаже, що САМЕ повернув сервіс у бот.
-                # Якщо тут 0, а в логах сервісу "Всі ID...", значить сервіс фільтрує перед поверненням.
                 logger.info(
                     f"[DEBUG] Route {r_name} ({r_type}): Service returned {len(raw_vehicles) if raw_vehicles else 0} items")
 
@@ -322,7 +320,9 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
                                       routes_meta: dict):
     """
     Формує повідомлення.
-    Тепер гарантовано показує маршрут, якщо global_vehicles не порожній.
+    Виправлено:
+    1. Відображення типу транспорту в заголовку Сценарію Б.
+    2. Показ усіх машин в Сценарії Б.
     """
 
     message = (
@@ -368,7 +368,6 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             r_name = r_meta.get('name')
             r_type = r_meta.get('type')
 
-        # Отримуємо список машин. Якщо None -> порожній список.
         global_vehicles = global_route_data.get(key) or []
         arrivals = arrivals_by_key.get(key, [])
 
@@ -378,7 +377,7 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
         # === СЦЕНАРІЙ А: Є ПРОГНОЗ ПРИБУТТЯ ===
         if arrivals:
             has_data = True
-            message += f"✅ <b>Маршрут №{r_name}:</b>\n"
+            message += f"✅ <b>{icon} {transport_name} №{r_name}:</b>\n"
 
             nearest = arrivals[0]
             nearest_bort = str(nearest.get('bort_number'))
@@ -395,18 +394,17 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             continue
 
         # === СЦЕНАРІЙ Б: НЕМАЄ ПРОГНОЗУ, АЛЕ Є GPS ===
-        # Якщо список global_vehicles не порожній - ми ЗОБОВ'ЯЗАНІ показати дані.
         elif global_vehicles:
             vehicles_count = len(global_vehicles)
 
-            # Подвійна перевірка, про всяк випадок
             if vehicles_count > 0:
                 has_data = True
-                message += f"⚠️ <b>Маршрут №{r_name}:</b>\n"
-                message += f"⚡️ На даному маршруті працює <b>{vehicles_count}</b> од. електротранспорту \n"
+                # ТУТ ЗМІНИ: Додали назву транспорту в заголовок, щоб розрізняти Трамвай і Тролейбус
+                message += f"⚠️ <b>{icon} {transport_name} №{r_name}:</b>\n"
+                message += f"⚡️ На маршруті працює <b>{vehicles_count}</b> од. електротранспорту 🚋\n"
 
                 message += (
-                    f"ℹ️ <i>Електротранспорт вже проїхав Вашу зупинку або рухається в іншому напрямку ↩️ (якщо на маршруті 1 од.)\n"
+                    f"ℹ️ <i>Електротранспорт вже проїхав Вашу зупинку або рухається в іншому напрямку ↩️\n"
                     f"⏳ Будь ласка, зачекайте, поки він завершить коло та почне рух до Вас.</i>\n\n"
                 )
 
