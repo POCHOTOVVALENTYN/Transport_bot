@@ -294,6 +294,10 @@ class EasyWayService:
                 raw_routes = [raw_routes]
 
             for route in raw_routes:
+                # === ВСТАВИТИ ЦЕЙ РЯДОК ТУТ ===
+                logger.info(f"🔍 Arrival Raw Data: {route}")
+                # ==============================
+
                 bort_number = str(route.get("bortNumber", "")).strip()
                 transport_key = route.get("transportKey")
 
