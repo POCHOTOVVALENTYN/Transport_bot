@@ -14,7 +14,6 @@ from services.easyway_service import easyway_service
 from services.stop_matcher import stop_matcher
 from services.gtfs_service import gtfs_service
 
-
 # === КОНФІГУРАЦІЯ ПОШУКУ ===
 
 SEARCH_SYNONYMS = {
@@ -235,24 +234,17 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
         stop_title = html.escape(stop_info.get("title", f"Зупинка {stop_id}"))
 
         # 2. Підготовка мапи Головних ID
-        # РОЗДІЛЯЄМО Трамваї та Тролейбуси!
-        # name_to_main_id = { ("10", "tram"): 123, ("10", "trol"): 456 }
         name_to_main_id = {}
-        name_meta = {}
-
         route_map = context.bot_data.get('easyway_structured_map', {})
 
         for kind in ['tram', 'trolley']:
             transport_type_code = 'tram' if kind == 'tram' else 'trol'
             for r in route_map.get(kind, []):
                 clean_name = str(r['name']).strip()
-                # Ключ тепер кортеж: (Назва, Тип)
                 name_to_main_id[(clean_name, transport_type_code)] = r['id']
-                # Також зберігаємо просто за назвою як fallback (але це небезпечно для №10)
-                # name_meta[clean_name] = transport_type_code
 
         routes_to_scan = []
-        seen_routes = set()  # Зберігаємо пари (назва, тип), щоб не дублювати
+        seen_routes = set()
 
         # 3. Перебираємо маршрути зупинки
         found_routes = stop_info.get('routes', [])
@@ -262,14 +254,10 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
             local_id = r.get('id')
             r_direction = r.get('direction')
 
-            # Визначаємо тип з API (transportKey)
             api_transport_key = r.get('transportKey', '')
             if api_transport_key == 'trolley': api_transport_key = 'trol'
 
-            # Якщо API не дало типу, пробуємо вгадати (але це ризиковано для №10)
             if not api_transport_key:
-                # Тут ми не можемо просто взяти з name_meta, бо там може бути конфлікт.
-                # Спробуємо знайти в name_to_main_id обидва варіанти
                 if (r_title, 'tram') in name_to_main_id:
                     api_transport_key = 'tram'
                 elif (r_title, 'trol') in name_to_main_id:
@@ -278,44 +266,31 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
             is_electric = (api_transport_key in ['tram', 'trol'])
 
             if is_electric:
-                # Ключ для унікальності
                 unique_key = (r_title, api_transport_key)
 
                 if unique_key not in seen_routes:
-                    # Шукаємо Головний ID саме для цього ТИПУ
                     target_id = name_to_main_id.get(unique_key, local_id)
-
                     logger.info(f"🔎 Scanning {api_transport_key.upper()} {r_title} (ID: {target_id})")
 
                     routes_to_scan.append((r_title, target_id, api_transport_key, r_direction))
                     seen_routes.add(unique_key)
 
         # 4. Скануємо GPS (паралельно)
-        # Використовуємо target_id, який має бути Головним
         tasks = [easyway_service.get_vehicles_on_route(r_id) for _, r_id, _, _ in routes_to_scan]
 
         global_results = []
         if tasks:
             global_results = await asyncio.gather(*tasks)
 
-            # 5. Групуємо результати
-            # global_route_data: { "10": [vehicles...], "5": [...] } -> ТУТ КОНФЛІКТ!
-            # Ми повинні змінити ключ на унікальний, наприклад "10_tram"
-
             global_route_data = {}
             routes_meta_info = {}
 
             for i, (r_name, r_id, r_type, target_dir) in enumerate(routes_to_scan):
                 raw_vehicles = global_results[i] if i < len(global_results) else []
-
-                # Унікальний ключ для словника даних
                 unique_key = f"{r_name}_{r_type}"
-
                 global_route_data[unique_key] = raw_vehicles
-
-                # Зберігаємо метадані
                 routes_meta_info[unique_key] = {
-                    'name': r_name,  # Чиста назва для відображення ("10")
+                    'name': r_name,
                     'type': r_type,
                     'stop_direction': target_dir
                 }
@@ -336,14 +311,14 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
         return States.ACCESSIBLE_SEARCH_STOP
 
 
-# === ЛОГІКА ВІДОБРАЖЕННЯ (Крок 4) ===
+# === ЛОГІКА ВІДОБРАЖЕННЯ (Оновлено) ===
 
 async def _render_accessible_response(query, stop_title: str, stop_info: dict, global_route_data: dict,
                                       routes_meta: dict):
     """
     Формує повідомлення.
-    Сценарій А: Є прогноз -> показуємо реальний борт.
-    Сценарій Б: Немає прогнозу, але є GPS -> показуємо ID трекера + пояснення + кількість.
+    Сценарій А (Arrivals): Є прогноз -> показуємо прогноз.
+    Сценарій Б (Only GPS): Немає прогнозу -> показуємо кількість машин і просимо чекати.
     """
 
     message = (
@@ -365,8 +340,6 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
         r_title = str(arr.get('title')).strip()
         r_key = arr.get('transport_key')
         if r_key == 'trolley': r_key = 'trol'
-
-        # Унікальний ключ: "10_tram"
         unique_key = f"{r_title}_{r_key}"
 
         if unique_key not in arrivals_by_key:
@@ -375,8 +348,6 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
 
     # 2. Складаємо повний список маршрутів
     all_keys = set(global_route_data.keys()) | set(arrivals_by_key.keys())
-
-    # Сортуємо (спочатку цифри, потім все інше)
     sorted_keys = sorted(list(all_keys), key=lambda x: int(re.sub(r'\D', '', x.split('_')[0])) if re.sub(r'\D', '',
                                                                                                          x.split('_')[
                                                                                                              0]) else 999)
@@ -384,17 +355,14 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
     has_data = False
 
     for key in sorted_keys:
-        # Відновлюємо метадані
         r_meta = routes_meta.get(key, {})
         if not r_meta:
             parts = key.split('_')
             r_name = parts[0]
             r_type = parts[1] if len(parts) > 1 else 'tram'
-            target_dir = None  # Не знаємо напрямку, якщо не сканували
         else:
             r_name = r_meta.get('name')
             r_type = r_meta.get('type')
-            target_dir = r_meta.get('stop_direction')
 
         global_vehicles = global_route_data.get(key, [])
         arrivals = arrivals_by_key.get(key, [])
@@ -406,18 +374,6 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
         if arrivals:
             has_data = True
             message += f"✅ <b>Маршрут №{r_name}:</b>\n"
-
-            # Показуємо кількість машин на маршруті (якщо сканували)
-            # Фільтруємо GPS, щоб порахувати реальну кількість
-            valid_count = 0
-            if global_vehicles:
-                for v in global_vehicles:
-                    lat, lng = v.get('lat'), v.get('lng')
-                    if lat and lng and gtfs_service.get_closest_stop_name(r_name, r_type, v.get('direction'), lat, lng):
-                        valid_count += 1
-
-            if valid_count > 0:
-                message += f"<i>(Всього на маршруті: {valid_count} од.)</i>\n"
 
             nearest = arrivals[0]
             nearest_bort = str(nearest.get('bort_number'))
@@ -433,65 +389,29 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             )
             continue
 
-        # === СЦЕНАРІЙ Б: НЕМАЄ ПРОГНОЗУ, АЛЕ Є GPS (Тільки "Чесний режим") ===
+        # === СЦЕНАРІЙ Б: НЕМАЄ ПРОГНОЗУ, АЛЕ Є МАШИНИ НА ЛІНІЇ ===
+        # Якщо ми тут, значить API не дало прогнозу (вагон далеко, їде в депо або API глючить).
+        # Але сканер GPS знайшов машини (global_vehicles).
+        # Ми просто показуємо їх кількість, щоб заспокоїти користувача.
+
         elif not arrivals and global_vehicles:
+            vehicles_count = len(global_vehicles)
 
-            # 1. Фільтруємо "фантомів" (далеко від маршруту)
-            valid_vehicles = []
-            for v in global_vehicles:
-                lat, lng = v.get('lat'), v.get('lng')
-                if not lat or not lng: continue
-
-                stop_name = gtfs_service.get_closest_stop_name(r_name, r_type, v.get('direction'), lat, lng)
-                if stop_name:
-                    v['matched_stop'] = stop_name
-                    valid_vehicles.append(v)
-
-            # Якщо після фільтрації машин немає
-            if not valid_vehicles:
-                # Можна нічого не писати, або написати, що даних немає
+            # Якщо машин 0 - пропускаємо, в кінці виведеться загальне "Інформація відсутня"
+            if vehicles_count == 0:
                 continue
 
             has_data = True
             message += f"⚠️ <b>Маршрут №{r_name}:</b>\n"
-            message += f"На маршруті працює <b>{len(valid_vehicles)}</b> од. низькопідлогового транспорту:\n"
+            message += f"На маршруті працює <b>{vehicles_count}</b> од. транспорту.\n"
 
-            for v in valid_vehicles:
-                v_bort = str(v.get('bort', '')).strip()
-                raw_id = str(v.get('raw_id', '')).strip()
-
-                # --- ЛОГІКА "ЧЕСНОГО" ВІДОБРАЖЕННЯ ---
-                # Якщо API віддає довгий ID замість короткого номера -> це ID трекера
-                if v_bort == raw_id and len(v_bort) > 3 and v_bort.isdigit():
-                    display_label = f"ID трекера: {v_bort}"
-                elif v_bort:
-                    display_label = f"№ <b>{v_bort}</b>"
-                else:
-                    display_label = "№ Невідомий"
-
-                loc_str = f"біля: {html.escape(v['matched_stop'])}"
-
-                # Напрямок
-                v_dir = v.get('direction')
-                dir_icon = "▶️" if v_dir == 1 else "◀️"
-                dir_info = f" ({dir_icon})"
-
-                # Позначаємо, якщо їде у наш бік (якщо знаємо наш бік)
-                if target_dir is not None and v_dir is not None:
-                    if v_dir == target_dir:
-                        dir_info = " (✅ попутний)"
-                    else:
-                        dir_info = " (↩️ зустрічний)"
-
-                message += f"▫️ {display_label} - {loc_str}{dir_info}\n"
-
-            # === ДОДАНО ПОЯСНЕННЯ (Ваш запит) ===
+            # Текст про те, що треба почекати
             message += (
-                f"\nℹ️ <i>Транспорт вже проїхав Вашу зупинку або рухається в іншому напрямку.\n"
+                f"ℹ️ <i>Транспорт вже проїхав Вашу зупинку або рухається в іншому напрямку.\n"
                 f"Будь ласка, зачекайте, поки він завершить коло та почне рух до Вас.</i>\n\n"
             )
 
-    # Підвал повідомлення
+    # Підвал
     if not has_data:
         message += "😕 Інформація про низькопідлогові маршрути на цій зупинці наразі відсутня.\n\n"
 
@@ -499,8 +419,6 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
         "🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n"
         "Умовні позначення:\n"
         f"{easyway_service.time_icons['gps']} = час за GPS\n"
-        f"✅ = транспорт рухається у Вашому напрямку\n"
-        f"↩️ = транспорт рухається у протилежному напрямку"
     )
 
     if len(message) > 4000:
