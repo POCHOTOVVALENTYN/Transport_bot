@@ -163,6 +163,8 @@ class EasyWayService:
 
         return []
 
+
+
     def _parse_route_gps(self, data: dict) -> List[dict]:
         """Парсить відповідь routes.GetRouteGPS з використанням мапінгу"""
         accessible_vehicles = []
@@ -174,41 +176,44 @@ class EasyWayService:
             elif not isinstance(vehicles, list):
                 vehicles = []
 
-            # Лог для відладки нових ID
+            # Лог залишаємо, щоб ви могли "виловити" ID справжнього вагона 3218
             if vehicles:
                 logger.info(f"🔍 RAW VEHICLE DATA (First item): {vehicles[0]}")
+
+            # Тимчасовий лог для відладки
+            all_ids = [str(v.get("id")) for v in vehicles]
+            logger.info(f"📋 Всі ID на маршруті: {all_ids}")
 
             for v in vehicles:
                 if v.get('data_relevance') == 0: continue
 
-                # 1. Отримуємо сирий ID або номер
+                # 1. Отримуємо сирий ID
                 raw_id = str(v.get("id") or v.get("bortNumber") or "").strip()
 
-                # 2. Спробуємо знайти реальний номер через мапінг
+                # 2. Мапінг (ID -> Реальний номер)
                 real_bort = VEHICLE_ID_MAP.get(raw_id)
-
-                # Якщо знайшли в мапінгу - беремо його, якщо ні - залишаємо як є
                 bort_number = real_bort if real_bort else raw_id
 
                 lat = float(v.get("lat", 0))
                 lng = float(v.get("lng", 0))
                 direction = int(v.get("direction", 0))
 
-                # === ПЕРЕВІРКА НА ІНКЛЮЗИВНІСТЬ ===
+                # === СУВОРА ПЕРЕВІРКА (STRICT MODE) ===
                 is_accessible = False
 
-                # а) Перевірка реального номера по базі
+                # а) ТІЛЬКИ якщо номер є в нашому білому списку
                 if bort_number in ACCESSIBLE_TRAMS or bort_number in ACCESSIBLE_TROLS:
                     is_accessible = True
 
-                # б) Перевірка прапорця API
-                if v.get("handicapped"):
-                    is_accessible = True
+                # б) ПРИБИРАЄМО ЦЕЙ БЛОК!
+                # Ми більше не віримо API, бо воно бреше про 7 вагонів.
+                # if v.get("handicapped"):
+                #    is_accessible = True
 
                 if is_accessible:
                     accessible_vehicles.append({
                         "bort": bort_number,
-                        "raw_id": raw_id,  # Зберігаємо оригінал про всяк випадок
+                        "raw_id": raw_id,
                         "lat": lat,
                         "lng": lng,
                         "direction": direction
