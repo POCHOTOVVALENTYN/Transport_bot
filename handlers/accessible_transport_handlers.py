@@ -212,8 +212,6 @@ async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEF
 async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Крок 3: Отримання даних.
-    ОНОВЛЕНО: Тепер строго перевіряє тип транспорту (Трамвай/Тролейбус) за назвою,
-    щоб уникнути плутанини між маршрутами з однаковими номерами (напр. №10).
     """
     query = update.callback_query
     await query.answer()
@@ -254,36 +252,30 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
             local_id = r.get('id')
             r_direction = r.get('direction')
 
-            # --- ПОЧАТОК ВИПРАВЛЕННЯ ТИПІВ ---
+            # --- ВИЗНАЧЕННЯ ТИПУ ТРАНСПОРТУ ---
             api_transport_key = r.get('transportKey', '')
             transport_name = str(r.get('transport_name', '')).lower()
 
-            # Нормалізація ключа
             if api_transport_key == 'trolley': api_transport_key = 'trol'
 
-            # Якщо ключ відсутній або неточний, визначаємо за назвою ("Трамвай"/"Тролейбус")
             if not api_transport_key:
                 if 'трамвай' in transport_name or 'tram' in transport_name:
                     api_transport_key = 'tram'
                 elif 'тролейбус' in transport_name or 'trol' in transport_name:
                     api_transport_key = 'trol'
 
-            # Якщо навіть після перевірки назви не визначили (рідкісний випадок), пробуємо fallback
             if not api_transport_key:
                 if (r_title, 'tram') in name_to_main_id:
                     api_transport_key = 'tram'
                 elif (r_title, 'trol') in name_to_main_id:
                     api_transport_key = 'trol'
-            # --- КІНЕЦЬ ВИПРАВЛЕННЯ ТИПІВ ---
 
             is_electric = (api_transport_key in ['tram', 'trol'])
 
             if is_electric:
-                # Ключ (номер, тип) гарантує, що ми не сплутаємо Трам 10 і Трол 10
                 unique_key = (r_title, api_transport_key)
 
                 if unique_key not in seen_routes:
-                    # Шукаємо ID саме для ЦЬОГО типу
                     target_id = name_to_main_id.get(unique_key, local_id)
 
                     logger.info(f"🔎 Scanning {api_transport_key.upper()} {r_title} (ID: {target_id})")
@@ -304,7 +296,6 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
             for i, (r_name, r_id, r_type, target_dir) in enumerate(routes_to_scan):
                 raw_vehicles = global_results[i] if i < len(global_results) else []
 
-                # --- [DEBUG LOG] ---
                 logger.info(
                     f"[DEBUG] Route {r_name} ({r_type}): Service returned {len(raw_vehicles) if raw_vehicles else 0} items")
 
@@ -416,7 +407,9 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
             if vehicles_count > 0:
                 has_data = True
                 message += f"⚠️ <b>{icon} {transport_name} №{r_name}:</b>\n"
-                message += f"⚡️ На маршруті працює <b>{vehicles_count}</b> од. електротранспорту 🚋\n"
+
+                # ЗМІНЕНО: Замість цифри виводимо загальне повідомлення
+                message += f"⚡️ На даному маршруті працює електротранспорт\n"
 
                 message += (
                     f"ℹ️ <i>Електротранспорт вже проїхав Вашу зупинку або рухається в іншому напрямку ↩️\n"
