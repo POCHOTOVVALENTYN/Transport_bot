@@ -7,7 +7,49 @@ from config.settings import (
 from handlers.common import get_back_keyboard # <-- Використовуємо get_back_keyboard
 from telegram.constants import ParseMode
 from utils.logger import logger
+import datetime
+import random
 
+
+# Функція генерації ID (якщо її немає)
+def generate_ticket_id():
+    return f"#THX-{random.randint(10000, 99999)}"
+
+
+async def register_gratitude(data: dict):
+    """
+    Формує рядок для запису в Google Sheet.
+    data - словник з даними, які ми зібрали у хендлерах.
+    """
+    ticket_id = generate_ticket_id()
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Визначаємо тип подяки для звіту
+    gratitude_type = "Конкретна" if data.get('is_specific') else "Загальна"
+
+    # Формуємо дані.
+    # УВАГА: Структура списку залежить від вашої таблиці.
+    # Я зробив припущення щодо порядку колонок A-H.
+    # Колонка I (9-та) - це transport_type.
+
+    transport_type = data.get('transport_type', '')  # Трамвай/Тролейбус або пусто
+
+    row = [
+        ticket_id,  # A: ID
+        timestamp,  # B: Дата
+        gratitude_type,  # C: Тип звернення
+        data.get('message', ''),  # D: Текст подяки
+        data.get('user_name', ''),  # E: Ім'я користувача (або водія для конкретної)
+        data.get('vehicle_number', ''),  # F: Бортовий номер
+        data.get('email', ''),  # G: Email
+        "Новий",  # H: Статус
+        transport_type  # I: Тип транспорту (Трамвай/Тролейбус)
+    ]
+
+    # Тут має бути виклик вашого клієнта для запису
+    # Наприклад: await google_sheets_client.append_row("АркушПодяки", row)
+    # Повертаємо ID, щоб показати користувачу
+    return ticket_id
 
 
 async def show_tickets_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):

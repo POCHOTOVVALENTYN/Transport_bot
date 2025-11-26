@@ -1,4 +1,17 @@
-# bot/states.py
+from aiogram.dispatcher.filters.state import State, StatesGroup
+
+class GratitudeForm(StatesGroup):
+    waiting_for_type_selection = State()      # Вибір: Конкретна чи Загальна
+    # Гілка КОНКРЕТНОЇ подяки
+    waiting_for_transport_type = State()      # Вибір: Трамвай чи Тролейбус
+    waiting_for_vehicle_number = State()      # Введення бортового номера
+    waiting_for_specific_details = State()    # Текст подяки + ПІБ водія
+    # Гілка ЗАГАЛЬНОЇ подяки
+    waiting_for_general_details = State()     # Суть подяки
+    waiting_for_user_name = State()           # ПІБ користувача
+    # Фінал (спільний)
+    waiting_for_email = State()               # Email
+
 
 class States:
     """Стани для ConversationHandlers"""

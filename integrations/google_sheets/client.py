@@ -10,18 +10,26 @@ logger = logging.getLogger(__name__)
 class GoogleSheetsClient:
     SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
-    def __init__(self):
+    def __init__(self, spreadsheet_id=None):
+        """
+        Ініціалізація клієнта.
+        :param spreadsheet_id: (Опціонально) ID таблиці. Якщо не передано, береться з конфігу.
+        """
         self.creds = None
         self.service = None
-        self.spreadsheet_id = GOOGLE_SHEET_ID
+        # Якщо передали ID — беремо його, якщо ні — беремо з settings.py
+        self.spreadsheet_id = spreadsheet_id or GOOGLE_SHEET_ID
         self._authenticate()
 
     def _authenticate(self):
         if os.path.exists(GOOGLE_SHEETS_CREDENTIALS_FILE):
-            self.creds = Credentials.from_service_account_file(
-                GOOGLE_SHEETS_CREDENTIALS_FILE, scopes=self.SCOPES)
-            self.service = build('sheets', 'v4', credentials=self.creds)
-            logger.info("✅ Google Sheets authenticated")
+            try:
+                self.creds = Credentials.from_service_account_file(
+                    GOOGLE_SHEETS_CREDENTIALS_FILE, scopes=self.SCOPES)
+                self.service = build('sheets', 'v4', credentials=self.creds)
+                logger.info("✅ Google Sheets authenticated")
+            except Exception as e:
+                logger.error(f"❌ Auth Error: {e}")
         else:
             logger.error(f"❌ Credentials file not found: {GOOGLE_SHEETS_CREDENTIALS_FILE}")
 
@@ -35,8 +43,7 @@ class GoogleSheetsClient:
             return False
 
         try:
-            # ВИПРАВЛЕННЯ: Безпечне форматування range з лапками для кирилиці
-            # Якщо назва вже має лапки, не додаємо їх, інакше додаємо
+            # Безпечне форматування range з лапками для кирилиці
             safe_sheet_name = sheet_name
             if " " in sheet_name or not sheet_name.isascii():
                 if not sheet_name.startswith("'"):
@@ -48,10 +55,10 @@ class GoogleSheetsClient:
                 'values': [values]
             }
 
-            result = self.service.spreadsheets().values().append(
+            self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
                 range=range_name,
-                valueInputOption="USER_ENTERED",  # Краще ніж RAW, бо форматує дати/числа
+                valueInputOption="USER_ENTERED",
                 body=body
             ).execute()
 
@@ -59,7 +66,6 @@ class GoogleSheetsClient:
             return True
 
         except Exception as e:
-            # Детальна діагностика помилки
             error_msg = str(e)
             if "Unable to parse range" in error_msg:
                 logger.error(
