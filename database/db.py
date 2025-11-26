@@ -9,14 +9,23 @@ from config.settings import DATABASE_URL
 Base = declarative_base()
 
 # --- Налаштування підключення ---
+# КРИТИЧНО: Використовуємо DATABASE_URL з config/settings.py
+# Але перевіряємо, чи він правильний для Docker
+print(f"🔗 DATABASE_URL: {DATABASE_URL}")
+
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 async def init_db():
     """Створює таблиці, якщо їх немає"""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        print("✅ Database tables initialized successfully")
+    except Exception as e:
+        print(f"❌ Error initializing database: {e}")
+        raise
 
 
 # ================= МОДЕЛІ (ТАБЛИЦІ) =================
@@ -62,14 +71,19 @@ class Feedback(Base):
     user_name = Column(String, nullable=True)
     user_phone = Column(String, nullable=True)
     user_email = Column(String, nullable=True)
-    username = Column(String, nullable=True)
 
-    # Зміст
+    # Основний вміст
     text = Column(String, nullable=True)
 
-    # Специфічні поля (для транспорту)
+    # Поля для транспорту (спільні для всіх)
     route = Column(String, nullable=True)
     board_number = Column(String, nullable=True)
+
+    # --- НОВІ ПОЛЯ ДЛЯ ПОДЯК (V2) ---
+    thanks_type = Column(String, nullable=True)  # "specific" або "general"
+    transport_type = Column(String, nullable=True)  # "tram" або "trolleybus"
+    driver_name = Column(String, nullable=True)  # ПІБ водія/кондуктора
+    reason = Column(String, nullable=True)  # За що вдячні
 
 
 # ================= ГОЛОВНИЙ КЛАС DATABASE =================
@@ -102,31 +116,41 @@ class Database:
         """
         Створює запис у таблиці Feedback.
         Повертає згенерований ticket_id.
+
+        :param data: Словник з полями для Feedback
+        :return: ticket_id
         """
-        # Генеруємо гарний ID: TICKET-YYYYMMDD-XXXX
+        # Генеруємо гарний ID: THX-YYYYMMDD-XXXX
         date_str = datetime.datetime.now().strftime("%Y%m%d")
         short_uuid = str(uuid.uuid4())[:5].upper()
         prefix = "FB"  # Feedback
 
-        # Якщо це подяка, можна змінити префікс, але не обов'язково
-        if data.get('category') == 'Подяки':
+        # Змінюємо префікс в залежності від категорії
+        category = data.get('category', 'Інше')
+        if category == 'Подяки':
             prefix = "THX"
-        elif data.get('category') == 'Скарги':
+        elif category == 'Скарги':
             prefix = "CMP"
+        elif category == 'Пропозиції':
+            prefix = "SUG"
 
         ticket_id = f"{prefix}-{date_str}-{short_uuid}"
 
         async with self.session_factory() as session:
             feedback = Feedback(
                 ticket_id=ticket_id,
-                category=data.get('category', 'Інше'),
+                category=category,
                 text=data.get('text'),
                 route=data.get('route'),
-                board_number=data.get('board'),
+                board_number=data.get('board_number'),
                 user_id=data.get('user_id'),
-                user_name=data.get('name'),
-                username=data.get('username'),
-                user_phone=data.get('phone'),
+                user_name=data.get('user_name'),
+                user_phone=data.get('user_phone'),
+                user_email=data.get('user_email'),
+                thanks_type=data.get('thanks_type'),
+                transport_type=data.get('transport_type'),
+                driver_name=data.get('driver_name'),
+                reason=data.get('reason'),
                 status="new"
             )
             session.add(feedback)

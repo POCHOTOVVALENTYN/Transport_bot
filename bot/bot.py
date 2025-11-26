@@ -46,8 +46,10 @@ from handlers.museum_handlers import (
 )
 
 from handlers.thanks_handlers import (
-    thanks_start, thanks_text, thanks_route, thanks_board,
-    thanks_name, skip_route, skip_board, thanks_cancel, register_thanks_handlers
+    thanks_start, thanks_specific_type_selection, thanks_transport_selected,
+    thanks_board_number_input, thanks_skip_board, thanks_reason_input,
+    thanks_email_input, thanks_general_start, thanks_general_message,
+    thanks_general_name, thanks_general_email, thanks_cancel
 )
 
 from handlers.suggestion_handlers import (
@@ -179,41 +181,72 @@ class TransportBot:
             ]
         )
 
-        # CONVERSATION: ПОДЯКИ (ОНОВЛЕНО ПІД НОВУ ЛОГІКУ)
+        # ===== НОВИЙ CONVERSATION HANDLER ДЛЯ ПОДЯК =====
         thanks_conv = ConversationHandler(
             entry_points=[CallbackQueryHandler(thanks_start, pattern="^thanks$", block=False)],
             states={
-                # 1. Чекаємо текст подяки
-                States.THANKS_TEXT: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_text),
+                # КРОК 1: Вибір типу подяки
+                States.THANKS_CHOOSE_TYPE: [
+                    CallbackQueryHandler(thanks_specific_type_selection, pattern="^thanks:specific$"),
+                    CallbackQueryHandler(thanks_general_start, pattern="^thanks:general$"),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
-                # 2. Чекаємо маршрут (або пропуск)
-                States.THANKS_ROUTE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_route),
-                    CallbackQueryHandler(skip_route, pattern="^skip_route$"),  # Кнопка "Не знаю"
+
+                # ГІЛКА КОНКРЕТНА: Вибір типу транспорту
+                States.THANKS_SPECIFIC_CHOOSE_TRANSPORT: [
+                    CallbackQueryHandler(thanks_transport_selected, pattern="^thanks:transport:"),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
-                # 3. Чекаємо бортовий номер (або пропуск)
-                States.THANKS_BOARD: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_board),
-                    CallbackQueryHandler(skip_board, pattern="^skip_board$"),  # Кнопка "Не знаю"
+
+                # ГІЛКА КОНКРЕТНА: Бортовий номер
+                States.THANKS_SPECIFIC_BOARD_NUMBER: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_board_number_input),
+                    CallbackQueryHandler(thanks_skip_board, pattern="^thanks:skip_board$"),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
-                # 4. Чекаємо ім'я (фінал)
-                States.THANKS_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_name),
+
+                # ГІЛКА КОНКРЕТНА: Причина подяки
+                States.THANKS_SPECIFIC_REASON: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_reason_input),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
+
+                # ГІЛКА КОНКРЕТНА: Email
+                States.THANKS_SPECIFIC_EMAIL: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_email_input),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+
+                # ГІЛКА ЗАГАЛЬНА: Повідомлення
+                States.THANKS_GENERAL_MESSAGE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_general_message),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+
+                # ГІЛКА ЗАГАЛЬНА: П.І.Б.
+                States.THANKS_GENERAL_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_general_name),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+
+                # ГІЛКА ЗАГАЛЬНА: Email
+                States.THANKS_GENERAL_EMAIL: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_general_email),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ]
             },
             fallbacks=[
                 CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                 CallbackQueryHandler(main_menu, pattern="^main_menu$"),
-                CommandHandler("cancel", thanks_cancel)  # Можна додати команду скасування
+                CommandHandler("cancel", thanks_cancel)
             ]
         )
 

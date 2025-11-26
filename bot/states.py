@@ -1,56 +1,52 @@
-from aiogram.fsm.state import State, StatesGroup
+"""
+bot/states.py
 
-class GratitudeForm(StatesGroup):
-    waiting_for_type_selection = State()      # Вибір: Конкретна чи Загальна
-    # Гілка КОНКРЕТНОЇ подяки
-    waiting_for_transport_type = State()      # Вибір: Трамвай чи Тролейбус
-    waiting_for_vehicle_number = State()      # Введення бортового номера
-    waiting_for_specific_details = State()    # Текст подяки + ПІБ водія
-    # Гілка ЗАГАЛЬНОЇ подяки
-    waiting_for_general_details = State()     # Суть подяки
-    waiting_for_user_name = State()           # ПІБ користувача
-    # Фінал (спільний)
-    waiting_for_email = State()               # Email
+Стани для ConversationHandlers (python-telegram-bot).
+Це прості INTEGER константи, які відслідковують етап діалогу.
+"""
 
 
 class States:
     """Стани для ConversationHandlers"""
 
-    # Стани для скарг
+    # ========== СКАРГИ ==========
     COMPLAINT_AWAIT_TEXT = 1
 
-    # --- ОНОВЛЕНІ СТАНИ ДЛЯ ПОДЯК ---
-    # Ми використовуємо ці назви у handlers/thanks_handlers.py
-    THANKS_TEXT = 6  # Було THANKS_PROBLEM
-    THANKS_ROUTE = 7
-    THANKS_BOARD = 8
-    THANKS_NAME = 19  # Новий стан для імені (замість старих 18/19/20)
+    # ========== ПОДЯКИ (V2 - Апгрейд) ==========
+    # Крок 0: Вибір типу подяки
+    THANKS_CHOOSE_TYPE = 2
 
-    # Нові стани для пропозицій
-    SUGGESTION_TEXT = 9
+    # ГІЛКА 1: КОНКРЕТНА ПОДЯКА
+    THANKS_SPECIFIC_CHOOSE_TRANSPORT = 3  # Вибір: Трамвай чи Тролейбус?
+    THANKS_SPECIFIC_BOARD_NUMBER = 4  # Введення бортового номера
+    THANKS_SPECIFIC_REASON = 5  # За що вдячні? + ПІБ водія
+    THANKS_SPECIFIC_EMAIL = 6  # Email
 
-    # Реєстрація в музей
+    # ГІЛКА 2: ЗАГАЛЬНА ПОДЯКА
+    THANKS_GENERAL_MESSAGE = 7  # Суть вдячності
+    THANKS_GENERAL_NAME = 8  # П.І.Б. користувача
+    THANKS_GENERAL_EMAIL = 9  # Email
+
+    # ========== МУЗЕЙ ==========
     MUSEUM_DATE = 11
     MUSEUM_PEOPLE_COUNT = 12
     MUSEUM_NAME = 13
     MUSEUM_PHONE = 14
 
-    # Адмін-панель Музею
+    # ========== АДМІН-ПАНЕЛЬ ==========
     ADMIN_STATE_ADD_DATE = 16
     ADMIN_STATE_DEL_DATE_CONFIRM = 17
     ADMIN_BROADCAST_TEXT = 50
     ADMIN_BROADCAST_CONFIRM = 51
 
-    # Старі стани подяк (THANKS_ASK_SPECIFIC і т.д.) можна видалити або залишити,
-    # але ми їх більше не використовуємо в коді.
-
-    # Пропозиції (продовження)
+    # ========== ПРОПОЗИЦІЇ ==========
+    SUGGESTION_TEXT = 20
     SUGGESTION_GET_NAME = 22
     SUGGESTION_GET_PHONE = 23
     COMPLAINT_EMAIL = 24
     SUGGESTION_EMAIL = 25
 
-    # Пошук Інклюзивного Транспорту
+    # ========== ІНКЛЮЗИВНИЙ ТРАНСПОРТ ==========
     ACCESSIBLE_SEARCH_STOP = 30
     ACCESSIBLE_SELECT_STOP = 31
     ACCESSIBLE_SHOWING_RESULTS = 32
