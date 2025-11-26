@@ -47,7 +47,7 @@ from handlers.museum_handlers import (
 
 from handlers.thanks_handlers import (
     thanks_start, thanks_text, thanks_route, thanks_board,
-    thanks_name, skip_route, skip_board, thanks_cancel
+    thanks_name, skip_route, skip_board, thanks_cancel, register_thanks_handlers
 )
 
 from handlers.suggestion_handlers import (

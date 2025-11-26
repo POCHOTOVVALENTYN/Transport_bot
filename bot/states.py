@@ -1,4 +1,4 @@
-from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.fsm.state import State, StatesGroup
 
 class GratitudeForm(StatesGroup):
     waiting_for_type_selection = State()      # Вибір: Конкретна чи Загальна

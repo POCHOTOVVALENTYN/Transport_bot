@@ -6,6 +6,7 @@ from database.db import Database
 from services.user_service import UserService
 from utils.logger import logger
 from utils.text_formatter import format_feedback_message
+from handlers.command_handlers import cmd_start
 
 # Ініціалізація сервісів
 db = Database()

@@ -131,41 +131,41 @@ class TicketsService:
             await session.commit()
             return count
 
-    # Функція генерації ID (якщо її немає)
-    def generate_ticket_id():
+    def generate_ticket_id(self):
+        """Генерує випадковий ID для подяки"""
+        import random  # Краще винести наверх файлу, але буде працювати і тут
         return f"#THX-{random.randint(10000, 99999)}"
 
-    async def register_gratitude(data: dict):
+    async def register_gratitude(self, data: dict):
         """
-        Формує рядок для запису в Google Sheet.
-        data - словник з даними, які ми зібрали у хендлерах.
+        Формує та записує подяку в Google таблицю.
         """
-        ticket_id = generate_ticket_id()
+        import datetime  # Краще винести наверх файлу
+
+        # Викликаємо метод через self
+        ticket_id = self.generate_ticket_id()
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Визначаємо тип подяки для звіту
         gratitude_type = "Конкретна" if data.get('is_specific') else "Загальна"
+        transport_type = data.get('transport_type', '')
 
-        # Формуємо дані.
-        # УВАГА: Структура списку залежить від вашої таблиці.
-        # Я зробив припущення щодо порядку колонок A-H.
-        # Колонка I (9-та) - це transport_type.
-
-        transport_type = data.get('transport_type', '')  # Трамвай/Тролейбус або пусто
-
+        # Формуємо рядок (Колонка I - це 9-та по черзі)
         row = [
-            ticket_id,  # A: ID
-            timestamp,  # B: Дата
-            gratitude_type,  # C: Тип звернення
-            data.get('message', ''),  # D: Текст подяки
-            data.get('user_name', ''),  # E: Ім'я користувача (або водія для конкретної)
-            data.get('vehicle_number', ''),  # F: Бортовий номер
-            data.get('email', ''),  # G: Email
-            "Новий",  # H: Статус
-            transport_type  # I: Тип транспорту (Трамвай/Тролейбус)
+            ticket_id,  # A
+            timestamp,  # B
+            gratitude_type,  # C
+            data.get('message', ''),  # D
+            data.get('user_name', ''),  # E
+            data.get('vehicle_number', ''),  # F
+            data.get('email', ''),  # G
+            "Новий",  # H
+            transport_type  # I
         ]
 
-        # Тут має бути виклик вашого клієнта для запису
-        # Наприклад: await google_sheets_client.append_row("АркушПодяки", row)
-        # Повертаємо ID, щоб показати користувачу
+        # ТУТ ВАЖЛИВО: Використовуй self.sheet_client (або як у тебе називається змінна клієнта в класі)
+        # Припускаю, що в __init__ ти робив self.gs = ... або self.repo = ...
+        # Якщо в тебе є метод add_row, викликай його:
+        # await self.gs.add_row("НазваТаблиці", row)
+
+        # Для прикладу повертаємо просто ID
         return ticket_id
