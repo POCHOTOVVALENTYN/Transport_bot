@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Column, Integer, String, DateTime, func, Boolean, BigInteger, select, update
 from config.settings import DATABASE_URL
+from sqlalchemy.exc import OperationalError
 
 Base = declarative_base()
 
@@ -18,14 +19,22 @@ AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=F
 
 
 async def init_db():
-    """Створює таблиці, якщо їх немає"""
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        print("✅ Database tables initialized successfully")
-    except Exception as e:
-        print(f"❌ Error initializing database: {e}")
-        raise
+    """Створює таблиці, якщо їх немає, з механізмом очікування"""
+    retries = 10
+    while retries > 0:
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            print("✅ Database tables initialized successfully")
+            return  # Успіх, виходимо
+        except (OSError, OperationalError) as e:
+            # OSError 111 - це Connection Refused
+            retries -= 1
+            print(f"⏳ БД ще не готова ({e}). Чекаємо 3 секунди... (Залишилось спроб: {retries})")
+            await asyncio.sleep(3)
+
+    # Якщо спроби скінчились
+    raise Exception("❌ Не вдалося підключитися до БД після багатьох спроб")
 
 
 # ================= МОДЕЛІ (ТАБЛИЦІ) =================
