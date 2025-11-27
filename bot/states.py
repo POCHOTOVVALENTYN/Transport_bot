@@ -11,6 +11,7 @@ class States:
 
     # ========== СКАРГИ ==========
     COMPLAINT_AWAIT_TEXT = 1
+    COMPLAINT_CONFIRMATION = "COMPLAINT_CONFIRMATION"
 
     # ========== ПОДЯКИ (V2 - Апгрейд) ==========
     # Крок 0: Вибір типу подяки
@@ -46,6 +47,7 @@ class States:
     SUGGESTION_GET_PHONE = 23
     COMPLAINT_EMAIL = 24
     SUGGESTION_EMAIL = 25
+    SUGGESTION_CONFIRMATION = "SUGGESTION_CONFIRMATION"
 
     # ========== ІНКЛЮЗИВНИЙ ТРАНСПОРТ ==========
     ACCESSIBLE_SEARCH_STOP = 30

@@ -8,7 +8,8 @@ from telegram.ext import (
 # --- Старі імпорти ---
 from handlers.command_handlers import cmd_start, cmd_help
 from handlers.complaint_handlers import (
-    complaint_start_simplified, complaint_save_simplified
+    complaint_start_simplified, complaint_confirm_step,
+    complaint_save_final
 )
 from handlers.menu_handlers import main_menu
 
@@ -55,8 +56,7 @@ from handlers.thanks_handlers import (
 
 from handlers.suggestion_handlers import (
     suggestion_start, suggestion_ask_contact, suggestion_get_name,
-    suggestion_get_phone, suggestion_get_email, suggestion_save_with_email,
-    suggestion_save_skip_email # <-- 'suggestion_save_anonymously' видалено
+    suggestion_get_phone, suggestion_check_data, suggestion_save_final  # <-- 'suggestion_save_anonymously' видалено
 )
 
 
@@ -182,20 +182,25 @@ class TransportBot:
             ]
         )
 
-        # ===== НОВИЙ CONVERSATION HANDLER ДЛЯ ПОДЯК =====
+        # 1. Імпорт функції реєстрації (нагорі файлу або перед використанням)
+        from handlers.thanks_handlers import register_thanks_handlers
+
+        # 2. Отримання конфігурації
         thanks_conf = register_thanks_handlers()
+
+        # 3. Створення ConversationHandler
         thanks_conv = ConversationHandler(
             entry_points=[CallbackQueryHandler(ep[2], pattern=f"^{ep[1]}$") for ep in thanks_conf['entry_points']],
             states={
                 state: [
+                    # Якщо це message handler
                     MessageHandler(filters.TEXT & ~filters.COMMAND, h[2]) if h[0] == 'message'
-                    else CallbackQueryHandler(h[2], pattern=f"^{h[1]}")
+                    # Якщо це callback handler (кнопка)
+                    else CallbackQueryHandler(h[2], pattern=f"^{h[1]}$")
                     for h in handlers
                 ]
                 for state, handlers in thanks_conf['states'].items()
-
             },
-
             fallbacks=[
                 CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                 CallbackQueryHandler(main_menu, pattern="^main_menu$")
@@ -205,37 +210,27 @@ class TransportBot:
 
         # NEW CONVERSATION: ПРОПОЗИЦІЇ (Оновлено)
         suggestion_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(suggestion_start, pattern="^suggestion$", block=False)],
+            entry_points=[CallbackQueryHandler(suggestion_start, pattern="^suggestion$")],
             states={
-                States.SUGGESTION_TEXT: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_ask_contact),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                States.SUGGESTION_GET_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_get_phone),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                States.SUGGESTION_GET_PHONE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_get_email),  # <-- ЗМІНЕНО
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-                # --- ДОДАЙТЕ ЦЕЙ БЛОК ---
+                States.SUGGESTION_TEXT: [MessageHandler(filters.TEXT, suggestion_ask_contact)],
+                States.SUGGESTION_GET_NAME: [MessageHandler(filters.TEXT, suggestion_get_name)],
+                States.SUGGESTION_GET_PHONE: [MessageHandler(filters.TEXT, suggestion_get_phone)],
+
+                # На етапі Email ми тепер йдемо на перевірку (check_data)
                 States.SUGGESTION_EMAIL: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_save_with_email),
-                    # Додаємо обробник для кнопки "Пропустити"
-                    CallbackQueryHandler(suggestion_save_skip_email, pattern="^suggestion_skip_email$"),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                    MessageHandler(filters.TEXT, suggestion_check_data),
+                    CallbackQueryHandler(suggestion_check_data, pattern="^suggestion_skip_email$")
                 ],
-                # --- КІНЕЦЬ ДОДАВАННЯ ---
+
+                # НОВИЙ СТАН
+                States.SUGGESTION_CONFIRMATION: [
+                    CallbackQueryHandler(suggestion_save_final, pattern="^suggestion_confirm_send$"),
+                    CallbackQueryHandler(suggestion_start, pattern="^suggestion$"),  # Переписати
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$")
+                ]
             },
-            fallbacks=[
-                CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                CallbackQueryHandler(main_menu, pattern="^main_menu$")
-            ]
+            fallbacks=[CallbackQueryHandler(main_menu, pattern="^main_menu$")],
+            per_message=False
         )
 
         # NEW CONVERSATION: РЕЄСТРАЦІЯ В МУЗЕЙ

@@ -348,7 +348,10 @@ def register_thanks_handlers():
                 ('callback', 'thanks:specific', thanks_specific_type_selection),
                 ('callback', 'thanks:general', thanks_general_start),
             ],
-            States.THANKS_SPECIFIC_CHOOSE_TRANSPORT: [('callback', 'thanks:transport:', thanks_transport_selected)],
+            States.THANKS_SPECIFIC_CHOOSE_TRANSPORT: [
+                # .* означає "будь-які символи після двокрапки"
+                ('callback', 'thanks:transport:.*', thanks_transport_selected),
+            ],
             States.THANKS_SPECIFIC_BOARD_NUMBER: [
                 ('message', None, thanks_board_number_input),
                 ('callback', 'thanks:skip_board', thanks_skip_board)

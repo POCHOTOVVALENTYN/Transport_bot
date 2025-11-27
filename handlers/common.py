@@ -7,6 +7,7 @@ from handlers.command_handlers import get_main_menu_keyboard
 from utils.logger import logger  # Додати імпорт нагорі
 
 
+
 async def dismiss_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Видаляє повідомлення розсилки і показує Головне меню.
@@ -130,3 +131,22 @@ async def cleanup_warning_task(context, message_id, chat_id):
     finally:
         # Знімаємо прапорець - тепер можна надсилати нове попередження
         context.user_data['warning_active'] = False
+
+
+async def safe_delete_prev_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """
+    Універсальна функція: видаляє повідомлення бота, ID якого збережено в 'last_bot_msg_id'.
+    """
+    msg_id = context.user_data.get('last_bot_msg_id')
+    # Також перевіряємо старий ключ, який використовувався у скаргах
+    if not msg_id:
+        msg_id = context.user_data.get('dialog_message_id')
+
+    if msg_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception as e:
+            logger.warning(f"Could not delete message {msg_id}: {e}")
+        finally:
+            context.user_data['last_bot_msg_id'] = None
+            context.user_data['dialog_message_id'] = None
