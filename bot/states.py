@@ -26,6 +26,7 @@ class States:
     THANKS_GENERAL_MESSAGE = 7  # Суть вдячності
     THANKS_GENERAL_NAME = 8  # П.І.Б. користувача
     THANKS_GENERAL_EMAIL = 9  # Email
+    THANKS_CONFIRMATION = "THANKS_CONFIRMATION"
 
     # ========== МУЗЕЙ ==========
     MUSEUM_DATE = 11

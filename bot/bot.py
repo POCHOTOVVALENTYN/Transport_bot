@@ -48,8 +48,9 @@ from handlers.museum_handlers import (
 from handlers.thanks_handlers import (
     thanks_start, thanks_specific_type_selection, thanks_transport_selected,
     thanks_board_number_input, thanks_skip_board, thanks_reason_input,
-    thanks_email_input, thanks_general_start, thanks_general_message,
-    thanks_general_name, thanks_general_email, thanks_cancel
+    thanks_general_start, thanks_general_message,
+    thanks_general_name, register_thanks_handlers,
+    thanks_input_email_and_confirm, thanks_confirm_save
 )
 
 from handlers.suggestion_handlers import (
@@ -182,72 +183,24 @@ class TransportBot:
         )
 
         # ===== НОВИЙ CONVERSATION HANDLER ДЛЯ ПОДЯК =====
+        thanks_conf = register_thanks_handlers()
         thanks_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(thanks_start, pattern="^thanks$", block=False)],
+            entry_points=[CallbackQueryHandler(ep[2], pattern=f"^{ep[1]}$") for ep in thanks_conf['entry_points']],
             states={
-                # КРОК 1: Вибір типу подяки
-                States.THANKS_CHOOSE_TYPE: [
-                    CallbackQueryHandler(thanks_specific_type_selection, pattern="^thanks:specific$"),
-                    CallbackQueryHandler(thanks_general_start, pattern="^thanks:general$"),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-
-                # ГІЛКА КОНКРЕТНА: Вибір типу транспорту
-                States.THANKS_SPECIFIC_CHOOSE_TRANSPORT: [
-                    CallbackQueryHandler(thanks_transport_selected, pattern="^thanks:transport:"),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-
-                # ГІЛКА КОНКРЕТНА: Бортовий номер
-                States.THANKS_SPECIFIC_BOARD_NUMBER: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_board_number_input),
-                    CallbackQueryHandler(thanks_skip_board, pattern="^thanks:skip_board$"),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-
-                # ГІЛКА КОНКРЕТНА: Причина подяки
-                States.THANKS_SPECIFIC_REASON: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_reason_input),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-
-                # ГІЛКА КОНКРЕТНА: Email
-                States.THANKS_SPECIFIC_EMAIL: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_email_input),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-
-                # ГІЛКА ЗАГАЛЬНА: Повідомлення
-                States.THANKS_GENERAL_MESSAGE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_general_message),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-
-                # ГІЛКА ЗАГАЛЬНА: П.І.Б.
-                States.THANKS_GENERAL_NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_general_name),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
-                ],
-
-                # ГІЛКА ЗАГАЛЬНА: Email
-                States.THANKS_GENERAL_EMAIL: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, thanks_general_email),
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                state: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, h[2]) if h[0] == 'message'
+                    else CallbackQueryHandler(h[2], pattern=f"^{h[1]}")
+                    for h in handlers
                 ]
+                for state, handlers in thanks_conf['states'].items()
+
             },
+
             fallbacks=[
                 CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                CallbackQueryHandler(main_menu, pattern="^main_menu$"),
-                CommandHandler("cancel", thanks_cancel)
-            ]
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+            ],
+            per_message=False
         )
 
         # NEW CONVERSATION: ПРОПОЗИЦІЇ (Оновлено)
