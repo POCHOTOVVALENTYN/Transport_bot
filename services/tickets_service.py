@@ -98,8 +98,19 @@ class TicketsService:
             loop = asyncio.get_running_loop()
 
             for item in feedbacks:
-                # Визначаємо лист в залежності від категорії
-                sheet_name = SHEET_NAMES.get(f"{item.category}s", "Інше")  # complaints -> Скарги
+                # Визначаємо ключ для SHEET_NAMES
+                category_key = f"{item.category}s"  # За замовчуванням (complaint -> complaints)
+
+                # Виправляємо для Подяк (бо в базі вони записані кирилицею "Подяки")
+                if item.category == 'Подяки':
+                    category_key = 'thanks'
+                elif item.category == 'Скарги':  # Про всяк випадок
+                    category_key = 'complaints'
+                elif item.category == 'Пропозиції':  # Про всяк випадок
+                    category_key = 'suggestions'
+
+                # Отримуємо назву листа (напр. "Подяки")
+                sheet_name = SHEET_NAMES.get(category_key, "Інше")
 
                 # Формуємо рядок (порядок полів має збігатися з шапкою вашої таблиці!)
                 # Приклад для Скарги: Дата | ID | Статус | Пріоритет | Маршрут | Проблема | Борт | Ім'я | Телефон | Email
