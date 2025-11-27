@@ -164,22 +164,32 @@ class TransportBot:
         # Кнопка входу в Адмінку Музею (Максим)
         self.app.add_handler(CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"))
 
-
-        # CONVERSATION: СКАРГИ (існуючий)
+        # CONVERSATION: СКАРГИ (Оновлений з підтвердженням)
         complaint_conv = ConversationHandler(
             entry_points=[CallbackQueryHandler(complaint_start_simplified, pattern="^complaint$", block=False)],
             states={
+                # Крок 1: Очікування тексту -> Перехід до ПІДТВЕРДЖЕННЯ
                 States.COMPLAINT_AWAIT_TEXT: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_save_simplified),
-                    # Обробка кнопок "Скасувати" та "Головне меню"
+                    # ТУТ БУЛА ПОМИЛКА: замість 'complaint_save_simplified' ставимо 'complaint_confirm_step'
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_confirm_step),
+
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
+
+                # Крок 2 (НОВИЙ): Підтвердження -> Збереження
+                States.COMPLAINT_CONFIRMATION: [
+                    CallbackQueryHandler(complaint_save_final, pattern="^complaint_confirm_send$"),
+                    # Якщо хоче переписати - запускаємо знову старт
+                    CallbackQueryHandler(complaint_start_simplified, pattern="^complaint$"),
+                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$")
+                ]
             },
             fallbacks=[
                 CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
                 CallbackQueryHandler(main_menu, pattern="^main_menu$")
-            ]
+            ],
+            per_message=False  # Додайте це, щоб прибрати warning у логах
         )
 
         # 1. Імпорт функції реєстрації (нагорі файлу або перед використанням)
