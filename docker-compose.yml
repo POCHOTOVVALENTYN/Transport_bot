@@ -13,6 +13,7 @@ services:
       - ./config/google_credentials.json:/app/config/google_credentials.json
       - ./assets:/app/assets
       - ./documents:/app/documents
+      - ./transport_bot.db:/app/transport_bot.db
     environment:
       - TZ=Europe/Kyiv
 

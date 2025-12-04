@@ -56,30 +56,35 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     logger.info(f"👤 User {user_id} started bot")
 
-    # --- ДОДАНО: ВИДАЛЕННЯ КОМАНДИ /start ---
+    # 1. Видалення команди /start (Чистий чат)
     if update.message:
         try:
             await update.message.delete()
         except Exception as e:
             logger.warning(f"Не вдалося видалити повідомлення /start для {user.id}: {e}")
-    # ----------------------------------------
 
-    # Реєструємо юзера в БД
+    # 2. Реєструємо юзера в БД
     try:
         await user_service.register_user(user)
     except Exception as e:
         logger.error(f"User reg error: {e}")
 
-    # Отримуємо правильну клавіатуру (функція сама визначить, які адмін-кнопки показати)
-    keyboard = await get_main_menu_keyboard(user_id)
+    # 3. Передаємо управління в main_menu
+    # ВАЖЛИВО: Імпорт робимо тут, щоб уникнути циклічної помилки (Circular Import),
+    # оскільки menu_handlers вже імпортує get_main_menu_keyboard з цього файлу.
+    from handlers.menu_handlers import main_menu
 
-    await update.message.reply_text(
-        MESSAGES['welcome'],
-        reply_markup=keyboard
-    )
+    await main_menu(update, context)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /help"""
     text = "🆘 Допомога:\n\n/start - Головне меню\n/help - Цей текст"
+    # Для help теж бажано видаляти повідомлення користувача, якщо хочете ідеальної чистоти
+    if update.message:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
     await update.message.reply_text(text)
