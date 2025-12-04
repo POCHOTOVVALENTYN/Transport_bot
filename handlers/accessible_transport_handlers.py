@@ -83,7 +83,10 @@ async def load_easyway_route_ids(application: Application) -> bool:
 async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    # 1. Зберігаємо ID поточного повідомлення перед очищенням (або відновлюємо після)
+    msg_id = query.message.message_id
     context.user_data.clear()
+    context.user_data['main_message_id'] = msg_id  # <--- ЗБЕРІГАЄМО ID
 
     keyboard = [
         [
@@ -118,6 +121,44 @@ async def accessible_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     original_input = update.message.text.strip()
+
+    # --- ЛОГІКА "ЧИСТОГО ЧАТУ" ---
+    # 1. Видаляємо повідомлення, яке написав користувач
+    try:
+        await update.message.delete()
+    except Exception as e:
+        logger.warning(f"Could not delete user message: {e}")
+
+    # 2. Отримуємо ID головного повідомлення бота, яке ми будемо редагувати
+    main_msg_id = context.user_data.get('main_message_id')
+    chat_id = update.effective_chat.id
+
+    # Якщо ID втрачено (наприклад, перезапуск бота), шлемо нове і зберігаємо його
+    if not main_msg_id:
+        msg = await update.message.reply_text("🔄 Обробка запиту...")
+        main_msg_id = msg.message_id
+        context.user_data['main_message_id'] = main_msg_id
+
+    # Допоміжна функція для редагування (щоб не дублювати код)
+    async def edit_root_message(text, reply_markup=None):
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=main_msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
+        except telegram.error.BadRequest as e:
+            # Якщо повідомлення не знайдено або не змінилося - ігноруємо або шлемо нове
+            logger.error(f"Failed to edit message: {e}")
+            if "Message to edit not found" in str(e):
+                msg = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup,
+                                                     parse_mode=ParseMode.HTML)
+                context.user_data['main_message_id'] = msg.message_id
+
+    # --- КІНЕЦЬ ЛОГІКИ "ЧИСТОГО ЧАТУ" ---
+
     context.user_data['last_search_term'] = original_input
 
     normalized_input = original_input.lower()
@@ -141,35 +182,41 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
     if not search_term:
         search_term = original_input
 
-    await update.message.chat.send_action("typing")
+    # Використовуємо send_chat_action, щоб показати "друкує..." без надсилання повідомлення
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
     try:
         data = await easyway_service.get_places_by_name(search_term=search_term)
 
         if data.get("error"):
             context.user_data['failed_search_query'] = original_input
-            await update.message.reply_text(
+
+            # ЗАМІНА reply_text НА edit_root_message
+            await edit_root_message(
                 text="❌ <b>Помилка API</b>\nСервер не відповів вчасно.",
-                reply_markup=_get_error_keyboard(retry_callback_data="accessible_retry_manual"),
-                parse_mode=ParseMode.HTML
+                reply_markup=_get_error_keyboard(retry_callback_data="accessible_retry_manual")
             )
             return States.ACCESSIBLE_SEARCH_STOP
 
         places = data.get("stops", [])
         if not places:
-            await update.message.reply_text(
-                f"❌ Зупинок не знайдено за запитом <b>'{search_term}'</b>.",
-                parse_mode="HTML"
+            # ЗАМІНА reply_text НА edit_root_message
+            await edit_root_message(
+                text=f"❌ Зупинок не знайдено за запитом <b>'{search_term}'</b>.\nСпробуйте ще раз або поверніться назад.",
+                reply_markup=_get_error_keyboard(retry_callback_data="accessible_start")
+                # Тут можна дати кнопку повернення
             )
             return States.ACCESSIBLE_SEARCH_STOP
 
         context.user_data["search_results"] = places
-        await _show_stops_keyboard(update, places)
+
+        # Оновлюємо виклик клавіатури, передаючи main_msg_id
+        await _show_stops_keyboard(update, places, context)  # <-- Зверніть увагу, ми змінили сигнатуру функції
         return States.ACCESSIBLE_SELECT_STOP
 
     except Exception as e:
         logger.error(f"Error searching stops: {e}")
-        await update.message.reply_text(f"❌ Помилка: {str(e)}")
+        await edit_root_message(text=f"❌ Помилка: {str(e)}")
         return States.ACCESSIBLE_SEARCH_STOP
 
 
@@ -252,21 +299,16 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
             local_id = r.get('id')
             r_direction = r.get('direction')
 
-            # --- ВИЗНАЧЕННЯ ТИПУ ТРАНСПОРТУ (FIXED) ---
+            # --- ВИЗНАЧЕННЯ ТИПУ ТРАНСПОРТУ (STRICT MODE) ---
             api_transport_key = r.get('transportKey', '')
             transport_name = str(r.get('transport_name', '')).lower()
 
-            # Нормалізація ключа
+            # 1. Нормалізація ключа
             if api_transport_key == 'trolley':
                 api_transport_key = 'trol'
 
-            # 1. Явний захист від автобусів: якщо це автобус, ставимо ключ 'bus'
-            # Це запобігає помилковому розпізнаванню Автобуса №2 як Тролейбуса №2
-            if not api_transport_key or api_transport_key in ['bus', 'minibus']:
-                if any(x in transport_name for x in ['автобус', 'bus', 'маршрутка', 'minibus', 'богдан']):
-                    api_transport_key = 'bus'
-
-            # 2. Спроба визначити електротранспорт за назвою, якщо ключ досі невідомий
+            # 2. Якщо ключа немає, пробуємо знайти його в назві маршруту
+            # (наприклад "Трамвай 7", "Trolleybus 10")
             if not api_transport_key:
                 if 'трамвай' in transport_name or 'tram' in transport_name:
                     api_transport_key = 'tram'
@@ -274,12 +316,8 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
                     api_transport_key = 'trol'
 
             # 3. Останній шанс (Blind Guessing) - використовуємо обережно
-            # Лише якщо ми ТОЧНО не визначили, що це автобус
-            if not api_transport_key:
-                if (r_title, 'tram') in name_to_main_id:
-                    api_transport_key = 'tram'
-                elif (r_title, 'trol') in name_to_main_id:
-                    api_transport_key = 'trol'
+            # Якщо API не надало transportKey і в назві немає слів "трамвай/тролейбус",
+            # ми ігноруємо цей маршрут. Це відсіює автобуси "2", "7" тощо.
 
             is_electric = (api_transport_key in ['tram', 'trol'])
 
@@ -496,7 +534,7 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
 
 # === ДОПОМІЖНІ ФУНКЦІЇ ===
 
-async def _show_stops_keyboard(update: Update, places: list):
+async def _show_stops_keyboard(update: Update, places: list, context: ContextTypes.DEFAULT_TYPE = None):
     keyboard = []
     for place in places[:10]:
         title = place['title']
@@ -512,15 +550,33 @@ async def _show_stops_keyboard(update: Update, places: list):
     reply_markup = InlineKeyboardMarkup(keyboard)
     message_text = "✅ Знайдено!\nОберіть точну зупинку зі списку:"
 
+    # Якщо функцію викликано через callback (кнопка)
     if update.callback_query:
         try:
             await update.callback_query.edit_message_text(text=message_text, reply_markup=reply_markup,
                                                           parse_mode=ParseMode.HTML)
         except Exception:
             pass
+    # Якщо функцію викликано після текстового вводу (ми передали context)
+    elif context and 'main_message_id' in context.user_data:
+        chat_id = update.effective_chat.id
+        msg_id = context.user_data['main_message_id']
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=message_text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
+        except Exception as e:
+            logger.error(f"Show stops edit error: {e}")
+            # Fallback
+            msg = await update.message.reply_text(text=message_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+            context.user_data['main_message_id'] = msg.message_id
     else:
+        # Старий fallback (на всяк випадок)
         await update.message.reply_text(text=message_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-
 
 async def accessible_back_to_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query

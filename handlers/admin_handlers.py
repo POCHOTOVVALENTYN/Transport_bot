@@ -148,7 +148,6 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['msgs_to_delete'] = msgs_to_delete
 
     # 3. Робимо "Прев'ю"
-    # === 👇 ВИПРАВЛЕННЯ ТУТ 👇 ===
     # Ми зберігаємо повідомлення в змінну і додаємо його ID у список видалення
     preview_title_msg = await msg.reply_text("👁 <b>Попередній перегляд:</b>", parse_mode=ParseMode.HTML)
     msgs_to_delete.append(preview_title_msg.message_id)

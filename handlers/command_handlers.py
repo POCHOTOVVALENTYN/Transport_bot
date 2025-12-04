@@ -13,7 +13,7 @@ async def get_main_menu_keyboard(user_id: int):
     """Повертає клавіатуру головного меню з урахуванням прав доступу"""
     keyboard = [
         [InlineKeyboardButton("📍 Де мій транспорт? (Real-time)", callback_data="realtime_transport")],
-        [InlineKeyboardButton("♿ Пошук інклюзивного транспорту", callback_data="accessible_start")],
+        [InlineKeyboardButton("♿ Пошук низькопідлогового транспорту", callback_data="accessible_start")],
         [InlineKeyboardButton("🎫 Квитки та тарифи", callback_data="tickets_menu")],
         [InlineKeyboardButton("✍️ Звернення та пропозиції", callback_data="feedback_menu")],
         [InlineKeyboardButton("ℹ️ Довідкова інформація", callback_data="info_menu")],
@@ -48,10 +48,21 @@ async def get_admin_main_menu_keyboard():
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start"""
+    """
+    Обробка команди /start.
+    Вітає користувача, показує головне меню та видаляє команду /start з чату.
+    """
     user = update.effective_user
     user_id = user.id
     logger.info(f"👤 User {user_id} started bot")
+
+    # --- ДОДАНО: ВИДАЛЕННЯ КОМАНДИ /start ---
+    if update.message:
+        try:
+            await update.message.delete()
+        except Exception as e:
+            logger.warning(f"Не вдалося видалити повідомлення /start для {user.id}: {e}")
+    # ----------------------------------------
 
     # Реєструємо юзера в БД
     try:
