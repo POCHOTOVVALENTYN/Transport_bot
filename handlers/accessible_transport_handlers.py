@@ -252,18 +252,29 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
             local_id = r.get('id')
             r_direction = r.get('direction')
 
-            # --- ВИЗНАЧЕННЯ ТИПУ ТРАНСПОРТУ ---
+            # --- ВИЗНАЧЕННЯ ТИПУ ТРАНСПОРТУ (FIXED) ---
             api_transport_key = r.get('transportKey', '')
             transport_name = str(r.get('transport_name', '')).lower()
 
-            if api_transport_key == 'trolley': api_transport_key = 'trol'
+            # Нормалізація ключа
+            if api_transport_key == 'trolley':
+                api_transport_key = 'trol'
 
+            # 1. Явний захист від автобусів: якщо це автобус, ставимо ключ 'bus'
+            # Це запобігає помилковому розпізнаванню Автобуса №2 як Тролейбуса №2
+            if not api_transport_key or api_transport_key in ['bus', 'minibus']:
+                if any(x in transport_name for x in ['автобус', 'bus', 'маршрутка', 'minibus', 'богдан']):
+                    api_transport_key = 'bus'
+
+            # 2. Спроба визначити електротранспорт за назвою, якщо ключ досі невідомий
             if not api_transport_key:
                 if 'трамвай' in transport_name or 'tram' in transport_name:
                     api_transport_key = 'tram'
                 elif 'тролейбус' in transport_name or 'trol' in transport_name:
                     api_transport_key = 'trol'
 
+            # 3. Останній шанс (Blind Guessing) - використовуємо обережно
+            # Лише якщо ми ТОЧНО не визначили, що це автобус
             if not api_transport_key:
                 if (r_title, 'tram') in name_to_main_id:
                     api_transport_key = 'tram'
