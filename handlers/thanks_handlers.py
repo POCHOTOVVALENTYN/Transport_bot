@@ -107,7 +107,7 @@ async def thanks_transport_selected(update: Update, context: ContextTypes.DEFAUL
 
     text = (
         f"✅ <b>Обрано: {transport}</b>\n\n"
-        "Введіть <b>бортовий номер</b> (4 цифри, напр: 1234).\n"
+        "Введіть <b>бортовий номер</b> (4 цифри, напр: 4013).\n"
         "Якщо не знаєте — натисніть 'Пропустити'."
     )
     keyboard = [[InlineKeyboardButton("⏭️ Пропустити", callback_data="thanks:skip_board")]]
@@ -142,7 +142,7 @@ async def thanks_skip_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _ask_specific_reason(update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback=False):
-    text = "📝 <b>Напишіть текст подяки:</b>\n\n(За що вдячні? ПІБ водія? Дата події?)"
+    text = "📝 <b>Напишіть текст подяки:</b>\n\n(За що вдячні? ПІБ водія. Дата події. Ваш номер телефону.)"
     markup = await get_navigation_buttons()
 
     if is_callback:
@@ -246,7 +246,7 @@ async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.D
     if thanks_type == 'specific':
         summary = (
             f"🔍 <b>Перевірте Ваші дані:</b>\n\n"
-            f"🔹 <b>Тип:</b> Конкретна ({context.user_data.get('transport_type')})\n"
+            f"🔹 <b>Тип:</b> Конкретне звернення ({context.user_data.get('transport_type')})\n"
             f"🔹 <b>Борт. номер:</b> {context.user_data.get('board_number')}\n"
             f"🔹 <b>Текст:</b> {context.user_data.get('reason')}\n"
             f"🔹 <b>Email:</b> {email}"
@@ -254,7 +254,7 @@ async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.D
     else:
         summary = (
             f"🔍 <b>Перевірте Ваші дані:</b>\n\n"
-            f"🔹 <b>Тип:</b> Загальна\n"
+            f"🔹 <b>Тип:</b> Загальне звернення\n"
             f"🔹 <b>Ім'я:</b> {context.user_data.get('user_name')}\n"
             f"🔹 <b>Текст:</b> {context.user_data.get('message')}\n"
             f"🔹 <b>Email:</b> {email}"

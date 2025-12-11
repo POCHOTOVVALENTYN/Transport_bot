@@ -18,7 +18,7 @@ async def get_main_menu_keyboard(user_id: int):
         [InlineKeyboardButton("✍️ Звернення та пропозиції", callback_data="feedback_menu")],
         [InlineKeyboardButton("ℹ️ Довідкова інформація", callback_data="info_menu")],
         [InlineKeyboardButton("👔 Вакансії", callback_data="vacancies_menu")],
-        [InlineKeyboardButton("🎓 Навчально-курсовий комбінат", callback_data="education_menu")],
+        [InlineKeyboardButton("🎓 Учбово-курсовий комбінат", callback_data="education_menu")],
         [InlineKeyboardButton("🏛️ Музей КП 'ОМЕТ'", callback_data="museum_menu")],
         [InlineKeyboardButton("🏢 Про підприємство", callback_data="company_menu")],
         [InlineKeyboardButton("🔔 Сповіщення від бота", callback_data="subscription_menu")]

@@ -12,6 +12,7 @@ from rapidfuzz import fuzz
 from bot.states import States
 from services.easyway_service import easyway_service
 from services.gtfs_service import gtfs_service
+from utils.text_formatter import format_stop_name
 
 # === КОНФІГУРАЦІЯ ПОШУКУ ===
 
@@ -386,10 +387,9 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
         f"📍 Зупинка: <b>{stop_title}</b>\n"
         f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n"
         f"👋 Шановні пасажири!\n"
-        f"⏱️ Інформація про рух електротранспорту\n\n"
-        f"⚠️ актуальні на момент запиту⚠️\n"
-        f"📢 <b>Увага!</b> На жаль під час <b>повітряної тривоги</b> 🚨 дані про рух електротранспорту "
-        f"не можуть бути надані.\n"
+        f" ⚠️Інформація  актуальна на момент запиту⚠️\n\n"
+        f"📢 <b>Увага!</b> Під час <b>повітряної тривоги</b> 🚨 інформація "
+        f"не може бути надана.\n"
         f"🚊— ─ ─ ─ ─ ─ ─ ─ ─ 🚎\n\n"
     )
 
@@ -535,29 +535,49 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
 # === ДОПОМІЖНІ ФУНКЦІЇ ===
 
 async def _show_stops_keyboard(update: Update, places: list, context: ContextTypes.DEFAULT_TYPE = None):
+    """
+    Відображає клавіатуру зі списком зупинок (зі скороченими назвами).
+    """
     keyboard = []
+
+    # Беремо перші 10 результатів
     for place in places[:10]:
-        title = place['title']
+        # 1. Використовуємо наш новий форматер для назви
+        raw_title = place['title']
+        display_title = format_stop_name(raw_title)
+
+        # 2. Формуємо текст кнопки
+        # routes_summary - це номери маршрутів (напр., "Трам: 5, 28").
+        # Додаємо їх в дужках в один рядок, щоб зекономити місце по вертикалі.
         summary = place.get('routes_summary')
-        button_text = f"📍 {title}"
+
         if summary:
-            button_text += f"\n{summary}"
-        if len(button_text) > 50:
-            button_text = button_text[:47] + "..."
+            # Спробуємо формат: "📍 вул. Назва (Т: 5, 28)"
+            button_text = f"📍 {display_title} ({summary})"
+        else:
+            button_text = f"📍 {display_title}"
+
+        # 3. Фінальна підстраховка довжини (Telegram дозволяє до 64 байт в callback_data,
+        # але текст кнопки візуально обрізається десь на 30-40 символах)
+        if len(button_text) > 40:
+            button_text = button_text[:37] + "..."
+
+        # 4. Додаємо кнопку як ОКРЕМИЙ список [button] - це гарантує 1 кнопку в рядку
         keyboard.append([InlineKeyboardButton(button_text, callback_data=f"stop_{place['id']}")])
 
+    # Кнопка "Назад"
     keyboard.append([InlineKeyboardButton("⬅️ Назад до пошуку", callback_data="accessible_start")])
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     message_text = "✅ Знайдено!\nОберіть точну зупинку зі списку:"
 
-    # Якщо функцію викликано через callback (кнопка)
+    # (Цей блок коду залишається без змін - логіка відправки)
     if update.callback_query:
         try:
             await update.callback_query.edit_message_text(text=message_text, reply_markup=reply_markup,
                                                           parse_mode=ParseMode.HTML)
         except Exception:
             pass
-    # Якщо функцію викликано після текстового вводу (ми передали context)
     elif context and 'main_message_id' in context.user_data:
         chat_id = update.effective_chat.id
         msg_id = context.user_data['main_message_id']
@@ -571,12 +591,12 @@ async def _show_stops_keyboard(update: Update, places: list, context: ContextTyp
             )
         except Exception as e:
             logger.error(f"Show stops edit error: {e}")
-            # Fallback
-            msg = await update.message.reply_text(text=message_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+            msg = await update.message.reply_text(text=message_text, reply_markup=reply_markup,
+                                                  parse_mode=ParseMode.HTML)
             context.user_data['main_message_id'] = msg.message_id
     else:
-        # Старий fallback (на всяк випадок)
         await update.message.reply_text(text=message_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
 
 async def accessible_back_to_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query

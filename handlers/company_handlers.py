@@ -44,49 +44,70 @@ async def show_company_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = "🏢 Розділ 'Про підприємство'. Оберіть опцію:"
 
-    # --- ПОЧАТОК ВИПРАВЛЕННЯ (Логіка Edit/Delete) ---
-    if query.message.text:
-        # Якщо ми прийшли з текстового меню (Головне меню)
-        await query.edit_message_text(
-            text=text,
-            reply_markup=reply_markup
-        )
-    else:
-        # Якщо ми прийшли з медіа (фото оренди)
+    # 1. Спроба "м'якого" редагування (якщо ми переходимо з текстового розділу)
+    try:
+        await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        # Якщо редагування вдалося - виходимо, все ок.
+        return
+    except Exception:
+        # Якщо не вийшло (значить попереднє повідомлення було з фото або його не можна редагувати)
+        pass
+
+    # 2. План Б (Анти-миготіння): Спочатку надсилаємо нове, потім видаляємо старе
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+
+    # 3. Тепер чистимо "хвости" (фото та старе повідомлення)
+    try:
         await query.message.delete()
-        await query.message.reply_text(
-            text=text,
-            reply_markup=reply_markup
-        )
-    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
+    except:
+        pass
 
-    async def show_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Показує інформацію про Історію підприємства."""
-        query = update.callback_query
-        await query.answer()
-
-        text = MESSAGES.get("company_history")
-
-        # Створюємо клавіатуру з посиланням та кнопками навігації
-        keyboard = [
-            [InlineKeyboardButton("📖 Дізнатися більше на сайті", url="https://oget.od.ua/about")],
-            [InlineKeyboardButton("⬅️ Назад", callback_data="company_menu")],
-            [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await query.edit_message_text(
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.HTML
-        )
+    if 'media_message_ids' in context.user_data:
+        for msg_id in context.user_data['media_message_ids']:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=msg_id)
+            except Exception:
+                pass
+        del context.user_data['media_message_ids']
 
 
-async def show_services_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Надсилає ОДНЕ фото з підписом та кнопками про Оренду."""
+
+async def show_history_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує інформацію про Історію підприємства."""
     query = update.callback_query
     await query.answer()
 
+    text = MESSAGES.get("company_history")
+
+    # Створюємо клавіатуру з посиланням та кнопками навігації
+    keyboard = [
+        [InlineKeyboardButton("📖 Дізнатися більше на сайті", url="https://oget.od.ua/about")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="company_menu")],
+        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def show_services_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Надсилає ОДНЕ фото з підписом та кнопками про Оренду.
+    Використовує 'Loading...' для плавного переходу.
+    """
+    query = update.callback_query
+    await query.answer()
+
+    chat_id = update.effective_chat.id
     caption_text = MESSAGES.get("company_services")
 
     keyboard = [
@@ -96,32 +117,52 @@ async def show_services_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    # 1. АНТИ-БЛИМАННЯ: Редагуємо текст на "Завантажую..." замість видалення
+    # Це утримує екран, поки ми возимося з файлом фото
     try:
-        # 1. Видаляємо поточне повідомлення (меню "Про підприємство")
-        await query.delete_message()
+        loading_msg = await query.edit_message_text(
+            text="⏳ <b>Завантажую інформацію...</b>",
+            parse_mode=ParseMode.HTML
+        )
+    except Exception:
+        # Якщо редагування не вдалося (рідкісний випадок), надсилаємо нове
+        loading_msg = await query.message.reply_text("⏳ Завантажую...")
 
-        # 2. Надсилаємо ОДНЕ фото з підписом та кнопками
+    try:
+        # 2. Відкриваємо і надсилаємо фото
         with open(RENTAL_SERVICE_IMAGE, 'rb') as photo:
-            await query.message.reply_photo(
+            sent_msg = await context.bot.send_photo(
+                chat_id=chat_id,
                 photo=photo,
                 caption=caption_text,
                 reply_markup=reply_markup,
                 parse_mode=ParseMode.HTML
             )
+
+        # 3. Зберігаємо ID фото (щоб кнопка "Назад" могла його видалити, як в інших меню)
+        context.user_data['media_message_ids'] = [sent_msg.message_id]
+
+        # 4. Видаляємо повідомлення "Завантажую..."
+        await context.bot.delete_message(chat_id=chat_id, message_id=loading_msg.message_id)
+
         logger.info("✅ Rental info (single photo) sent successfully")
 
     except FileNotFoundError:
         logger.error(f"❌ Rental photo file not found: {RENTAL_SERVICE_IMAGE}")
-        # Відправляємо текст, якщо фото не знайдено
-        await query.message.reply_text(
-            text=f"❌ Файл з фото не знайдено.\n\n{caption_text}",
+        # Якщо фото немає, редагуємо "Завантажую" на текст помилки/інфо
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=loading_msg.message_id,
+            text=f"❌ Фото не знайдено, але ось інформація:\n\n{caption_text}",
             reply_markup=reply_markup,
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
         logger.error(f"❌ Error sending rental info: {e}")
-        await query.message.reply_text(
-            "❌ Сталася помилка при завантаженні інформації.",
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=loading_msg.message_id,
+            text="❌ Сталася технічна помилка при завантаженні.",
             reply_markup=reply_markup
         )
 

@@ -1,5 +1,4 @@
 """
-bot/states.py
 
 Стани для ConversationHandlers (python-telegram-bot).
 Це прості INTEGER константи, які відслідковують етап діалогу.

@@ -70,16 +70,6 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Could not delete dates message: {e}")
         del context.user_data['dates_message_id']
 
-    # --- ВИДАЛЯЄМО ПОТОЧНЕ ПОВІДОМЛЕННЯ (якщо воно ще існує) ---
-    # ВАЖЛИВО: Це може бути те саме повідомлення, яке ми вже видалили вище
-    # Тому просто ігноруємо помилку
-    try:
-        await query.message.delete()
-        logger.info(f"✅ Deleted current message in show_museum_menu")
-    except Exception as e:
-        # Це нормально - повідомлення могло бути вже видалене
-        logger.info(f"ℹ️ Current message already deleted or not found: {e}")
-
     # Очищуємо всі дані реєстрації
     context.user_data.pop('museum_date', None)
     context.user_data.pop('museum_people_count', None)
@@ -92,15 +82,27 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")],
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
     ]
-
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = "🏛️ Розділ 'Музей КП 'ОМЕТ''. Оберіть опцію:"
 
-    # Надсилаємо НОВЕ повідомлення
-    await query.message.reply_text(
-        text=text,
-        reply_markup=reply_markup
-    )
+    # --- ВИПРАВЛЕННЯ: РЕДАГУВАННЯ ЗАМІСТЬ ВИДАЛЕННЯ ---
+    try:
+        # Спроба 1: Просто змінити текст і кнопки (найплавніший варіант)
+        await query.edit_message_text(
+            text=text,
+            reply_markup=reply_markup
+        )
+    except Exception:
+        # Спроба 2: Якщо старе повідомлення було з фото, редагування тексту не спрацює.
+        # Тоді діємо по-старому: видаляємо і пишемо нове.
+        try:
+            await query.message.delete()
+        except:
+            pass
+        await query.message.reply_text(
+            text=text,
+            reply_markup=reply_markup
+        )
 
     return ConversationHandler.END
 
@@ -190,18 +192,29 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
     logger.info(f"🔥 museum_register_start CALLED by user {user.id}")
 
     try:
-        # 1. Отримуємо дати через сервіс (з кешу або Sheets)
+        # 1. МИТТЄВА РЕАКЦІЯ: Показуємо "Завантаження..." замість видалення
+        # Це запобігає "пустому екрану"
+        try:
+            await query.edit_message_text(
+                text="⏳ <b>Завантажую вільні дати...</b>",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
+
+            # 2. Отримуємо дати (поки юзер бачить "Завантаження")
         dates_list = await museum_service.get_available_dates()
 
         # 2. Якщо дат немає
         if not dates_list:
-            keyboard = await get_back_keyboard("museum_menu")
-            await query.message.delete()
-            await query.message.reply_text(
-                text="😢 На жаль, наразі вільних дат для запису немає. Спробуйте пізніше.",
-                reply_markup=keyboard
-            )
-            return ConversationHandler.END
+            if not dates_list:
+                keyboard = await get_back_keyboard("museum_menu")
+                # Редагуємо повідомлення "Завантаження" на помилку
+                await query.edit_message_text(
+                    text="😢 На жаль, наразі вільних дат для запису немає. Спробуйте пізніше.",
+                    reply_markup=keyboard
+                )
+                return ConversationHandler.END
 
         # 3. Формуємо клавіатуру (ОДИН РАЗ)
         keyboard = []
@@ -217,9 +230,8 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
 
         text = "🗓️ Оберіть вільну дату та час для екскурсії:\n"
 
-        # 4. Відправляємо повідомлення
-        await query.message.delete()
-        sent_message = await query.message.reply_text(
+        # 4. РЕДАГУЄМО повідомлення "Завантаження" на список дат
+        sent_message = await query.edit_message_text(
             text=text,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
