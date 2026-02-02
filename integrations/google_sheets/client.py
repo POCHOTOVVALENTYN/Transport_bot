@@ -73,3 +73,73 @@ class GoogleSheetsClient:
             else:
                 logger.error(f"❌ Google Sheets error: {e}")
             return False
+
+    def read_range(self, range_name: str | None = None, sheet_range: str | None = None):
+        """
+        Читає діапазон клітинок з таблиці та повертає список списків значень.
+
+        Параметри:
+        - range_name: стандартний A1-діапазон (наприклад, \"MuseumDates!A1:A50\").
+        - sheet_range: те саме, що range_name (залишено для зворотної сумісності з існуючими викликами).
+        """
+        if not self.service:
+            logger.error("❌ Google Sheets service not initialized")
+            return []
+
+        # Підтримуємо обидва варіанти імені аргументу
+        final_range = sheet_range or range_name
+        if not final_range:
+            logger.error("❌ Google Sheets read_range: не передано діапазон")
+            return []
+
+        try:
+            result = (
+                self.service.spreadsheets()
+                .values()
+                .get(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=final_range,
+                )
+                .execute()
+            )
+            values = result.get("values", [])
+            logger.info(f"✅ Read {len(values)} rows from range {final_range}")
+            return values
+        except Exception as e:
+            logger.error(f"❌ Google Sheets read_range error ({final_range}): {e}")
+            return []
+
+    def clear_cell(self, sheet_name: str, cell: str) -> bool:
+        """
+        Очищає одну клітинку (наприклад, A5) на вказаному аркуші.
+        sheet_name — назва вкладки (\"MuseumDates\" тощо),
+        cell — адреса клітинки у форматі A1 (\"A5\").
+        """
+        if not self.service:
+            logger.error("❌ Google Sheets service not initialized")
+            return False
+
+        try:
+            safe_sheet_name = sheet_name
+            if " " in sheet_name or not sheet_name.isascii():
+                if not sheet_name.startswith("'"):
+                    safe_sheet_name = f"'{sheet_name}'"
+
+            range_name = f"{safe_sheet_name}!{cell}"
+
+            (
+                self.service.spreadsheets()
+                .values()
+                .clear(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=range_name,
+                    body={},
+                )
+                .execute()
+            )
+
+            logger.info(f"✅ Cleared cell {range_name}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Google Sheets clear_cell error ({sheet_name}!{cell}): {e}")
+            return False

@@ -14,11 +14,13 @@ from handlers.command_handlers import get_admin_main_menu_keyboard
 
 from services.user_service import UserService
 from services.tickets_service import TicketsService
+from services.museum_service import MuseumService
 from config.settings import MUSEUM_ADMIN_ID
 
 
 user_service = UserService()
 tickets_service = TicketsService()
+museum_service = MuseumService()
 
 
 
@@ -505,9 +507,8 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
     if query.from_user.id != MUSEUM_ADMIN_ID: return
 
     try:
-        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
-        # Читаємо останні 50 бронювань (включно з заголовком)
-        bookings_data = sheets.read_range(sheet_range="MuseumBookings!A1:E51")
+        # Читаємо останні 50 бронювань (включно з заголовком) через сервіс
+        bookings_data = await museum_service.get_last_bookings(limit=50)
 
         if not bookings_data or len(bookings_data) < 2: # Якщо є тільки заголовок
             await query.edit_message_text(
@@ -544,8 +545,15 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
 
     except Exception as e:
-        logger.error(f"Failed to show bookings: {e}")
-        await query.edit_message_text(f"❌ Помилка при читанні бронювань: {e}")
+        logger.error(f"Failed to show bookings: {e}", exc_info=True)
+        await query.edit_message_text(
+            "❌ Сталася помилка при читанні бронювань.\n"
+            "Переконайтеся, будь ласка, що в Google Sheets існує вкладка 'MuseumBookings' "
+            "і бот має доступ до таблиці.",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
+            )
+        )
 
     # Ця функція не є частиною діалогу, тому нічого не повертаємо
 

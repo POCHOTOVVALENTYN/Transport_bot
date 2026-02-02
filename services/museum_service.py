@@ -45,6 +45,24 @@ class MuseumService:
 
         return []
 
+    async def get_last_bookings(self, limit: int = 50) -> list:
+        """
+        Повертає останні бронювання з аркуша MuseumBookings.
+        Повертає «сирі» дані з Google Sheets (список списків), включно з заголовком.
+        """
+        loop = asyncio.get_running_loop()
+        range_name = f"MuseumBookings!A1:E{limit + 1}"  # +1 на рядок заголовків
+        bookings_data = await loop.run_in_executor(
+            None,
+            self.sheets.read_range,
+            range_name
+        )
+        if not bookings_data:
+            logger.info("ℹ️ Museum bookings: no data returned from Google Sheets")
+            return []
+        logger.info(f"✅ Museum bookings: loaded {len(bookings_data)} rows from Google Sheets")
+        return bookings_data
+
     async def create_booking(self, date: str, count: int, name: str, phone: str) -> bool:
         """
         Миттєво зберігає бронювання в локальну БД SQLite.
