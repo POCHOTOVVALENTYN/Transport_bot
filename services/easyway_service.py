@@ -1,6 +1,7 @@
 # services/easyway_service.py
 import aiohttp
 import json
+import time
 import logging
 import asyncio
 from typing import List, Dict, Optional
@@ -8,7 +9,9 @@ from cachetools import TTLCache
 
 from config.settings import (
     EASYWAY_API_URL, EASYWAY_LOGIN, EASYWAY_PASSWORD, EASYWAY_CITY,
-    EASYWAY_STOP_INFO_VERSION, TIME_SOURCE_ICONS
+    EASYWAY_STOP_INFO_VERSION, TIME_SOURCE_ICONS,
+    EASYWAY_STOP_CACHE_TTL, EASYWAY_PLACES_CACHE_TTL,
+    EASYWAY_ROUTES_CACHE_TTL, EASYWAY_ROUTE_GPS_CACHE_TTL
 )
 from config.accessible_vehicles import ACCESSIBLE_TRAMS, ACCESSIBLE_TROLS
 
@@ -50,11 +53,28 @@ class EasyWayService:
             "tram": "🚋",
         }
         self.time_icons = TIME_SOURCE_ICONS
-        self.stop_cache = TTLCache(maxsize=1000, ttl=30)
-        logger.info("✅ EasyWay Stop Cache initialized (TTL=30s)")
+        self.stop_cache = TTLCache(maxsize=1000, ttl=EASYWAY_STOP_CACHE_TTL)
+        self.places_cache = TTLCache(maxsize=2000, ttl=EASYWAY_PLACES_CACHE_TTL)
+        self.routes_cache = TTLCache(maxsize=1, ttl=EASYWAY_ROUTES_CACHE_TTL)
+        self.route_gps_cache = TTLCache(maxsize=2000, ttl=EASYWAY_ROUTE_GPS_CACHE_TTL)
+        logger.info(
+            "✅ EasyWay Cache initialized "
+            f"(stop={EASYWAY_STOP_CACHE_TTL}s, places={EASYWAY_PLACES_CACHE_TTL}s, "
+            f"routes={EASYWAY_ROUTES_CACHE_TTL}s, gps={EASYWAY_ROUTE_GPS_CACHE_TTL}s)"
+        )
+
+    def _log_api_duration(self, name: str, start_ts: float, extra: str = ""):
+        duration = time.monotonic() - start_ts
+        if duration >= 1.0:
+            logger.info(f"⏱️ EasyWay {name} took {duration:.2f}s {extra}".strip())
 
     async def get_routes_list(self) -> dict:
         """Отримує список маршрутів"""
+        cached = self.routes_cache.get("routes_list")
+        if cached:
+            return cached
+
+        start_ts = time.monotonic()
         params = {
             "login": self.login,
             "password": self.password,
@@ -70,7 +90,10 @@ class EasyWayService:
                 async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
                     async with session.get(url, timeout=timeout) as response:
                         if response.status == 200:
-                            return await response.json(content_type=None)
+                            data = await response.json(content_type=None)
+                            self.routes_cache["routes_list"] = data
+                            self._log_api_duration("GetRoutesList", start_ts)
+                            return data
             except Exception as e:
                 logger.warning(f"GetRoutesList error: {e}")
                 if attempt < 2: await asyncio.sleep(2)
@@ -78,6 +101,12 @@ class EasyWayService:
 
     async def get_places_by_name(self, search_term: str) -> dict:
         """Пошук зупинок за назвою"""
+        cache_key = search_term.strip().lower()
+        cached = self.places_cache.get(cache_key)
+        if cached:
+            return cached
+
+        start_ts = time.monotonic()
         params = {
             "login": self.config.LOGIN,
             "password": self.config.PASSWORD,
@@ -94,7 +123,11 @@ class EasyWayService:
                 async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
                     async with session.get(url, timeout=timeout) as response:
                         if response.status == 200:
-                            return self._parse_places_response(await response.json(content_type=None))
+                            parsed = self._parse_places_response(await response.json(content_type=None))
+                            if not parsed.get("error"):
+                                self.places_cache[cache_key] = parsed
+                            self._log_api_duration("GetPlacesByName", start_ts, f"(term={cache_key})")
+                            return parsed
             except Exception as e:
                 logger.warning(f"Search error: {e}")
                 if attempt < 2: await asyncio.sleep(1)
@@ -105,6 +138,7 @@ class EasyWayService:
         if stop_id in self.stop_cache:
             return self.stop_cache[stop_id]
 
+        start_ts = time.monotonic()
         params = {
             "login": self.config.LOGIN,
             "password": self.config.PASSWORD,
@@ -126,6 +160,7 @@ class EasyWayService:
                             parsed = self._parse_stop_info_v12(await response.json(content_type=None))
                             if not parsed.get("error"):
                                 self.stop_cache[stop_id] = parsed
+                            self._log_api_duration("GetStopInfo", start_ts, f"(stop_id={stop_id})")
                             return parsed
             except Exception as e:
                 logger.warning(f"StopInfo error: {e}")
@@ -137,6 +172,11 @@ class EasyWayService:
         Отримує список ВСЬОГО транспорту на маршруті.
         Ми прибрали фільтрацію, щоб показувати реальну кількість машин.
         """
+        cached = self.route_gps_cache.get(route_id)
+        if cached is not None:
+            return cached
+
+        start_ts = time.monotonic()
         params = {
             "login": self.config.LOGIN,
             "password": self.config.PASSWORD,
@@ -153,7 +193,10 @@ class EasyWayService:
                 async with session.get(url, timeout=8) as response:
                     if response.status == 200:
                         data = await response.json(content_type=None)
-                        return self._parse_route_gps(data)
+                        parsed = self._parse_route_gps(data)
+                        self.route_gps_cache[route_id] = parsed
+                        self._log_api_duration("GetRouteGPS", start_ts, f"(route_id={route_id})")
+                        return parsed
                     else:
                         logger.warning(f"API returned status {response.status} for GetRouteGPS")
         except Exception as e:

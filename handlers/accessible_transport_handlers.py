@@ -3,6 +3,7 @@ from utils.logger import logger
 import re
 import asyncio
 import html
+import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler, Application
@@ -160,6 +161,13 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
 
     # --- КІНЕЦЬ ЛОГІКИ "ЧИСТОГО ЧАТУ" ---
 
+    last_ts = context.user_data.get('easyway_search_ts', 0)
+    now_ts = time.monotonic()
+    if now_ts - last_ts < 0.5:
+        await edit_root_message(text="⏳ Зачекайте секунду перед наступним запитом...")
+        return States.ACCESSIBLE_SEARCH_STOP
+    context.user_data['easyway_search_ts'] = now_ts
+
     context.user_data['last_search_term'] = original_input
 
     normalized_input = original_input.lower()
@@ -224,6 +232,13 @@ async def accessible_search_stop(update: Update, context: ContextTypes.DEFAULT_T
 async def accessible_stop_quick_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    last_ts = context.user_data.get('easyway_search_ts', 0)
+    now_ts = time.monotonic()
+    if now_ts - last_ts < 0.5:
+        await query.edit_message_text("⏳ Зачекайте секунду перед наступним запитом...", parse_mode="HTML")
+        return States.ACCESSIBLE_SELECT_STOP
+    context.user_data['easyway_search_ts'] = now_ts
 
     search_term = query.data.split("stop_search_")[-1]
 

@@ -72,6 +72,20 @@ EASYWAY_PASSWORD = "ndHdy2Ytw2Ois"
 EASYWAY_CITY = "odesa"
 EASYWAY_STOP_INFO_VERSION = "1.2"  # API версія з GPS
 
+# Кешування EasyWay
+EASYWAY_STOP_CACHE_TTL = int(os.getenv("EASYWAY_STOP_CACHE_TTL", "30"))
+EASYWAY_PLACES_CACHE_TTL = int(os.getenv("EASYWAY_PLACES_CACHE_TTL", "120"))
+EASYWAY_ROUTES_CACHE_TTL = int(os.getenv("EASYWAY_ROUTES_CACHE_TTL", "1800"))
+EASYWAY_ROUTE_GPS_CACHE_TTL = int(os.getenv("EASYWAY_ROUTE_GPS_CACHE_TTL", "15"))
+
+# Синхронізація звернень
+FEEDBACK_SYNC_BATCH_SIZE = int(os.getenv("FEEDBACK_SYNC_BATCH_SIZE", "100"))
+FEEDBACK_SYNC_MAX_ROWS = int(os.getenv("FEEDBACK_SYNC_MAX_ROWS", "500"))
+
+# Розсилка
+BROADCAST_BATCH_SIZE = int(os.getenv("BROADCAST_BATCH_SIZE", "50"))
+BROADCAST_PAUSE_SEC = float(os.getenv("BROADCAST_PAUSE_SEC", "0.2"))
+
 # Іконки для джерел часу
 TIME_SOURCE_ICONS = {
     "gps": "🛰️",

@@ -27,6 +27,33 @@ def generate_telegram_update(update_id, user_id, text):
     }
 
 
+def generate_callback_update(update_id, user_id, callback_data, message_id=None):
+    return {
+        "update_id": update_id,
+        "callback_query": {
+            "id": f"cb_{update_id}_{user_id}",
+            "from": {
+                "id": user_id,
+                "is_bot": False,
+                "first_name": f"User{user_id}",
+                "username": f"user_{user_id}",
+                "language_code": "uk"
+            },
+            "message": {
+                "message_id": message_id or random.randint(1000, 9999),
+                "chat": {
+                    "id": user_id,
+                    "first_name": f"User{user_id}",
+                    "type": "private"
+                },
+                "date": 1686000000,
+                "text": "Меню"
+            },
+            "data": callback_data
+        }
+    }
+
+
 class TransportBotUser(HttpUser):
     # 👇 ДОДАЙТЕ ЦЕЙ РЯДОК ОБОВ'ЯЗКОВО 👇
     host = "http://localhost:8001"
@@ -48,20 +75,23 @@ class TransportBotUser(HttpUser):
     @task(1)
     def book_museum(self):
         """Сценарій: Бронювання музею (DB Write + Google Sheets)"""
-        # Крок 1: Запит дат
-        payload_dates = generate_telegram_update(self.update_id, self.user_id, "Музей")
-        self.client.post("/webhook", json=payload_dates)
+        # Крок 1: Відкриття меню музею
+        payload_menu = generate_callback_update(self.update_id, self.user_id, "museum_menu")
+        self.client.post("/webhook", json=payload_menu)
         self.update_id += 1
 
-        # Крок 2: Вибір дати (імітація CallbackQuery або тексту)
-        # Тут треба адаптувати під вашу структуру хендлерів
-        payload_book = generate_telegram_update(self.update_id, self.user_id, "Забронювати на 12:00")
-        self.client.post("/webhook", json=payload_book)
+        # Крок 2: Старт реєстрації
+        payload_start = generate_callback_update(self.update_id, self.user_id, "museum:register_start")
+        self.client.post("/webhook", json=payload_start)
         self.update_id += 1
 
     @task(1)
     def feedback(self):
         """Сценарій: Відгук (Google Sheets)"""
-        payload = generate_telegram_update(self.update_id, self.user_id, "Скарги та пропозиції")
+        payload_menu = generate_callback_update(self.update_id, self.user_id, "feedback_menu")
+        self.client.post("/webhook", json=payload_menu)
+        self.update_id += 1
+
+        payload = generate_telegram_update(self.update_id, self.user_id, "Тестове звернення для перевірки")
         self.client.post("/webhook", json=payload)
         self.update_id += 1

@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 import logging
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -74,7 +75,7 @@ class GoogleSheetsClient:
                 logger.error(f"❌ Google Sheets error: {e}")
             return False
 
-    def read_range(self, range_name: str | None = None, sheet_range: str | None = None):
+    def read_range(self, range_name: Optional[str] = None, sheet_range: Optional[str] = None):
         """
         Читає діапазон клітинок з таблиці та повертає список списків значень.
 
@@ -117,6 +118,44 @@ class GoogleSheetsClient:
         """
         if not self.service:
             logger.error("❌ Google Sheets service not initialized")
+            return False
+
+    def append_rows(self, sheet_name: str, values: list):
+        """
+        Додає декілька рядків у вказаний аркуш.
+        Автоматично додає лапки до назви аркуша, щоб уникнути помилок з кирилицею.
+        """
+        if not self.service:
+            logger.error("❌ Google Sheets service not initialized")
+            return False
+
+        try:
+            safe_sheet_name = sheet_name
+            if " " in sheet_name or not sheet_name.isascii():
+                if not sheet_name.startswith("'"):
+                    safe_sheet_name = f"'{sheet_name}'"
+
+            range_name = f"{safe_sheet_name}!A1"
+            body = {'values': values}
+
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name,
+                valueInputOption="USER_ENTERED",
+                body=body
+            ).execute()
+
+            logger.info(f"✅ Rows appended to {sheet_name}: {len(values)}")
+            return True
+
+        except Exception as e:
+            error_msg = str(e)
+            if "Unable to parse range" in error_msg:
+                logger.error(
+                    f"❌ Google Sheets Critical Error: Вкладка '{sheet_name}' не знайдена в таблиці! Створіть її."
+                )
+            else:
+                logger.error(f"❌ Google Sheets error: {e}")
             return False
 
         try:

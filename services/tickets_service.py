@@ -4,7 +4,7 @@ from sqlalchemy import select, func
 from database.db import AsyncSessionLocal, Feedback
 from config.constants import SHEET_NAMES
 from integrations.google_sheets.client import GoogleSheetsClient
-from config.settings import GOOGLE_SHEETS_ID
+from config.settings import GOOGLE_SHEETS_ID, FEEDBACK_SYNC_BATCH_SIZE, FEEDBACK_SYNC_MAX_ROWS
 from utils.logger import logger
 from utils.text_formatter import format_ticket_id
 import asyncio
@@ -109,6 +109,7 @@ class TicketsService:
     async def sync_new_feedbacks_to_sheets(self):
         """Читає всі 'new' записи з БД і вантажить в Google Sheets"""
         count = 0
+        start_ts = datetime.datetime.now()
         async with AsyncSessionLocal() as session:
             # Отримуємо всі несинхронізовані записи
             result = await session.execute(select(Feedback).where(Feedback.status == "new"))
@@ -118,8 +119,9 @@ class TicketsService:
                 return 0
 
             loop = asyncio.get_running_loop()
+            rows_by_sheet = {}
 
-            for item in feedbacks:
+            for item in feedbacks[:FEEDBACK_SYNC_MAX_ROWS]:
                 # Визначаємо ключ для SHEET_NAMES
                 category_key = f"{item.category}s"  # За замовчуванням (complaint -> complaints)
 
@@ -156,19 +158,33 @@ class TicketsService:
                     item.user_email or ""
                 ]
 
-                # Відправляємо в Sheets (в окремому потоці)
-                success = await loop.run_in_executor(
-                    None,
-                    self.sheets_client.append_row,
-                    sheet_name,
-                    row
-                )
+                rows_by_sheet.setdefault(sheet_name, []).append((item, row))
 
-                if success:
-                    item.status = "synced"
-                    count += 1
+            for sheet_name, items_rows in rows_by_sheet.items():
+                for i in range(0, len(items_rows), FEEDBACK_SYNC_BATCH_SIZE):
+                    batch = items_rows[i:i + FEEDBACK_SYNC_BATCH_SIZE]
+                    rows = [r for _, r in batch]
+
+                    success = False
+                    for attempt in range(3):
+                        success = await loop.run_in_executor(
+                            None,
+                            self.sheets_client.append_rows,
+                            sheet_name,
+                            rows
+                        )
+                        if success:
+                            break
+                        await asyncio.sleep(2 ** attempt)
+
+                    if success:
+                        for item, _ in batch:
+                            item.status = "synced"
+                            count += 1
 
             await session.commit()
+            duration = (datetime.datetime.now() - start_ts).total_seconds()
+            logger.info(f"✅ Sheets sync finished: {count} rows in {duration:.1f}s")
             return count
 
     def generate_ticket_id(self):

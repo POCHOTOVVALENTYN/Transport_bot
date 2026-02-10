@@ -6,7 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler,
                           filters)
-from config.settings import MUSEUM_ADMIN_ID, GOOGLE_SHEETS_ID, GENERAL_ADMIN_IDS
+from config.settings import MUSEUM_ADMIN_ID, GOOGLE_SHEETS_ID, GENERAL_ADMIN_IDS, BROADCAST_BATCH_SIZE, BROADCAST_PAUSE_SEC
 from integrations.google_sheets.client import GoogleSheetsClient
 from utils.logger import logger
 from bot.states import States
@@ -259,6 +259,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
 
         count = 0
         blocked = 0
+        start_time = datetime.now()
 
         # Кнопка "Закрити" ТІЛЬКИ для користувачів
         user_close_btn = InlineKeyboardMarkup([
@@ -266,7 +267,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         ])
 
         # Цикл розсилки
-        for user_id in users:
+        for index, user_id in enumerate(users, start=1):
             try:
                 await context.bot.copy_message(
                     chat_id=user_id,
@@ -275,7 +276,8 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
                     reply_markup=user_close_btn  # Додаємо кнопку тільки тут
                 )
                 count += 1
-                await asyncio.sleep(0.05)
+                if index % BROADCAST_BATCH_SIZE == 0:
+                    await asyncio.sleep(BROADCAST_PAUSE_SEC)
             except Exception as e:
                 logger.warning(f"Failed to send broadcast to {user_id}: {e}")
                 blocked += 1
@@ -284,12 +286,14 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         #await status_msg.delete()
 
         # Фінальний звіт
+        duration = (datetime.now() - start_time).total_seconds()
         await context.bot.send_message(
             chat_id=chat_id,
             text=(
                 f"✅ <b>Розсилка завершена!</b>\n\n"
                 f"📨 Успішно надіслано: <b>{count}</b>\n"
-                f"🚫 Не отримали (блокували): <b>{blocked}</b>"
+                f"🚫 Не отримали (блокували): <b>{blocked}</b>\n"
+                f"⏱️ Час виконання: <b>{duration:.1f} сек.</b>"
             ),
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]]),

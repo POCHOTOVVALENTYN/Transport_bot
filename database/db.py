@@ -3,7 +3,7 @@ import uuid
 import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, String, DateTime, func, Boolean, BigInteger, select, update
+from sqlalchemy import Column, Integer, String, DateTime, func, Boolean, BigInteger, select, update, Index, text
 from config.settings import DATABASE_URL
 from sqlalchemy.exc import OperationalError
 
@@ -25,6 +25,10 @@ async def init_db():
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_status ON feedbacks(status)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_created_at ON feedbacks(created_at)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_id ON users(telegram_id)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_subscribed ON users(is_subscribed)"))
             print("✅ Database tables initialized successfully")
             return  # Успіх, виходимо
         except (OSError, OperationalError) as e:
@@ -93,6 +97,13 @@ class Feedback(Base):
     transport_type = Column(String, nullable=True)  # "tram" або "trolleybus"
     driver_name = Column(String, nullable=True)  # ПІБ водія/кондуктора
     reason = Column(String, nullable=True)  # За що вдячні
+
+
+# --- Індекси ---
+Index("ix_feedbacks_status", Feedback.status)
+Index("ix_feedbacks_created_at", Feedback.created_at)
+Index("ix_users_telegram_id", BotUser.telegram_id)
+Index("ix_users_is_subscribed", BotUser.is_subscribed)
 
 
 # ================= ГОЛОВНИЙ КЛАС DATABASE =================
