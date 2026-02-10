@@ -1,5 +1,5 @@
 # services/tickets_service.py
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, func
 from database.db import AsyncSessionLocal, Feedback
 from config.constants import SHEET_NAMES
@@ -10,11 +10,33 @@ from utils.text_formatter import format_ticket_id
 import asyncio
 import datetime
 import random
+from typing import Optional
+from zoneinfo import ZoneInfo
 
 
 class TicketsService:
     def __init__(self):
         self.sheets_client = GoogleSheetsClient(GOOGLE_SHEETS_ID)
+        self._kyiv_tz = ZoneInfo("Europe/Kyiv")
+
+    def _to_kyiv_time(self, dt_value):
+        if not dt_value:
+            return None
+        if dt_value.tzinfo is None:
+            dt_value = dt_value.replace(tzinfo=timezone.utc)
+        return dt_value.astimezone(self._kyiv_tz)
+
+    def _format_phone_for_sheet(self, phone_value: Optional[str]):
+        if not phone_value:
+            return ""
+        phone_str = str(phone_value).strip()
+        if not phone_str:
+            return ""
+        if phone_str.startswith("'"):
+            return phone_str
+        if phone_str.startswith("0") or phone_str.startswith("+"):
+            return f"'{phone_str}'"
+        return phone_str
 
     async def _save_to_db(self, data: dict):
         """Універсальний метод збереження в БД"""
@@ -114,8 +136,15 @@ class TicketsService:
 
                 # Формуємо рядок (порядок полів має збігатися з шапкою вашої таблиці!)
                 # Приклад для Скарги: Дата | ID | Статус | Пріоритет | Маршрут | Проблема | Борт | Ім'я | Телефон | Email
+                created_at_kyiv = self._to_kyiv_time(item.created_at)
+                created_at_str = (
+                    created_at_kyiv.strftime("%d.%m.%Y %H:%M")
+                    if created_at_kyiv
+                    else ""
+                )
+
                 row = [
-                    item.created_at.strftime("%d.%m.%Y %H:%M"),
+                    created_at_str,
                     item.ticket_id,
                     "🆕 Нова (БД)",
                     "БД",
@@ -123,7 +152,7 @@ class TicketsService:
                     item.text,
                     item.board_number or "N/A",
                     item.user_name,
-                    item.user_phone,
+                    self._format_phone_for_sheet(item.user_phone),
                     item.user_email or ""
                 ]
 
@@ -146,6 +175,27 @@ class TicketsService:
         """Генерує випадковий ID для подяки"""
         import random  # Краще винести наверх файлу, але буде працювати і тут
         return f"#THX-{random.randint(10000, 99999)}"
+
+    async def get_feedback_stats(self):
+        async with AsyncSessionLocal() as session:
+            total = await session.scalar(select(func.count(Feedback.id)))
+            new_count = await session.scalar(
+                select(func.count(Feedback.id)).where(Feedback.status == "new")
+            )
+            synced_count = await session.scalar(
+                select(func.count(Feedback.id)).where(Feedback.status == "synced")
+            )
+            result = await session.execute(
+                select(Feedback.category, func.count(Feedback.id)).group_by(Feedback.category)
+            )
+            by_category = {row[0]: row[1] for row in result.all() if row[0]}
+
+            return {
+                "total": total or 0,
+                "new": new_count or 0,
+                "synced": synced_count or 0,
+                "by_category": by_category,
+            }
 
     async def register_gratitude(self, data: dict):
         """

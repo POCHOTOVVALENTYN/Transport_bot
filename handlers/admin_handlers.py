@@ -50,6 +50,7 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
     keyboard = [
         [InlineKeyboardButton("📢 Зробити розсилку (Новини)", callback_data="admin_broadcast_start")],
         [InlineKeyboardButton("🔄 Синхронізувати БД -> Sheets", callback_data="admin_sync_db")],
+        [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton("🏠 В режим користувача", callback_data="main_menu")]
     ]
 
@@ -83,6 +84,41 @@ async def admin_sync_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         await query.edit_message_text(f"❌ Помилка: {e}")
+
+
+async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує статистику для загального адміна"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    user_stats = await user_service.get_stats()
+    feedback_stats = await tickets_service.get_feedback_stats()
+    by_category = feedback_stats.get("by_category", {})
+
+    def _cat_count(key: str) -> int:
+        return by_category.get(key, 0)
+
+    known_total = _cat_count("complaint") + _cat_count("thanks") + _cat_count("suggestion")
+    other_count = max(0, feedback_stats["total"] - known_total)
+
+    text = (
+        "📊 <b>Статистика бота</b>\n\n"
+        f"👥 Всього користувачів: <b>{user_stats['total_users']}</b>\n"
+        f"🔔 Підписані на розсилку: <b>{user_stats['subscribed_users']}</b>\n\n"
+        f"📩 Всього звернень: <b>{feedback_stats['total']}</b>\n"
+        f"🆕 Нових (не синхр.): <b>{feedback_stats['new']}</b>\n"
+        f"✅ Синхронізованих: <b>{feedback_stats['synced']}</b>\n\n"
+        "📂 Розподіл за категоріями:\n"
+        f"• Скарги: <b>{_cat_count('complaint')}</b>\n"
+        f"• Подяки: <b>{_cat_count('thanks')}</b>\n"
+        f"• Пропозиції: <b>{_cat_count('suggestion')}</b>\n"
+        f"• Інше: <b>{other_count}</b>\n"
+    )
+
+    back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]])
+    await query.edit_message_text(text, reply_markup=back_btn, parse_mode=ParseMode.HTML)
 
 
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):

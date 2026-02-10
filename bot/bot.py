@@ -66,10 +66,12 @@ from handlers.admin_handlers import (
     admin_show_bookings, admin_sync_db,
     admin_broadcast_start, admin_broadcast_preview,       # Нова функція прев'ю
     admin_broadcast_send_confirm,
-    show_general_admin_menu, admin_museum_menu_show # Нова функція зі списком
+    show_general_admin_menu, admin_museum_menu_show, admin_show_stats # Нова функція зі списком
 )
 
 from utils.logger import logger
+from config.settings import FEEDBACK_SYNC_INTERVAL_MIN
+from services.tickets_service import TicketsService
 
 from handlers.subscription_handlers import show_subscription_menu, handle_subscription_choice
 from handlers.common import dismiss_broadcast_message
@@ -82,6 +84,7 @@ class TransportBot:
 
     def __init__(self, token: str):
         self.token = token
+        self.tickets_service = TicketsService()
 
         # 1. ЗАЛИШАЄМО ТІЛЬКИ ОДИН РЯДОК Application.builder
         #    з реєстрацією `post_init`.
@@ -90,6 +93,25 @@ class TransportBot:
         # Рядок (self.app = Application.builder().token(token).build()) ВИДАЛЕНО
 
         self._setup_handlers()
+        self._setup_jobs()
+
+    def _setup_jobs(self):
+        interval_minutes = max(5, FEEDBACK_SYNC_INTERVAL_MIN)
+        interval_seconds = interval_minutes * 60
+        self.app.job_queue.run_repeating(
+            self._auto_sync_feedbacks,
+            interval=interval_seconds,
+            first=interval_seconds,
+            name="auto_sync_feedbacks"
+        )
+
+    async def _auto_sync_feedbacks(self, context):
+        try:
+            count = await self.tickets_service.sync_new_feedbacks_to_sheets()
+            if count:
+                logger.info(f"✅ Auto-sync: synced {count} feedback(s) to Sheets")
+        except Exception as e:
+            logger.error(f"❌ Auto-sync failed: {e}")
 
 
     def _setup_handlers(self):
@@ -160,6 +182,9 @@ class TransportBot:
 
         # Кнопка синхронізації БД (Валентин/Тетяна)
         self.app.add_handler(CallbackQueryHandler(admin_sync_db, pattern="^admin_sync_db$"))
+
+        # Кнопка статистики (Валентин/Тетяна)
+        self.app.add_handler(CallbackQueryHandler(admin_show_stats, pattern="^admin_stats$"))
 
         # Кнопка входу в Адмінку Музею (Максим)
         self.app.add_handler(CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"))

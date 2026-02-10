@@ -43,6 +43,7 @@ GOOGLE_SHEETS_CREDENTIALS_FILE = BASE_DIR / "integrations/google_sheets/credenti
 # ===============================================
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = BASE_DIR / "logs" / "bot.log"
+FEEDBACK_SYNC_INTERVAL_MIN = int(os.getenv("FEEDBACK_SYNC_INTERVAL_MIN", "15"))
 
 # ===============================================
 # 5. ШЛЯХИ ДО ЗОБРАЖЕНЬ ТА ДОКУМЕНТІВ
