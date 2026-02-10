@@ -148,23 +148,7 @@ async def show_museum_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption_text = MESSAGES.get("museum_info")
 
     try:
-        # 1. Надсилаємо фото
-        with open(MUSEUM_LOGO_IMAGE, 'rb') as photo:
-            # --- ПОЧАТОК ЗМІН ---
-            # Зберігаємо надіслане повідомлення у змінну
-            sent_photo = await query.message.reply_photo(
-                photo=photo,
-                # Ви можете додати короткий підпис до самого фото, якщо хочете
-                # caption="Логотип Музею",
-            )
-
-            # Додаємо ID фото у user_data
-        media_ids = context.user_data.get('media_message_ids', [])
-        media_ids.append(sent_photo.message_id)
-        context.user_data['media_message_ids'] = media_ids
-        # --- КІНЕЦЬ ЗМІН ---
-
-        # 2. Редагуємо меню "Музей" на інформаційний текст
+        # Редагуємо меню "Музей" на інформаційний текст (без фото)
         try:
             await query.edit_message_text(
                 text=caption_text,
