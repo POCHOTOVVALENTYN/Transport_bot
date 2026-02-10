@@ -4,7 +4,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from telegram.constants import ParseMode
 
 from services.tickets_service import TicketsService
-from handlers.common import get_feedback_cancel_keyboard, safe_delete_prev_message
+from handlers.common import get_feedback_cancel_keyboard, safe_edit_prev_message
 from bot.states import States
 from utils.logger import logger
 from config.messages import MESSAGES
@@ -16,8 +16,13 @@ async def _ask_next_step(update, context, text, keyboard_markup=None):
     if not keyboard_markup:
         keyboard_markup = await get_feedback_cancel_keyboard("feedback_menu")
 
-    msg = await update.message.reply_text(text=text, reply_markup=keyboard_markup, parse_mode=ParseMode.HTML)
-    context.user_data['last_bot_msg_id'] = msg.message_id
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text=text,
+        reply_markup=keyboard_markup,
+        parse_mode=ParseMode.HTML
+    )
 
 
 # === ХЕНДЛЕРИ ===
@@ -34,7 +39,6 @@ async def suggestion_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def suggestion_ask_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
-    await safe_delete_prev_message(context, update.effective_chat.id)
 
     context.user_data['suggestion_text'] = update.message.text
     # Переходимо до запиту імені
@@ -44,7 +48,6 @@ async def suggestion_ask_contact(update: Update, context: ContextTypes.DEFAULT_T
 
 async def suggestion_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
-    await safe_delete_prev_message(context, update.effective_chat.id)
 
     name = update.message.text.strip()
     if len(name) < 5:
@@ -59,7 +62,6 @@ async def suggestion_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
-    await safe_delete_prev_message(context, update.effective_chat.id)
 
     phone = update.message.text.strip()
     # (Тут можна додати regex валідацію телефону, якщо треба)
@@ -72,8 +74,12 @@ async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
     ])
 
-    msg = await update.message.reply_text(MESSAGES['suggestion_email'], reply_markup=kb)
-    context.user_data['last_bot_msg_id'] = msg.message_id
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text=MESSAGES['suggestion_email'],
+        reply_markup=kb
+    )
     return States.SUGGESTION_EMAIL
 
 
@@ -90,9 +96,8 @@ async def suggestion_check_data(update: Update, context: ContextTypes.DEFAULT_TY
         msg_func = update.callback_query.edit_message_text
     else:
         await update.message.delete()
-        await safe_delete_prev_message(context, update.effective_chat.id)
         email = update.message.text.strip()
-        msg_func = update.message.reply_text
+        msg_func = None
 
     context.user_data['suggestion_email'] = email
 
@@ -110,10 +115,18 @@ async def suggestion_check_data(update: Update, context: ContextTypes.DEFAULT_TY
          InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
     ]
 
-    msg = await msg_func(text=summary, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
-    # Якщо це був reply_text, треба зберегти ID. Якщо edit - він не змінюється, але оновити не завадить.
-    if hasattr(msg, 'message_id'):
-        context.user_data['last_bot_msg_id'] = msg.message_id
+    if msg_func:
+        msg = await msg_func(text=summary, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+        if hasattr(msg, 'message_id'):
+            context.user_data['last_bot_msg_id'] = msg.message_id
+    else:
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text=summary,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.HTML
+        )
 
     return States.SUGGESTION_CONFIRMATION
 
@@ -122,7 +135,6 @@ async def suggestion_save_final(update: Update, context: ContextTypes.DEFAULT_TY
     """Фінальне збереження"""
     query = update.callback_query
     await query.answer()
-    await safe_delete_prev_message(context, update.effective_chat.id)
 
     data = {
         "text": context.user_data.get('suggestion_text'),
@@ -135,13 +147,19 @@ async def suggestion_save_final(update: Update, context: ContextTypes.DEFAULT_TY
         service = TicketsService()
         result = await service.create_suggestion_ticket(update.effective_user.id, data)
 
-        await query.message.reply_text(
-            result['message'],
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text=result['message'],
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]])
         )
     except Exception as e:
         logger.error(f"Save error: {e}")
-        await query.message.reply_text("❌ Помилка збереження.")
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text="❌ Помилка збереження."
+        )
 
     context.user_data.clear()
     return ConversationHandler.END

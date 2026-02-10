@@ -61,7 +61,7 @@ async def send_rules_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         # 1. Видаляємо поточне повідомлення (меню "Довідка")
-        await query.delete_message()
+        await query.message.delete()
 
         # 2. Надсилаємо документ
         with open(RULES_PDF_PATH, 'rb') as document:

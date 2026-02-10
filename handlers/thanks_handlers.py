@@ -6,6 +6,7 @@ from telegram.constants import ParseMode
 from bot.states import States
 from database.db import Database
 from utils.logger import logger
+from handlers.common import safe_edit_prev_message
 
 db = Database()
 
@@ -17,17 +18,6 @@ def generate_registration_number():
     import random
     suffix = random.randint(1000, 9999)
     return f"THX-{timestamp}-{suffix}"
-
-
-async def safe_delete_prev_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-    msg_id = context.user_data.get('last_bot_msg_id')
-    if msg_id:
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-        except Exception:
-            pass
-        finally:
-            context.user_data['last_bot_msg_id'] = None
 
 
 async def get_navigation_buttons(back_callback="feedback_menu"):
@@ -121,13 +111,15 @@ async def thanks_transport_selected(update: Update, context: ContextTypes.DEFAUL
 
 async def thanks_board_number_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
-    await safe_delete_prev_message(context, update.effective_chat.id)
 
     board = update.message.text.strip()
     if not validate_board_number(board):
-        msg = await update.message.reply_text("❌ Номер має бути з 4 цифр (напр: 7011). Спробуйте ще раз:",
-                                              reply_markup=await get_navigation_buttons())
-        context.user_data['last_bot_msg_id'] = msg.message_id
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text="❌ Номер має бути з 4 цифр (напр: 7011). Спробуйте ще раз:",
+            reply_markup=await get_navigation_buttons()
+        )
         return States.THANKS_SPECIFIC_BOARD_NUMBER
 
     context.user_data['board_number'] = board
@@ -147,28 +139,39 @@ async def _ask_specific_reason(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if is_callback:
         msg = await update.callback_query.edit_message_text(text=text, reply_markup=markup, parse_mode=ParseMode.HTML)
+        context.user_data['last_bot_msg_id'] = msg.message_id
     else:
-        msg = await update.message.reply_text(text=text, reply_markup=markup, parse_mode=ParseMode.HTML)
-
-    context.user_data['last_bot_msg_id'] = msg.message_id
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text=text,
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML
+        )
     return States.THANKS_SPECIFIC_REASON
 
 
 async def thanks_reason_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
-    await safe_delete_prev_message(context, update.effective_chat.id)
 
     text = update.message.text.strip()
     if not validate_message(text):
-        msg = await update.message.reply_text("❌ Текст надто короткий. Мінімум 10 символів.",
-                                              reply_markup=await get_navigation_buttons())
-        context.user_data['last_bot_msg_id'] = msg.message_id
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text="❌ Текст надто короткий. Мінімум 10 символів.",
+            reply_markup=await get_navigation_buttons()
+        )
         return States.THANKS_SPECIFIC_REASON
 
     context.user_data['reason'] = text
-    msg = await update.message.reply_text("✉️ <b>Введіть Ваш Email</b> для зворотного зв'язку:",
-                                          reply_markup=await get_navigation_buttons(), parse_mode=ParseMode.HTML)
-    context.user_data['last_bot_msg_id'] = msg.message_id
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text="✉️ <b>Введіть Ваш Email</b> для зворотного зв'язку:",
+        reply_markup=await get_navigation_buttons(),
+        parse_mode=ParseMode.HTML
+    )
     return States.THANKS_SPECIFIC_EMAIL
 
 
@@ -187,31 +190,45 @@ async def thanks_general_start(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def thanks_general_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
-    await safe_delete_prev_message(context, update.effective_chat.id)
     text = update.message.text.strip()
     if not validate_message(text):
-        msg = await update.message.reply_text("❌ Мінімум 10 символів.", reply_markup=await get_navigation_buttons())
-        context.user_data['last_bot_msg_id'] = msg.message_id
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text="❌ Мінімум 10 символів.",
+            reply_markup=await get_navigation_buttons()
+        )
         return States.THANKS_GENERAL_MESSAGE
     context.user_data['message'] = text
-    msg = await update.message.reply_text("👤 <b>Як до Вас звертатися? (ПІБ)</b>",
-                                          reply_markup=await get_navigation_buttons(), parse_mode=ParseMode.HTML)
-    context.user_data['last_bot_msg_id'] = msg.message_id
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text="👤 <b>Як до Вас звертатися? (ПІБ)</b>",
+        reply_markup=await get_navigation_buttons(),
+        parse_mode=ParseMode.HTML
+    )
     return States.THANKS_GENERAL_NAME
 
 
 async def thanks_general_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
-    await safe_delete_prev_message(context, update.effective_chat.id)
     name = update.message.text.strip()
     if not validate_name(name):
-        msg = await update.message.reply_text("❌ Вкажіть коректне ім'я.", reply_markup=await get_navigation_buttons())
-        context.user_data['last_bot_msg_id'] = msg.message_id
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text="❌ Вкажіть коректне ім'я.",
+            reply_markup=await get_navigation_buttons()
+        )
         return States.THANKS_GENERAL_NAME
     context.user_data['user_name'] = name
-    msg = await update.message.reply_text("✉️ <b>Введіть Ваш Email:</b>", reply_markup=await get_navigation_buttons(),
-                                          parse_mode=ParseMode.HTML)
-    context.user_data['last_bot_msg_id'] = msg.message_id
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text="✉️ <b>Введіть Ваш Email:</b>",
+        reply_markup=await get_navigation_buttons(),
+        parse_mode=ParseMode.HTML
+    )
     return States.THANKS_GENERAL_EMAIL
 
 
@@ -225,13 +242,14 @@ async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.D
     але ЗАМІСТЬ збереження — показує Summary.
     """
     await update.message.delete()
-    await safe_delete_prev_message(context, update.effective_chat.id)
-
     email = update.message.text.strip()
     if not validate_email(email):
-        msg = await update.message.reply_text("❌ Невірний формат Email. Спробуйте ще раз:",
-                                              reply_markup=await get_navigation_buttons())
-        context.user_data['last_bot_msg_id'] = msg.message_id
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text="❌ Невірний формат Email. Спробуйте ще раз:",
+            reply_markup=await get_navigation_buttons()
+        )
         # Повертаємось у той стан, з якого прийшли (залежить від типу)
         if context.user_data.get('thanks_type') == 'specific':
             return States.THANKS_SPECIFIC_EMAIL
@@ -267,12 +285,13 @@ async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.D
          InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
     ]
 
-    msg = await update.message.reply_text(
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
         text=summary,
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.HTML
     )
-    context.user_data['last_bot_msg_id'] = msg.message_id
 
     # Переходимо в новий стан очікування кліку
     return States.THANKS_CONFIRMATION
@@ -284,9 +303,6 @@ async def thanks_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
     """
     query = update.callback_query
     await query.answer()
-
-    # Видаляємо повідомлення з перевіркою
-    await safe_delete_prev_message(context, update.effective_chat.id)
 
     # ... Логіка збереження в БД (така ж, як була раніше) ...
     reg_number = generate_registration_number()
@@ -321,16 +337,24 @@ async def thanks_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"🆔 <b>Номер звернення:</b> <code>{reg_number}</code>\n"
             f"🙏 Дякуємо, що допомагаєте нам ставати кращими!"
         )
-        await query.message.reply_text(
-            success_text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]),
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text=success_text,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
+            ),
             parse_mode=ParseMode.HTML
         )
         logger.info(f"Thanks saved: {reg_number}")
 
     except Exception as e:
         logger.error(f"Save error: {e}")
-        await query.message.reply_text("❌ Помилка збереження.")
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text="❌ Помилка збереження."
+        )
 
     context.user_data.clear()
     return ConversationHandler.END

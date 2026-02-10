@@ -1,5 +1,6 @@
 from datetime import datetime
 import re
+from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from telegram.constants import ParseMode
@@ -15,6 +16,37 @@ from services.museum_service import MuseumService
 
 # Ініціалізація сервісу (один раз)
 museum_service = MuseumService()
+
+
+async def _edit_museum_dialog_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+    parse_mode: Optional[str] = None,
+):
+    msg_id = context.user_data.get('dialog_message_id')
+    if msg_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+            return msg_id
+        except Exception as e:
+            logger.warning(f"Could not edit museum dialog message {msg_id}: {e}")
+
+    sent_message = await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+    )
+    context.user_data['dialog_message_id'] = sent_message.message_id
+    return sent_message.message_id
 
 
 async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -94,11 +126,7 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception:
         # Спроба 2: Якщо старе повідомлення було з фото, редагування тексту не спрацює.
-        # Тоді діємо по-старому: видаляємо і пишемо нове.
-        try:
-            await query.message.delete()
-        except:
-            pass
+        # Тоді просто надсилаємо нове.
         await query.message.reply_text(
             text=text,
             reply_markup=reply_markup
@@ -117,7 +145,7 @@ async def show_museum_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         # 1. Видаляємо поточне повідомлення (меню "Музей")
-        await query.delete_message()
+        await query.message.delete()
 
         # 2. Надсилаємо фото
         with open(MUSEUM_LOGO_IMAGE, 'rb') as photo:
@@ -244,12 +272,7 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"Error in museum_register_start: {e}", exc_info=True)
         keyboard = await get_back_keyboard("museum_menu")
 
-        # Безпечне видалення/відправка повідомлення про помилку
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-
+        # Показуємо повідомлення про помилку
         await query.message.reply_text(
             text=f"❌ Сталася технічна помилка при завантаженні дат. Спробуйте пізніше.",
             reply_markup=keyboard
@@ -269,24 +292,15 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = await get_cancel_keyboard("museum_menu")
 
-    # --- ВИПРАВЛЕННЯ: Видаляємо повідомлення з датами ---
-    try:
-        # 1. Видаляємо список дат
-        await context.bot.delete_message(
-            chat_id=update.effective_chat.id,
-            message_id=context.user_data['dialog_message_id']  # <-- Використовуємо новий ключ
-        )
-    except Exception as e:
-        logger.warning(f"Could not delete dates message in museum_get_date: {e}")
     keyboard = await get_cancel_keyboard("museum_menu")  # <-- Кнопка "Скасувати реєстрацію"
 
-    # 2. Надсилаємо нове запитання
-    sent_message = await query.message.reply_text(
+    # 2. Редагуємо повідомлення зі списком дат на наступне питання
+    context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+        context,
+        update.effective_chat.id,
         "Вкажіть кількість осіб у вашій групі (напишіть цифрою):",
-        reply_markup=keyboard
+        keyboard
     )
-    # 3. Зберігаємо ID нового запитання
-    context.user_data['dialog_message_id'] = sent_message.message_id
 
     return States.MUSEUM_PEOPLE_COUNT
 
@@ -303,31 +317,25 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
 
     keyboard = await get_cancel_keyboard("museum_menu")
 
-    # 2. Видаляємо попереднє запитання бота
-    try:
-        await context.bot.delete_message(
-            chat_id=update.effective_chat.id,
-            message_id=context.user_data['dialog_message_id']
-        )
-    except Exception as e:
-        logger.warning(f"Could not delete people count message: {e}")
-
     # ВАЛІДАЦІЯ (як у вас і було)
     if count <= 0:
-        sent_message = await update.message.reply_text(
+        context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+            context,
+            update.effective_chat.id,
             "❌ Введіть коректну кількість осіб (цифрою, більше 0).",
-            reply_markup=keyboard
+            keyboard
         )
-        context.user_data['dialog_message_id'] = sent_message.message_id
         return States.MUSEUM_PEOPLE_COUNT # Повертаємо на той самий крок
 
     if count > 10:
         # Це кінець діалогу, просто надсилаємо повідомлення (ID не зберігаємо)
-        await update.message.reply_text(
+        await _edit_museum_dialog_message(
+            context,
+            update.effective_chat.id,
             "Для груп понад 10 осіб потрібна індивідуальна домовленість.\n"
             "Будь ласка, зателефонуйте організатору за номером <code>050-399-42-11</code>.",
-            reply_markup=await get_back_keyboard("museum_menu"), # Кнопка "Назад"
-            parse_mode=ParseMode.HTML
+            await get_back_keyboard("museum_menu"), # Кнопка "Назад"
+            ParseMode.HTML
         )
         context.user_data.clear()
         return ConversationHandler.END # Завершуємо
@@ -336,13 +344,13 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['museum_people_count'] = count
     logger.info(f"People count: {count}")
 
-    # 3. Надсилаємо нове запитання
-    sent_message = await update.message.reply_text(
+    # 3. Редагуємо повідомлення на наступне запитання
+    context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+        context,
+        update.effective_chat.id,
         "✅ Чудово! Тепер вкажіть Ваше П.І.Б. (наприклад: Писаренко Олег Анатолійович):",
-        reply_markup=keyboard
+        keyboard
     )
-    # 4. Зберігаємо ID нового запитання
-    context.user_data['dialog_message_id'] = sent_message.message_id
 
     return States.MUSEUM_NAME
 
@@ -352,22 +360,14 @@ async def museum_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name_text = update.message.text.strip()
     keyboard = await get_cancel_keyboard("museum_menu")
 
-    # 2. Видаляємо попереднє запитання бота
-    try:
-        await context.bot.delete_message(
-            chat_id=update.effective_chat.id,
-            message_id=context.user_data['dialog_message_id']
-        )
-    except Exception as e:
-        logger.warning(f"Could not delete name message: {e}")
-
     # --- ПОЧАТОК БЛОКУ ВАЛІДАЦІЇ ПІБ ---
     if not re.match(r"^[А-Яа-яЇїІіЄєҐґA-Za-z\s'-]{5,}$", name_text):
-        sent_message = await update.message.reply_text(
+        context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+            context,
+            update.effective_chat.id,
             f"❌ Будь ласка, введіть коректне П.І.Б. (тільки літери, довжина від 5 символів).",
-            reply_markup=keyboard
+            keyboard
         )
-        context.user_data['dialog_message_id'] = sent_message.message_id
         return States.MUSEUM_NAME  # Повертаємо на той самий крок
     # --- КІНЕЦЬ БЛОКУ ВАЛІДАЦІЇ ---
 
@@ -375,13 +375,13 @@ async def museum_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['museum_name'] = name_text
     logger.info(f"Museum Name: {name_text}")
 
-    # 3. Надсилаємо нове запитання
-    sent_message = await update.message.reply_text(
+    # 3. Редагуємо повідомлення на наступне запитання
+    context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+        context,
+        update.effective_chat.id,
         "📞 Вкажіть контактний телефон для підтвердження (наприклад: 0994564778):",
-        reply_markup=keyboard
+        keyboard
     )
-    # 4. Зберігаємо ID нового запитання
-    context.user_data['dialog_message_id'] = sent_message.message_id
 
     return States.MUSEUM_PHONE
 
@@ -398,26 +398,17 @@ async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAUL
     # Клавіатура для скасування (на випадок помилки валідації)
     keyboard_cancel = await get_cancel_keyboard("museum_menu")
 
-    # 2. Видаляємо попереднє запитання бота
-    if 'dialog_message_id' in context.user_data:
-        try:
-            await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
-                message_id=context.user_data['dialog_message_id']
-            )
-        except Exception as e:
-            logger.warning(f"Could not delete final museum message: {e}")
-
     # --- ВАЛІДАЦІЯ ТЕЛЕФОНУ ---
     cleaned_phone = phone_text.replace(" ", "").replace("-", "")
     if not re.match(r"^(\+?38)?0\d{9}$", cleaned_phone):
-        sent_message = await update.message.reply_text(
+        context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+            context,
+            update.effective_chat.id,
             f"❌ Не схоже на український номер телефону.\n\n"
             f"Будь ласка, введіть номер у форматі <code>0991234567</code> (10 цифр).",
-            reply_markup=keyboard_cancel,
-            parse_mode=ParseMode.HTML
+            keyboard_cancel,
+            ParseMode.HTML
         )
-        context.user_data['dialog_message_id'] = sent_message.message_id
         return States.MUSEUM_PHONE  # Повертаємо на той самий крок
 
     # --- ЗБІР ДАНИХ ---
@@ -433,9 +424,11 @@ async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAUL
     if not success:
         # Якщо база даних не відповіла
         keyboard_final = await get_back_keyboard("main_menu")
-        await update.message.reply_text(
+        await _edit_museum_dialog_message(
+            context,
+            update.effective_chat.id,
             "❌ Сталася системна помилка при збереженні заявки. Спробуйте пізніше.",
-            reply_markup=keyboard_final
+            keyboard_final
         )
         context.user_data.clear()
         return ConversationHandler.END
@@ -473,12 +466,14 @@ async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAUL
 
     # 2. Відповідь користувачу
     keyboard_final = await get_back_keyboard("main_menu")
-    await update.message.reply_text(
+    await _edit_museum_dialog_message(
+        context,
+        update.effective_chat.id,
         f"✅ <b>Заявку прийнято!</b>\n\n"
         f"Ми чекаємо вас <b>{date}</b>.\n"
         f"Адреса музею: <b>м. Одеса, площа Олексіївська, 21А.</b>",
-        reply_markup=keyboard_final,
-        parse_mode=ParseMode.HTML
+        keyboard_final,
+        ParseMode.HTML
     )
 
     context.user_data.clear()

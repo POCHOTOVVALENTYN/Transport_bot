@@ -1,4 +1,5 @@
 import asyncio
+from typing import Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -150,3 +151,45 @@ async def safe_delete_prev_message(context: ContextTypes.DEFAULT_TYPE, chat_id: 
         finally:
             context.user_data['last_bot_msg_id'] = None
             context.user_data['dialog_message_id'] = None
+
+
+async def safe_edit_prev_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    text: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+    parse_mode: Optional[str] = None,
+    disable_web_page_preview: Optional[bool] = None,
+):
+    """
+    Універсальна функція: редагує попереднє повідомлення бота.
+    Якщо редагування неможливе - надсилає нове повідомлення і оновлює last_bot_msg_id.
+    """
+    msg_id = context.user_data.get('last_bot_msg_id') or context.user_data.get('dialog_message_id')
+
+    if msg_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+                disable_web_page_preview=disable_web_page_preview,
+            )
+            context.user_data['last_bot_msg_id'] = msg_id
+            context.user_data['dialog_message_id'] = None
+            return msg_id
+        except Exception as e:
+            logger.warning(f"Could not edit message {msg_id}: {e}")
+
+    sent = await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+        disable_web_page_preview=disable_web_page_preview,
+    )
+    context.user_data['last_bot_msg_id'] = sent.message_id
+    context.user_data['dialog_message_id'] = None
+    return sent.message_id

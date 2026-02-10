@@ -22,18 +22,17 @@ async def show_feedback_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # --- ПОЧАТОК ВИПРАВЛЕННЯ: Логіка Edit/Delete ---
     # (Потрібно, бо ми можемо прийти сюди з текстового повідомлення)
     try:
-        await query.edit_message_text(
+        msg = await query.edit_message_text(
             text=text,
             reply_markup=reply_markup
         )
     except Exception:
-        # Повідомлення не було текстовим (напр., помилка) або було видалено
-        # Просто видаляємо поточне і надсилаємо нове
-        await query.message.delete()
-        await query.message.reply_text(
+        # Повідомлення не було текстовим або було видалено - надсилаємо нове
+        msg = await query.message.reply_text(
             text=text,
             reply_markup=reply_markup
         )
+    context.user_data['last_bot_msg_id'] = msg.message_id
     # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     return ConversationHandler.END

@@ -15,7 +15,6 @@ from handlers.command_handlers import get_admin_main_menu_keyboard
 from services.user_service import UserService
 from services.tickets_service import TicketsService
 from services.museum_service import MuseumService
-from config.settings import MUSEUM_ADMIN_ID
 
 
 user_service = UserService()
@@ -68,6 +67,8 @@ async def admin_sync_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ручний запуск синхронізації"""
     query = update.callback_query
     await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
     await query.edit_message_text("⏳ Синхронізація даних... Зачекайте.")
 
     try:
@@ -87,6 +88,8 @@ async def admin_sync_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
 
     # Кнопка "Скасувати" веде в General Menu
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="general_admin_menu")]])
@@ -112,6 +115,8 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
     """
     user_id = update.effective_user.id
     msg = update.message
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
 
     # 1. Перевіряємо кількість підписників
     users = await user_service.get_subscribed_users_ids()
@@ -184,6 +189,8 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
     """Виконує розсилку або скасування та очищає чат"""
     query = update.callback_query
     await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
 
     action = query.data
     chat_id = update.effective_chat.id
