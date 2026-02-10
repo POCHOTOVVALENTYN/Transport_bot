@@ -96,6 +96,9 @@ class TransportBot:
         self._setup_jobs()
 
     def _setup_jobs(self):
+        if not self.app.job_queue:
+            logger.warning("⚠️ JobQueue is not configured. Auto-sync is disabled.")
+            return
         interval_minutes = max(5, FEEDBACK_SYNC_INTERVAL_MIN)
         interval_seconds = interval_minutes * 60
         self.app.job_queue.run_repeating(
