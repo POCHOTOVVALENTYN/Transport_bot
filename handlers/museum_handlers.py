@@ -140,12 +140,29 @@ async def show_museum_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    keyboard = await get_back_keyboard("museum_menu")
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("ℹ️ Більше інформації", url="https://oget.od.ua/muzei/")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="museum_menu")],
+        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+    ])
     caption_text = MESSAGES.get("museum_info")
 
     try:
-        # 1. Видаляємо поточне повідомлення (меню "Музей")
-        await query.message.delete()
+        # 1. Редагуємо меню "Музей" на інформаційний текст
+        try:
+            await query.edit_message_text(
+                text=caption_text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            )
+        except Exception:
+            await query.message.reply_text(
+                text=caption_text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            )
 
         # 2. Надсилаємо фото
         with open(MUSEUM_LOGO_IMAGE, 'rb') as photo:
@@ -158,16 +175,11 @@ async def show_museum_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             # Додаємо ID фото у user_data
-        context.user_data['media_message_ids'] = [sent_photo.message_id]
+        media_ids = context.user_data.get('media_message_ids', [])
+        media_ids.append(sent_photo.message_id)
+        context.user_data['media_message_ids'] = media_ids
         # --- КІНЕЦЬ ЗМІН ---
 
-        # 3. Надсилаємо основний текст з кнопками "Назад"
-        await query.message.reply_text(
-            text=caption_text,
-            reply_markup=keyboard,
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True
-        )
         logger.info("✅ Museum info and logo sent successfully")
 
     except FileNotFoundError:
