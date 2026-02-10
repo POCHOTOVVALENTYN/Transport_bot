@@ -283,7 +283,7 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Ми більше не перевіряємо "other", оскільки такої кнопки немає
 
-    selected_date = query.data.split(":")[1]
+    selected_date = query.data.split(":", 1)[1]
     context.user_data['museum_date'] = selected_date
 
     keyboard = await get_cancel_keyboard("museum_menu")
