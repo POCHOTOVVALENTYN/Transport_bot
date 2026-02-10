@@ -43,7 +43,8 @@ from handlers.company_handlers import (
 from handlers.museum_handlers import (
     show_museum_menu, handle_museum_static, museum_register_start,
     museum_get_date, museum_get_people_count, museum_get_name,
-    museum_get_phone_and_save, show_museum_info
+    museum_get_phone_input, show_museum_info, museum_show_confirm,
+    museum_edit_choice, museum_edit_field, museum_confirm_save
 )
 
 from handlers.thanks_handlers import (
@@ -294,8 +295,20 @@ class TransportBot:
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
                 States.MUSEUM_PHONE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_phone_and_save),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_phone_input),
                     # КРИТИЧНО: Додаємо обробку кнопок!
+                    CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.MUSEUM_CONFIRM: [
+                    CallbackQueryHandler(museum_confirm_save, pattern="^museum_confirm_send$"),
+                    CallbackQueryHandler(museum_edit_choice, pattern="^museum_edit$"),
+                    CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.MUSEUM_EDIT_CHOICE: [
+                    CallbackQueryHandler(museum_edit_field, pattern="^museum_edit:(date|people|name|phone)$"),
+                    CallbackQueryHandler(museum_show_confirm, pattern="^museum_confirm_back$"),
                     CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],

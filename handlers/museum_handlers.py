@@ -49,6 +49,110 @@ async def _edit_museum_dialog_message(
     return sent_message.message_id
 
 
+def _build_museum_summary(context: ContextTypes.DEFAULT_TYPE) -> str:
+    date = context.user_data.get('museum_date', 'Не вказано')
+    count = context.user_data.get('museum_people_count', 'Не вказано')
+    name = context.user_data.get('museum_name', 'Не вказано')
+    phone = context.user_data.get('museum_phone', 'Не вказано')
+
+    return (
+        "🔍 <b>Перевірте дані заявки:</b>\n\n"
+        f"🗓 <b>Дата:</b> {date}\n"
+        f"👥 <b>Кількість:</b> {count}\n"
+        f"👤 <b>ПІБ:</b> {name}\n"
+        f"📞 <b>Телефон:</b> {phone}\n\n"
+        "Все вірно?"
+    )
+
+
+def _clear_museum_edit_flags(context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop('museum_edit_mode', None)
+    context.user_data.pop('museum_edit_field', None)
+
+
+async def museum_show_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Підтвердити", callback_data="museum_confirm_send")],
+        [InlineKeyboardButton("✏️ Редагувати", callback_data="museum_edit")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="museum_menu")]
+    ])
+
+    context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+        context,
+        update.effective_chat.id,
+        _build_museum_summary(context),
+        keyboard,
+        ParseMode.HTML
+    )
+    return States.MUSEUM_CONFIRM
+
+
+async def museum_edit_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🗓 Дата", callback_data="museum_edit:date")],
+        [InlineKeyboardButton("👥 Кількість", callback_data="museum_edit:people")],
+        [InlineKeyboardButton("👤 ПІБ", callback_data="museum_edit:name")],
+        [InlineKeyboardButton("📞 Телефон", callback_data="museum_edit:phone")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="museum_confirm_back")]
+    ])
+
+    context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+        context,
+        update.effective_chat.id,
+        "Що саме хочете відредагувати?",
+        keyboard
+    )
+    return States.MUSEUM_EDIT_CHOICE
+
+
+async def museum_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    field = query.data.split(":", 1)[1]
+    context.user_data['museum_edit_mode'] = True
+    context.user_data['museum_edit_field'] = field
+
+    if field == "date":
+        return await museum_register_start(update, context)
+
+    if field == "people":
+        keyboard = await get_cancel_keyboard("museum_menu")
+        context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+            context,
+            update.effective_chat.id,
+            "Вкажіть кількість осіб у вашій групі (напишіть цифрою):",
+            keyboard
+        )
+        return States.MUSEUM_PEOPLE_COUNT
+
+    if field == "name":
+        keyboard = await get_cancel_keyboard("museum_menu")
+        context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+            context,
+            update.effective_chat.id,
+            "✅ Чудово! Тепер вкажіть Ваше П.І.Б. (наприклад: Писаренко Олег Анатолійович):",
+            keyboard
+        )
+        return States.MUSEUM_NAME
+
+    keyboard = await get_cancel_keyboard("museum_menu")
+    context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+        context,
+        update.effective_chat.id,
+        "📞 Вкажіть контактний телефон для підтвердження (наприклад: 0994564778):",
+        keyboard
+    )
+    return States.MUSEUM_PHONE
+
+
 async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Показує меню 'Музей'.
@@ -106,6 +210,9 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop('museum_date', None)
     context.user_data.pop('museum_people_count', None)
     context.user_data.pop('museum_name', None)
+    context.user_data.pop('museum_phone', None)
+    context.user_data.pop('museum_edit_mode', None)
+    context.user_data.pop('museum_edit_field', None)
 
     keyboard = [
         [InlineKeyboardButton("🖼️ Інфо про музей", callback_data="museum:info")],
@@ -164,14 +271,7 @@ async def show_museum_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 disable_web_page_preview=True
             )
 
-        logger.info("✅ Museum info and logo sent successfully")
-
-    except FileNotFoundError:
-        logger.error(f"❌ Museum logo file not found: {MUSEUM_LOGO_IMAGE}")
-        await query.message.reply_text(
-            "❌ Файл з логотипом музею не знайдено. Спробуйте пізніше.",
-            reply_markup=keyboard
-        )
+        logger.info("✅ Museum info sent successfully")
     except Exception as e:
         logger.error(f"❌ Error sending museum info: {e}")
         await query.message.reply_text(
@@ -288,7 +388,9 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = await get_cancel_keyboard("museum_menu")
 
-    keyboard = await get_cancel_keyboard("museum_menu")  # <-- Кнопка "Скасувати реєстрацію"
+    if context.user_data.get('museum_edit_field') == "date":
+        _clear_museum_edit_flags(context)
+        return await museum_show_confirm(update, context)
 
     # 2. Редагуємо повідомлення зі списком дат на наступне питання
     context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
@@ -340,6 +442,10 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['museum_people_count'] = count
     logger.info(f"People count: {count}")
 
+    if context.user_data.get('museum_edit_field') == "people":
+        _clear_museum_edit_flags(context)
+        return await museum_show_confirm(update, context)
+
     # 3. Редагуємо повідомлення на наступне запитання
     context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
         context,
@@ -371,6 +477,10 @@ async def museum_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['museum_name'] = name_text
     logger.info(f"Museum Name: {name_text}")
 
+    if context.user_data.get('museum_edit_field') == "name":
+        _clear_museum_edit_flags(context)
+        return await museum_show_confirm(update, context)
+
     # 3. Редагуємо повідомлення на наступне запитання
     context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
         context,
@@ -384,8 +494,8 @@ async def museum_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # handlers/museum_handlers.py
 
-async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отримує телефон, валідує його, зберігає в БД та повідомляє адміна."""
+async def museum_get_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отримує телефон, валідує його та переходить на підтвердження."""
 
     # 1. Видаляємо відповідь користувача
     await update.message.delete()
@@ -407,11 +517,22 @@ async def museum_get_phone_and_save(update: Update, context: ContextTypes.DEFAUL
         )
         return States.MUSEUM_PHONE  # Повертаємо на той самий крок
 
+    context.user_data['museum_phone'] = phone_text
+
+    _clear_museum_edit_flags(context)
+    return await museum_show_confirm(update, context)
+
+
+async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Фінальне збереження заявки після підтвердження."""
+    query = update.callback_query
+    await query.answer()
+
     # --- ЗБІР ДАНИХ ---
     date = context.user_data.get('museum_date', 'Не вказано')
     count = context.user_data.get('museum_people_count', 0)
     name = context.user_data.get('museum_name', 'Не вказано')
-    phone = phone_text
+    phone = context.user_data.get('museum_phone', 'Не вказано')
 
     # --- ЗБЕРЕЖЕННЯ В БД (SQLite) ---
     # Це відбувається миттєво

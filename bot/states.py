@@ -33,6 +33,8 @@ class States:
     MUSEUM_PEOPLE_COUNT = 12
     MUSEUM_NAME = 13
     MUSEUM_PHONE = 14
+    MUSEUM_CONFIRM = "MUSEUM_CONFIRM"
+    MUSEUM_EDIT_CHOICE = "MUSEUM_EDIT_CHOICE"
 
     # ========== АДМІН-ПАНЕЛЬ ==========
     ADMIN_STATE_ADD_DATE = 16
