@@ -148,23 +148,7 @@ async def show_museum_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption_text = MESSAGES.get("museum_info")
 
     try:
-        # 1. Редагуємо меню "Музей" на інформаційний текст
-        try:
-            await query.edit_message_text(
-                text=caption_text,
-                reply_markup=keyboard,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True
-            )
-        except Exception:
-            await query.message.reply_text(
-                text=caption_text,
-                reply_markup=keyboard,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True
-            )
-
-        # 2. Надсилаємо фото
+        # 1. Надсилаємо фото
         with open(MUSEUM_LOGO_IMAGE, 'rb') as photo:
             # --- ПОЧАТОК ЗМІН ---
             # Зберігаємо надіслане повідомлення у змінну
@@ -179,6 +163,22 @@ async def show_museum_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         media_ids.append(sent_photo.message_id)
         context.user_data['media_message_ids'] = media_ids
         # --- КІНЕЦЬ ЗМІН ---
+
+        # 2. Редагуємо меню "Музей" на інформаційний текст
+        try:
+            await query.edit_message_text(
+                text=caption_text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            )
+        except Exception:
+            await query.message.reply_text(
+                text=caption_text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True
+            )
 
         logger.info("✅ Museum info and logo sent successfully")
 
