@@ -51,12 +51,14 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ВАРІАНТ Б: Користувач написав команду /start або текст "Меню"
     elif update.message:
-        # Спробуємо видалити повідомлення користувача (щоб чат був чистим)
-        # Якщо це /start, воно вже видалене в command_handlers, тому тут буде помилка, яку ми ігноруємо
-        try:
-            await update.message.delete()
-        except Exception:
-            pass
+        # НЕ видаляємо /start, щоб уникнути миготіння для нових користувачів
+        # або після очищення історії. Для іншого тексту (наприклад, "Меню")
+        # видалення можна залишити для «чистого» чату.
+        if not (update.message.text and update.message.text.startswith("/")):
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
 
         # Надсилаємо НОВЕ красиве повідомлення (замість reply_text)
         await context.bot.send_message(

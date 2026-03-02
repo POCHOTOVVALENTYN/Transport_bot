@@ -56,20 +56,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     logger.info(f"👤 User {user_id} started bot")
 
-    # 1. Видалення команди /start (Чистий чат)
-    if update.message:
-        try:
-            await update.message.delete()
-        except Exception as e:
-            logger.warning(f"Не вдалося видалити повідомлення /start для {user.id}: {e}")
-
-    # 2. Реєструємо юзера в БД
+    # 1. Реєструємо юзера в БД
     try:
         await user_service.register_user(user)
     except Exception as e:
         logger.error(f"User reg error: {e}")
 
-    # 3. Передаємо управління в main_menu
+    # 2. Передаємо управління в main_menu
     # ВАЖЛИВО: Імпорт робимо тут, щоб уникнути циклічної помилки (Circular Import),
     # оскільки menu_handlers вже імпортує get_main_menu_keyboard з цього файлу.
     from handlers.menu_handlers import main_menu
