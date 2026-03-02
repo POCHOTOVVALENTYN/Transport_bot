@@ -61,10 +61,22 @@ async def handle_subscription_choice(update: Update, context: ContextTypes.DEFAU
     # Повертаємо в головне меню з новим текстом
     main_keyboard = await get_main_menu_keyboard(user_id)
 
-    # Видаляємо старе повідомлення і шлемо нове (щоб було красиво)
-    await query.message.delete()
-    await query.message.reply_text(
-        text=text,
-        reply_markup=main_keyboard,
-        parse_mode=ParseMode.HTML
-    )
+    # Показуємо результат БЕЗ «порожнього» екрану:
+    # спочатку пробуємо відредагувати поточне повідомлення,
+    # а якщо не виходить — надсилаємо нове і лише потім видаляємо старе.
+    try:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=main_keyboard,
+            parse_mode=ParseMode.HTML
+        )
+    except Exception:
+        sent = await query.message.reply_text(
+            text=text,
+            reply_markup=main_keyboard,
+            parse_mode=ParseMode.HTML
+        )
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
