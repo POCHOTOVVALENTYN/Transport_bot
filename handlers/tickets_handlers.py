@@ -77,15 +77,17 @@ async def show_tickets_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
     except Exception:
-        # Якщо редагування неможливе (старе було з фото або видалене)
-        try:
-            await query.message.delete()
-        except:
-            pass
+        # Якщо редагування неможливе (старе було з фото або видалене),
+        # спочатку показуємо нове меню...
         await query.message.reply_text(
             text=text,
             reply_markup=reply_markup
         )
+        # ...а вже потім пробуємо видалити старе повідомлення
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
 
 
 async def show_passes_list(update: Update, context: ContextTypes.DEFAULT_TYPE):

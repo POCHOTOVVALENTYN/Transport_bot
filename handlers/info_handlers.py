@@ -40,13 +40,16 @@ async def show_info_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         # Якщо НІ (це означає, що ми прийшли з повідомлення без тексту,
         # як-от наш PDF-документ), ми не можемо його "відредагувати".
-        # Тому ми повинні видалити повідомлення з PDF...
-        await query.message.delete()
-        # ...і надіслати нове текстове повідомлення з меню "Довідка".
+        # Тому спочатку надсилаємо нове текстове повідомлення з меню "Довідка"...
         await query.message.reply_text(
             text=text,
             reply_markup=reply_markup
         )
+        # ...а вже потім акуратно видаляємо повідомлення з PDF, щоб уникнути «порожнього» екрану.
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
     # --- КІНЕЦЬ ВИПРАВЛЕННЯ --- 03.11.2025 10:01
 
 
@@ -60,10 +63,7 @@ async def send_rules_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption_text = MESSAGES.get("info_rules")
 
     try:
-        # 1. Видаляємо поточне повідомлення (меню "Довідка")
-        await query.message.delete()
-
-        # 2. Надсилаємо документ
+        # 1. Спочатку надсилаємо документ користувачу
         with open(RULES_PDF_PATH, 'rb') as document:
             await query.message.reply_document(
                 document=document,
@@ -71,6 +71,13 @@ async def send_rules_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=caption_text,
                 reply_markup=keyboard
             )
+
+        # 2. Після цього пробуємо видалити старе меню \"Довідка\",
+        # щоб уникнути короткого періоду без жодного повідомлення.
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
         logger.info("✅ Rules PDF sent successfully")
 
     except FileNotFoundError:

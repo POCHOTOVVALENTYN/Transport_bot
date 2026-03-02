@@ -32,6 +32,7 @@ def generate_callback_update(update_id, user_id, callback_data, message_id=None)
         "update_id": update_id,
         "callback_query": {
             "id": f"cb_{update_id}_{user_id}",
+            "chat_instance": f"chat_{user_id}",
             "from": {
                 "id": user_id,
                 "is_bot": False,

@@ -36,12 +36,18 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
         except Exception:
             # Якщо редагування неможливе (наприклад, старе повідомлення було з фото)
+            # Спочатку надсилаємо НОВЕ повідомлення з меню...
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML,
+            )
+            # ...а потім пробуємо акуратно видалити старе, щоб уникнути «порожнього» екрану
             try:
                 await query.message.delete()
-            except:
+            except Exception:
                 pass
-            await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=keyboard,
-                                           parse_mode=ParseMode.HTML)
 
     # ВАРІАНТ Б: Користувач написав команду /start або текст "Меню"
     elif update.message:

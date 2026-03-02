@@ -15,8 +15,10 @@ DB_PASS = os.getenv("DB_PASS", "secure_pass")
 DB_NAME = os.getenv("DB_NAME", "transport_bot_db")
 DB_PORT = os.getenv("DB_PORT", "5432")  # ⚠️ Всередину контейнера: 5432
 
-# Формуємо URL для SQLAlchemy
-DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# Формуємо URL для SQLAlchemy (можна перевизначити через DATABASE_URL)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # ===============================================
 # 2. TELEGRAM НАЛАШТУВАННЯ
