@@ -15,6 +15,12 @@ class MuseumService:
         self._last_cache_update = 0
         self._cache_ttl = 300  # Кеш живе 5 хвилин (300 сек)
 
+    def invalidate_dates_cache(self) -> None:
+        """Скидає кеш дат після змін у Google Sheets (адмін: додавання/видалення)."""
+        self._dates_cache = []
+        self._last_cache_update = 0
+        logger.info("🗑️ Museum dates cache invalidated")
+
     async def get_available_dates(self) -> list:
         """
         Отримує дати екскурсій.

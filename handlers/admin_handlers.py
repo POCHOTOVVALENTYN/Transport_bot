@@ -423,6 +423,7 @@ async def admin_add_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         # --- ВАЛІДАЦІЯ ПРОЙДЕНА ---
         sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
         sheets.append_row(sheet_name="MuseumDates", values=[date_text])
+        museum_service.invalidate_dates_cache()
 
         logger.info(f"✅ Admin added new date: {date_text}")
         await update.message.reply_text(f"✅ Дату '<b>{date_text}</b>' успішно додано.", parse_mode=ParseMode.HTML)
@@ -523,14 +524,24 @@ async def admin_del_date_confirm(update: Update, context: ContextTypes.DEFAULT_T
 
     try:
         sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
-        sheets.clear_cell(sheet_name="MuseumDates", cell=cell_to_delete)
+        ok = sheets.clear_cell(sheet_name="MuseumDates", cell=cell_to_delete)
+        if ok:
+            museum_service.invalidate_dates_cache()
 
         # --- ПОЧАТОК ВИПРАВЛЕННЯ 2 ---
-        # Додаємо reply_markup до повідомлення
-        await query.edit_message_text(
-            text=f"✅ Дату '{date_str}' (комірка {cell_to_delete}) видалено.",
-            reply_markup=reply_markup_back
-        )
+        if ok:
+            await query.edit_message_text(
+                text=f"✅ Дату '{date_str}' (комірка {cell_to_delete}) видалено.",
+                reply_markup=reply_markup_back
+            )
+        else:
+            await query.edit_message_text(
+                text=(
+                    "❌ Не вдалося очистити дату в Google Sheets (перевірте права сервісного "
+                    f"акаунта та вкладку MuseumDates). Комірка: {cell_to_delete}"
+                ),
+                reply_markup=reply_markup_back
+            )
         # --- КІНЕЦЬ ВИПРАВЛЕННЯ 2 ---
 
     except Exception as e:

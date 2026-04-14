@@ -100,6 +100,9 @@ class GoogleSheetsClient:
                 .get(
                     spreadsheetId=self.spreadsheet_id,
                     range=final_range,
+                    # Як у інтерфейсі таблиці (не серійні числа для дат/часу)
+                    valueRenderOption="FORMATTED_VALUE",
+                    dateTimeRenderOption="FORMATTED_STRING",
                 )
                 .execute()
             )
@@ -118,6 +121,31 @@ class GoogleSheetsClient:
         """
         if not self.service:
             logger.error("❌ Google Sheets service not initialized")
+            return False
+
+        try:
+            safe_sheet_name = sheet_name
+            if " " in sheet_name or not sheet_name.isascii():
+                if not sheet_name.startswith("'"):
+                    safe_sheet_name = f"'{sheet_name}'"
+
+            range_name = f"{safe_sheet_name}!{cell}"
+
+            (
+                self.service.spreadsheets()
+                .values()
+                .clear(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=range_name,
+                    body={},
+                )
+                .execute()
+            )
+
+            logger.info(f"✅ Cleared cell {range_name}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Google Sheets clear_cell error ({sheet_name}!{cell}): {e}")
             return False
 
     def append_rows(self, sheet_name: str, values: list):
@@ -156,29 +184,4 @@ class GoogleSheetsClient:
                 )
             else:
                 logger.error(f"❌ Google Sheets error: {e}")
-            return False
-
-        try:
-            safe_sheet_name = sheet_name
-            if " " in sheet_name or not sheet_name.isascii():
-                if not sheet_name.startswith("'"):
-                    safe_sheet_name = f"'{sheet_name}'"
-
-            range_name = f"{safe_sheet_name}!{cell}"
-
-            (
-                self.service.spreadsheets()
-                .values()
-                .clear(
-                    spreadsheetId=self.spreadsheet_id,
-                    range=range_name,
-                    body={},
-                )
-                .execute()
-            )
-
-            logger.info(f"✅ Cleared cell {range_name}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Google Sheets clear_cell error ({sheet_name}!{cell}): {e}")
             return False
