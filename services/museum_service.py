@@ -95,20 +95,85 @@ class MuseumService:
                 )
                 session.add(booking)
                 await session.commit()
+                await session.refresh(booking)
                 logger.info(f"✅ Booking saved to SQLite: {name}, {date}")
 
-                # ЗА БАЖАННЯМ: Можна запустити фонову задачу для відправки в Sheets
-                # asyncio.create_task(self._sync_to_sheets(booking))
+                # Запускаємо фонову задачу для відправки в Sheets
+                asyncio.create_task(self._sync_to_sheets_task(booking.id))
 
                 return True
         except Exception as e:
             logger.error(f"❌ Failed to save booking to DB: {e}")
             return False
 
+    async def _sync_to_sheets_task(self, booking_id: int):
+        """Фонова задача для синхронізації 1 запису в Google Sheets"""
+        try:
+            from datetime import datetime
+            import asyncio
+            
+            async with AsyncSessionLocal() as session:
+                booking = await session.get(MuseumBooking, booking_id)
+                if not booking or booking.status == "synced":
+                    return
+
+                reg_date = booking.created_at.strftime("%d.%m.%Y %H:%M") if booking.created_at else ""
+                row = [
+                    reg_date,
+                    booking.excursion_date,
+                    str(booking.people_count),
+                    booking.user_name,
+                    booking.user_phone
+                ]
+
+                # Відправляємо в Google Sheets
+                loop = asyncio.get_running_loop()
+                success = await loop.run_in_executor(
+                    None,
+                    self.sheets.append_row,
+                    "MuseumBookings",
+                    row
+                )
+
+                if success:
+                    booking.status = "synced"
+                    await session.commit()
+                    logger.info(f"✅ Sync to Sheets successful for booking ID {booking_id}")
+        except Exception as e:
+            logger.error(f"❌ Background sync failed: {e}")
+
     async def sync_unsynced_bookings(self):
         """
         Цю функцію можна викликати окремо (напр. адмін-командою),
         щоб вивантажити всі нові записи з БД в Google Sheets.
         """
-        # Логіка вибірки з БД записів зі статусом 'new' і запис їх у Sheets
-        pass
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(MuseumBooking).where(MuseumBooking.status == "new")
+                )
+                bookings = result.scalars().all()
+                if not bookings: return
+                
+                rows = []
+                for b in bookings:
+                    reg_date = b.created_at.strftime("%d.%m.%Y %H:%M") if b.created_at else ""
+                    rows.append([reg_date, b.excursion_date, str(b.people_count), b.user_name, b.user_phone])
+                
+                # Відправляємо всі пакетом
+                loop = asyncio.get_running_loop()
+                success = await loop.run_in_executor(
+                    None,
+                    self.sheets.append_rows,
+                    "MuseumBookings",
+                    rows
+                )
+                
+                if success:
+                    for b in bookings:
+                        b.status = "synced"
+                    await session.commit()
+                    logger.info(f"✅ Synced {len(rows)} past museum bookings to Google Sheets")
+                    
+        except Exception as e:
+            logger.error(f"❌ Failed to sync past bookings: {e}")
