@@ -53,21 +53,33 @@ class MuseumService:
 
     async def get_last_bookings(self, limit: int = 50) -> list:
         """
-        Повертає останні бронювання з аркуша MuseumBookings.
-        Повертає «сирі» дані з Google Sheets (список списків), включно з заголовком.
+        Повертає останні бронювання з локальної бази даних SQLite.
+        Повертає «сирі» дані у вигляді списку списків для сумісності з попереднім кодом, включно з заголовком.
         """
-        loop = asyncio.get_running_loop()
-        range_name = f"MuseumBookings!A1:E{limit + 1}"  # +1 на рядок заголовків
-        bookings_data = await loop.run_in_executor(
-            None,
-            self.sheets.read_range,
-            range_name
-        )
-        if not bookings_data:
-            logger.info("ℹ️ Museum bookings: no data returned from Google Sheets")
-            return []
-        logger.info(f"✅ Museum bookings: loaded {len(bookings_data)} rows from Google Sheets")
-        return bookings_data
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(MuseumBooking).order_by(MuseumBooking.created_at.desc()).limit(limit)
+                )
+                bookings = result.scalars().all()
+
+                formatted_data = [["Дата реєстрації", "Дата екскурсії", "Кількість", "ПІБ", "Телефон"]]
+                
+                for b in bookings:
+                    reg_date = b.created_at.strftime("%d.%m.%Y %H:%M") if b.created_at else "N/A"
+                    formatted_data.append([
+                        reg_date,
+                        b.excursion_date,
+                        str(b.people_count),
+                        b.user_name,
+                        b.user_phone
+                    ])
+                    
+                logger.info(f"✅ Museum bookings: loaded {len(bookings)} rows from SQLite")
+                return formatted_data
+        except Exception as e:
+            logger.error(f"❌ Error getting bookings from DB: {e}")
+            return [["Дата реєстрації", "Дата екскурсії", "Кількість", "ПІБ", "Телефон"]]
 
     async def create_booking(self, date: str, count: int, name: str, phone: str) -> bool:
         """
