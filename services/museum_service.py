@@ -51,6 +51,14 @@ class MuseumService:
 
         return []
 
+    def _to_kyiv_time(self, dt_value):
+        if not dt_value: return None
+        from datetime import timezone
+        from zoneinfo import ZoneInfo
+        if dt_value.tzinfo is None:
+            dt_value = dt_value.replace(tzinfo=timezone.utc)
+        return dt_value.astimezone(ZoneInfo("Europe/Kyiv"))
+
     async def get_last_bookings(self, limit: int = 50) -> list:
         """
         Повертає останні бронювання з локальної бази даних SQLite.
@@ -66,7 +74,8 @@ class MuseumService:
                 formatted_data = [["Дата реєстрації", "Дата екскурсії", "Кількість", "ПІБ", "Телефон"]]
                 
                 for b in bookings:
-                    reg_date = b.created_at.strftime("%d.%m.%Y %H:%M") if b.created_at else "N/A"
+                    local_created_at = self._to_kyiv_time(b.created_at)
+                    reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else "N/A"
                     formatted_data.append([
                         reg_date,
                         b.excursion_date,
@@ -117,7 +126,8 @@ class MuseumService:
                 if not booking or booking.status == "synced":
                     return
 
-                reg_date = booking.created_at.strftime("%d.%m.%Y %H:%M") if booking.created_at else ""
+                local_created_at = self._to_kyiv_time(booking.created_at)
+                reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else ""
                 row = [
                     reg_date,
                     booking.excursion_date,
@@ -157,7 +167,8 @@ class MuseumService:
                 
                 rows = []
                 for b in bookings:
-                    reg_date = b.created_at.strftime("%d.%m.%Y %H:%M") if b.created_at else ""
+                    local_dt = self._to_kyiv_time(b.created_at)
+                    reg_date = local_dt.strftime("%d.%m.%Y %H:%M") if local_dt else ""
                     rows.append([reg_date, b.excursion_date, str(b.people_count), b.user_name, b.user_phone])
                 
                 # Відправляємо всі пакетом
