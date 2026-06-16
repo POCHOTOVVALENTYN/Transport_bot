@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import html
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -575,16 +576,16 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             return
 
-        text_list = "📋 **Останні заявки на екскурсії:**\n\n"
+        text_list = "📋 <b>Останні заявки на екскурсії:</b>\n\n"
         # Пропускаємо заголовок (bookings_data[0]) і беремо дані
         for row in bookings_data[1:]:
             # A: Дата реєстрації, B: Дата екскурсії, C: Кількість, D: ПІБ, E: Телефон
             if row: # Переконуємося, що рядок не пустий
-                reg_date = row[0]
-                excursion_date = row[1] if len(row) > 1 else "N/A"
-                count = row[2] if len(row) > 2 else "N/A"
-                name = row[3] if len(row) > 3 else "N/A"
-                phone = row[4] if len(row) > 4 else "N/A"
+                reg_date = html.escape(str(row[0]))
+                excursion_date = html.escape(str(row[1])) if len(row) > 1 else "N/A"
+                count = html.escape(str(row[2])) if len(row) > 2 else "N/A"
+                name = html.escape(str(row[3])) if len(row) > 3 else "N/A"
+                phone = html.escape(str(row[4])) if len(row) > 4 else "N/A"
 
                 text_list += (
                     f"▪️ <b>{name}</b> ({phone})\n"
@@ -605,9 +606,8 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         logger.error(f"Failed to show bookings: {e}", exc_info=True)
         await query.edit_message_text(
-            "❌ Сталася помилка при читанні бронювань.\n"
-            "Переконайтеся, будь ласка, що в Google Sheets існує вкладка 'MuseumBookings' "
-            "і бот має доступ до таблиці.",
+            "❌ Сталася помилка при читанні бронювань з бази даних.\n"
+            "Будь ласка, зверніться до адміністратора або спробуйте пізніше.",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
             )
