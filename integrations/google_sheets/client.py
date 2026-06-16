@@ -148,6 +148,36 @@ class GoogleSheetsClient:
             logger.error(f"❌ Google Sheets clear_cell error ({sheet_name}!{cell}): {e}")
             return False
 
+    def update_cell(self, sheet_name: str, cell: str, value: str) -> bool:
+        """
+        Записує значення в одну клітинку (наприклад, B5) на вказаному аркуші.
+        """
+        if not self.service:
+            logger.error("❌ Google Sheets service not initialized")
+            return False
+
+        try:
+            safe_sheet_name = sheet_name
+            if " " in sheet_name or not sheet_name.isascii():
+                if not sheet_name.startswith("'"):
+                    safe_sheet_name = f"'{sheet_name}'"
+
+            range_name = f"{safe_sheet_name}!{cell}"
+            body = {'values': [[value]]}
+
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name,
+                valueInputOption="USER_ENTERED",
+                body=body
+            ).execute()
+
+            logger.info(f"✅ Updated cell {range_name} with value {value}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Google Sheets update_cell error ({sheet_name}!{cell}): {e}")
+            return False
+
     def append_rows(self, sheet_name: str, values: list):
         """
         Додає декілька рядків у вказаний аркуш.

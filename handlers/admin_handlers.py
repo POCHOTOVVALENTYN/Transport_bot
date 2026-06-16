@@ -689,3 +689,267 @@ async def admin_menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     return ConversationHandler.END
+
+
+# --- Святкові екскурсії (Максим) ---
+
+async def admin_add_holiday_date_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if user_id != MUSEUM_ADMIN_ID:
+        await query.message.reply_text(f"⛔ Помилка доступу. Ваш ID: {user_id}")
+        return ConversationHandler.END
+
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    text = (
+        "Будь ласка, введіть дату та час <b>святкової екскурсії</b> у чіткому форматі:\n\n"
+        "<code>ДД.ММ.РРРР ГГ:ХХ</code>\n\n"
+        "Наприклад: <code>25.11.2025 11:00</code>"
+    )
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+    return States.ADMIN_STATE_ADD_HOLIDAY_DATE
+
+
+async def admin_add_holiday_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != MUSEUM_ADMIN_ID: return ConversationHandler.END
+
+    date_text = update.message.text.strip()
+
+    try:
+        if not re.match(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$", date_text):
+            raise ValueError("Невірний формат. Очікується <code>ДД.ММ.РРРР ГГ:ХХ</code>.")
+
+        try:
+            parsed_date = datetime.strptime(date_text, '%d.%m.%Y %H:%M')
+        except ValueError:
+            raise ValueError("Некоректна дата. Можливо, неіснуючий день або місяць?")
+
+        if parsed_date < datetime.now():
+            raise ValueError("Дата не може бути у минулому.")
+
+        # --- ВАЛІДАЦІЯ ПРОЙДЕНА ---
+        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
+        
+        loop = asyncio.get_running_loop()
+        dates_data = await loop.run_in_executor(
+            None,
+            sheets.read_range,
+            "MuseumDates!B1:B100"
+        )
+        
+        first_empty_row = 1
+        if dates_data:
+            first_empty_row = len(dates_data) + 1
+        
+        cell_ref = f"B{first_empty_row}"
+        
+        await loop.run_in_executor(
+            None,
+            sheets.update_cell,
+            "MuseumDates",
+            cell_ref,
+            date_text
+        )
+        
+        museum_service.invalidate_holiday_dates_cache()
+
+        logger.info(f"✅ Admin added new holiday date: {date_text} in {cell_ref}")
+        await update.message.reply_text(f"✅ Святкову дату '<b>{date_text}</b>' успішно додано.", parse_mode=ParseMode.HTML)
+
+        await admin_menu_show(update, context)
+        return ConversationHandler.END
+
+    except ValueError as e:
+        logger.warning(f"Admin holiday date validation failed: {e}")
+        await update.message.reply_text(
+            f"❌ <b>Помилка:</b> {e}\n\n"
+            f"Будь ласка, спробуйте ще раз або натисніть 'Назад'.",
+            parse_mode=ParseMode.HTML
+        )
+        return States.ADMIN_STATE_ADD_HOLIDAY_DATE
+
+    except Exception as e:
+        logger.error(f"Failed to add holiday date by admin: {e}")
+        await update.message.reply_text(f"❌ Сталася системна помилка при додаванні святкової дати: {e}")
+        await admin_menu_show(update, context)
+        return ConversationHandler.END
+
+
+async def admin_del_holiday_date_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.from_user.id != MUSEUM_ADMIN_ID:
+        return ConversationHandler.END
+
+    await query.edit_message_text("⏳ Завантажую список святкових дат...")
+
+    try:
+        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
+        loop = asyncio.get_running_loop()
+
+        dates_data = await loop.run_in_executor(
+            None,
+            sheets.read_range,
+            "MuseumDates!B1:B100"
+        )
+
+        keyboard = []
+        for i, row in enumerate(dates_data):
+            if i == 0: continue
+            if row:
+                date_str = row[0]
+                cell_ref = f"B{i + 1}"
+                keyboard.append([InlineKeyboardButton(f"❌ {date_str}", callback_data=f"admin_del_holiday_confirm:{cell_ref}")])
+
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
+        await query.edit_message_text("Оберіть святкову дату, яку потрібно видалити:",
+                                      reply_markup=InlineKeyboardMarkup(keyboard))
+
+    except Exception as e:
+        logger.error(f"Failed to show holiday dates for deletion: {e}")
+        await query.edit_message_text(f"❌ Помилка: {e}")
+
+    return States.ADMIN_STATE_DEL_HOLIDAY_DATE_CONFIRM
+
+
+async def admin_del_holiday_date_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.from_user.id != MUSEUM_ADMIN_ID: return ConversationHandler.END
+
+    cell_to_delete = query.data.split(":")[1]
+
+    keyboard_back = [
+        [InlineKeyboardButton("⬅️ Назад до адмін-панелі", callback_data="admin_museum_menu")]
+    ]
+    reply_markup_back = InlineKeyboardMarkup(keyboard_back)
+
+    date_str = ""
+    for row in query.message.reply_markup.inline_keyboard:
+        if row[0].callback_data == query.data:
+            date_str = row[0].text.replace("❌ ", "")
+            break
+
+    try:
+        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
+        ok = sheets.clear_cell(sheet_name="MuseumDates", cell=cell_to_delete)
+        if ok:
+            museum_service.invalidate_holiday_dates_cache()
+
+        if ok:
+            await query.edit_message_text(
+                text=f"✅ Святкову дату '{date_str}' (комірка {cell_to_delete}) видалено.",
+                reply_markup=reply_markup_back
+            )
+        else:
+            await query.edit_message_text(
+                text=f"❌ Не вдалося очистити святкову дату в Google Sheets. Комірка: {cell_to_delete}",
+                reply_markup=reply_markup_back
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to delete holiday date: {e}")
+        await query.edit_message_text(
+            text=f"❌ Помилка при видаленні святкової дати: {e}",
+            reply_markup=reply_markup_back
+        )
+
+    return ConversationHandler.END
+
+
+async def admin_show_holiday_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує список останніх святкових бронювань з пагінацією."""
+    query = update.callback_query
+    await query.answer()
+    if query.from_user.id != MUSEUM_ADMIN_ID: return
+
+    offset = 0
+    if query.data and ":" in query.data:
+        try:
+            offset = int(query.data.split(":")[1])
+        except (ValueError, IndexError):
+            offset = 0
+
+    limit = 15
+    try:
+        bookings_data = await museum_service.get_last_holiday_bookings(limit=limit + 1, offset=offset)
+
+        has_next = len(bookings_data) > (limit + 1)
+        display_data = bookings_data[:limit + 1] if has_next else bookings_data
+
+        if not display_data or len(display_data) < 2:
+            if offset > 0:
+                keyboard = []
+                nav_buttons = []
+                nav_buttons.append(InlineKeyboardButton("⬅️ Попередні 15", callback_data=f"admin_show_holiday_bookings:{max(0, offset - limit)}"))
+                keyboard.append(nav_buttons)
+                keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
+                
+                await query.edit_message_text(
+                    "📋 Більше немає святкових заявок.",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                await query.edit_message_text(
+                    "📋 Наразі немає жодного святкового бронювання.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]])
+                )
+            return
+
+        start_num = offset + 1
+        end_num = offset + len(display_data) - 1
+        text_list = f"📋 <b>Останні святкові заявки на екскурсії ({start_num}-{end_num}):</b>\n\n"
+        
+        for row in display_data[1:]:
+            if row:
+                reg_date = html.escape(str(row[0]))
+                excursion_date = html.escape(str(row[1])) if len(row) > 1 else "N/A"
+                count = html.escape(str(row[2])) if len(row) > 2 else "N/A"
+                name = html.escape(str(row[3])) if len(row) > 3 else "N/A"
+                phone = html.escape(str(row[4])) if len(row) > 4 else "N/A"
+
+                text_list += (
+                    f"▪️ <b>{name}</b> ({phone})\n"
+                    f"   На дату: <b>{excursion_date}</b>, {count} осіб.\n"
+                    f"   (Заявка від: {reg_date})\n"
+                    f"---------------------\n"
+                )
+
+        keyboard = []
+        nav_buttons = []
+        if offset > 0:
+            nav_buttons.append(InlineKeyboardButton("⬅️ Попередні 15", callback_data=f"admin_show_holiday_bookings:{max(0, offset - limit)}"))
+        if has_next:
+            nav_buttons.append(InlineKeyboardButton("Наступні 15 ➡️", callback_data=f"admin_show_holiday_bookings:{offset + limit}"))
+        
+        if nav_buttons:
+            keyboard.append(nav_buttons)
+            
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
+
+        # Використовуємо HTML для форматування
+        await query.edit_message_text(
+            text=text_list,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.HTML
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to show holiday bookings: {e}", exc_info=True)
+        await query.edit_message_text(
+            "❌ Сталася помилка при читанні святкових бронювань з бази даних.\n"
+            "Будь ласка, зверніться до адміністратора або спробуйте пізніше.",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
+            )
+        )

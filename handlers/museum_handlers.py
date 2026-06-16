@@ -218,6 +218,7 @@ async def show_museum_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🖼️ Інфо про музей", callback_data="museum:info")],
         [InlineKeyboardButton("📱 Соц. мережі музею", callback_data="museum:socials")],
         [InlineKeyboardButton("🗓️ Запис на екскурсію", callback_data="museum:register_start")],
+        [InlineKeyboardButton("🎉 Запис на святкову екскурсію", callback_data="museum:holiday_register_start")],
         [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")],
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
     ]
@@ -326,8 +327,18 @@ async def museum_register_start(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception:
             pass
 
-            # 2. Отримуємо дати (поки юзер бачить "Завантаження")
-        dates_list = await museum_service.get_available_dates()
+        if query.data == "museum:holiday_register_start":
+            context.user_data['museum_type'] = 'holiday'
+        elif query.data == "museum:register_start":
+            context.user_data['museum_type'] = 'regular'
+
+        excursion_type = context.user_data.get('museum_type', 'regular')
+
+        # 2. Отримуємо дати (поки юзер бачить "Завантаження")
+        if excursion_type == 'holiday':
+            dates_list = await museum_service.get_available_holiday_dates()
+        else:
+            dates_list = await museum_service.get_available_dates()
 
         # 2. Якщо дат немає
         if not dates_list:
@@ -536,7 +547,11 @@ async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # --- ЗБЕРЕЖЕННЯ В БД (SQLite) ---
     # Це відбувається миттєво
-    success = await museum_service.create_booking(date, count, name, phone)
+    excursion_type = context.user_data.get('museum_type', 'regular')
+    if excursion_type == 'holiday':
+        success = await museum_service.create_holiday_booking(date, count, name, phone)
+    else:
+        success = await museum_service.create_booking(date, count, name, phone)
 
     if not success:
         # Якщо база даних не відповіла
@@ -554,8 +569,9 @@ async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # 1. Повідомляємо Адміна (в блоці try, щоб помилка тут не лякала користувача)
     try:
+        title = "Нова заявка на святкову екскурсію!" if excursion_type == 'holiday' else "Нова заявка на екскурсію!"
         admin_message = (
-            f"🔔 <b>Нова заявка на екскурсію!</b>\n"
+            f"🔔 <b>{title}</b>\n"
             f"➖➖➖➖➖➖➖\n"
             f"🗓 <b>Дата:</b> {date}\n"
             f"👥 <b>Людей:</b> {count}\n"

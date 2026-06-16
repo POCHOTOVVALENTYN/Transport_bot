@@ -56,6 +56,19 @@ class MuseumBooking(Base):
     status = Column(String, default="new")
 
 
+class MuseumHolidayBooking(Base):
+    __tablename__ = "museum_holiday_bookings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=func.now())
+    excursion_date = Column(String, nullable=False)
+    people_count = Column(Integer, nullable=False)
+    user_name = Column(String, nullable=False)
+    user_phone = Column(String, nullable=False)
+    status = Column(String, default="new")
+
+
+
 # --- 2. Таблиця Користувачів (для розсилки та статистики) ---
 class BotUser(Base):
     __tablename__ = "users"
@@ -195,6 +208,19 @@ class Database:
     async def create_museum_booking(self, data: dict):
         async with self.session_factory() as session:
             booking = MuseumBooking(
+                excursion_date=data.get('date'),
+                people_count=int(data.get('people', 1)),
+                user_name=data.get('name'),
+                user_phone=data.get('phone'),
+                status="new"
+            )
+            session.add(booking)
+            await session.commit()
+            return booking.id
+
+    async def create_museum_holiday_booking(self, data: dict):
+        async with self.session_factory() as session:
+            booking = MuseumHolidayBooking(
                 excursion_date=data.get('date'),
                 people_count=int(data.get('people', 1)),
                 user_name=data.get('name'),

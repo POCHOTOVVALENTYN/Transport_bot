@@ -1,6 +1,6 @@
 
 from sqlalchemy import select
-from database.db import AsyncSessionLocal, MuseumBooking
+from database.db import AsyncSessionLocal, MuseumBooking, MuseumHolidayBooking
 from integrations.google_sheets.client import GoogleSheetsClient
 
 from utils.logger import logger
@@ -13,6 +13,8 @@ class MuseumService:
         self.sheets = GoogleSheetsClient()
         self._dates_cache = []
         self._last_cache_update = 0
+        self._holiday_dates_cache = []
+        self._last_holiday_cache_update = 0
         self._cache_ttl = 300  # Кеш живе 5 хвилин (300 сек)
 
     def invalidate_dates_cache(self) -> None:
@@ -21,9 +23,15 @@ class MuseumService:
         self._last_cache_update = 0
         logger.info("🗑️ Museum dates cache invalidated")
 
+    def invalidate_holiday_dates_cache(self) -> None:
+        """Скидає кеш святкових дат після змін у Google Sheets."""
+        self._holiday_dates_cache = []
+        self._last_holiday_cache_update = 0
+        logger.info("🗑️ Museum holiday dates cache invalidated")
+
     async def get_available_dates(self) -> list:
         """
-        Отримує дати екскурсій.
+        Отримує дати звичайних екскурсій.
         Спочатку дивиться в кеш. Якщо кеш старий -> читає з Google Sheets.
         """
         current_time = time.time()
@@ -40,7 +48,7 @@ class MuseumService:
         raw_dates = await loop.run_in_executor(
             None,
             self.sheets.read_range,
-            "MuseumDates!A1:A50"
+            "MuseumDates!A2:A50"
         )
 
         if raw_dates:
@@ -48,6 +56,32 @@ class MuseumService:
             self._dates_cache = [row[0] for row in raw_dates if row]
             self._last_cache_update = current_time
             return self._dates_cache
+
+        return []
+
+    async def get_available_holiday_dates(self) -> list:
+        """
+        Отримує дати святкових екскурсій з колонки B.
+        """
+        current_time = time.time()
+
+        if self._holiday_dates_cache and (current_time - self._last_holiday_cache_update < self._cache_ttl):
+            logger.info("💎 Museum holiday dates: Cache HIT")
+            return self._holiday_dates_cache
+
+        logger.info("🔄 Museum holiday dates: Updating from Google Sheets...")
+
+        loop = asyncio.get_running_loop()
+        raw_dates = await loop.run_in_executor(
+            None,
+            self.sheets.read_range,
+            "MuseumDates!B2:B50"
+        )
+
+        if raw_dates:
+            self._holiday_dates_cache = [row[0] for row in raw_dates if row]
+            self._last_holiday_cache_update = current_time
+            return self._holiday_dates_cache
 
         return []
 
@@ -191,3 +225,95 @@ class MuseumService:
                     
         except Exception as e:
             logger.error(f"❌ Failed to sync past bookings: {e}")
+
+    async def get_last_holiday_bookings(self, limit: int = 15, offset: int = 0) -> list:
+        """
+        Повертає останні бронювання святкових екскурсій з локальної бази даних SQLite.
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(MuseumHolidayBooking)
+                    .order_by(MuseumHolidayBooking.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+                bookings = result.scalars().all()
+
+                formatted_data = [["Дата реєстрації", "Дата святкової екскурсії", "Кількість", "П.І.Б.", "Телефон"]]
+                
+                for b in bookings:
+                    local_created_at = self._to_kyiv_time(b.created_at)
+                    reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else "N/A"
+                    formatted_data.append([
+                        reg_date,
+                        b.excursion_date,
+                        str(b.people_count),
+                        b.user_name,
+                        b.user_phone
+                    ])
+                    
+                logger.info(f"✅ Museum holiday bookings: loaded {len(bookings)} rows from SQLite (offset={offset}, limit={limit})")
+                return formatted_data
+        except Exception as e:
+            logger.error(f"❌ Error getting holiday bookings from DB: {e}")
+            return [["Дата реєстрації", "Дата святкової екскурсії", "Кількість", "П.І.Б.", "Телефон"]]
+
+    async def create_holiday_booking(self, date: str, count: int, name: str, phone: str) -> bool:
+        """
+        Миттєво зберігає святкове бронювання в локальну БД SQLite.
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                booking = MuseumHolidayBooking(
+                    excursion_date=date,
+                    people_count=count,
+                    user_name=name,
+                    user_phone=phone
+                )
+                session.add(booking)
+                await session.commit()
+                await session.refresh(booking)
+                logger.info(f"✅ Holiday booking saved to SQLite: {name}, {date}")
+
+                # Запускаємо фонову задачу для відправки в Sheets
+                asyncio.create_task(self._sync_holiday_to_sheets_task(booking.id))
+
+                return True
+        except Exception as e:
+            logger.error(f"❌ Failed to save holiday booking to DB: {e}")
+            return False
+
+    async def _sync_holiday_to_sheets_task(self, booking_id: int):
+        """Фонова задача для синхронізації 1 запису святкового бронювання в Google Sheets"""
+        try:
+            async with AsyncSessionLocal() as session:
+                booking = await session.get(MuseumHolidayBooking, booking_id)
+                if not booking or booking.status == "synced":
+                    return
+
+                local_created_at = self._to_kyiv_time(booking.created_at)
+                reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else ""
+                row = [
+                    reg_date,
+                    booking.excursion_date,
+                    str(booking.people_count),
+                    booking.user_name,
+                    booking.user_phone
+                ]
+
+                # Відправляємо в Google Sheets у лист "Holiday excursion list"
+                loop = asyncio.get_running_loop()
+                success = await loop.run_in_executor(
+                    None,
+                    self.sheets.append_row,
+                    "Holiday excursion list",
+                    row
+                )
+
+                if success:
+                    booking.status = "synced"
+                    await session.commit()
+                    logger.info(f"✅ Sync to Sheets successful for holiday booking ID {booking_id}")
+        except Exception as e:
+            logger.error(f"❌ Background holiday sync failed: {e}")

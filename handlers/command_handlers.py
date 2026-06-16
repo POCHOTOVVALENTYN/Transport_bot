@@ -42,6 +42,9 @@ async def get_admin_main_menu_keyboard():
         [InlineKeyboardButton("➕ Додати дату екскурсії", callback_data="admin_add_date")],
         [InlineKeyboardButton("➖ Видалити дату екскурсії", callback_data="admin_del_date_menu")],
         [InlineKeyboardButton("📋 Перелік зареєстрованих", callback_data="admin_show_bookings")],
+        [InlineKeyboardButton("🎉➕ Додати дату святкової екскурсії", callback_data="admin_add_holiday_date")],
+        [InlineKeyboardButton("🎉➖ Видалити дату святкової екскурсії", callback_data="admin_del_holiday_date_menu")],
+        [InlineKeyboardButton("🎉📋 Перелік зареєстрованих (святкові)", callback_data="admin_show_holiday_bookings")],
         [InlineKeyboardButton("👤 Режим користувача", callback_data="main_menu")],
     ]
     return InlineKeyboardMarkup(keyboard)

@@ -67,7 +67,10 @@ from handlers.admin_handlers import (
     admin_show_bookings, admin_sync_db,
     admin_broadcast_start, admin_broadcast_preview,       # Нова функція прев'ю
     admin_broadcast_send_confirm,
-    show_general_admin_menu, admin_museum_menu_show, admin_show_stats # Нова функція зі списком
+    show_general_admin_menu, admin_museum_menu_show, admin_show_stats, # Нова функція зі списком
+    admin_add_holiday_date_start, admin_add_holiday_date_save,
+    admin_del_holiday_date_menu, admin_del_holiday_date_confirm,
+    admin_show_holiday_bookings
 )
 
 from utils.logger import logger
@@ -135,6 +138,8 @@ class TransportBot:
                 # Кнопки дій теж є точками входу
                 CallbackQueryHandler(admin_add_date_start, pattern="^admin_add_date$"),
                 CallbackQueryHandler(admin_del_date_menu, pattern="^admin_del_date_menu$"),
+                CallbackQueryHandler(admin_add_holiday_date_start, pattern="^admin_add_holiday_date$"),
+                CallbackQueryHandler(admin_del_holiday_date_menu, pattern="^admin_del_holiday_date_menu$"),
                 # === 👇 (1) ДОДАЄМО ВХІД ДЛЯ РОЗСИЛКИ ТУТ 👇 ===
                 CallbackQueryHandler(admin_broadcast_start, pattern="^admin_broadcast_start$"),
 
@@ -147,6 +152,14 @@ class TransportBot:
                 ],
                 States.ADMIN_STATE_DEL_DATE_CONFIRM: [
                     CallbackQueryHandler(admin_del_date_confirm, pattern="^admin_del_confirm:"),
+                    CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
+                ],
+                States.ADMIN_STATE_ADD_HOLIDAY_DATE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_holiday_date_save),
+                    CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
+                ],
+                States.ADMIN_STATE_DEL_HOLIDAY_DATE_CONFIRM: [
+                    CallbackQueryHandler(admin_del_holiday_date_confirm, pattern="^admin_del_holiday_confirm:"),
                     CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
                 ],
                 # === 👇 (2) ДОДАЄМО СТАНИ РОЗСИЛКИ ТУТ 👇 ===
@@ -272,9 +285,8 @@ class TransportBot:
             per_message=False
         )
 
-        # NEW CONVERSATION: РЕЄСТРАЦІЯ В МУЗЕЙ
         museum_conv = ConversationHandler(
-            entry_points=[CallbackQueryHandler(museum_register_start, pattern="^museum:register_start$")],
+            entry_points=[CallbackQueryHandler(museum_register_start, pattern="^museum:(holiday_)?register_start$")],
             states={
                 States.MUSEUM_DATE: [
                     CallbackQueryHandler(museum_get_date, pattern="^museum_date:"),
@@ -402,6 +414,7 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(send_rules_pdf, pattern="^info:rules$"))
         self.app.add_handler(CallbackQueryHandler(handle_info_static, pattern="^info:"))
         self.app.add_handler(CallbackQueryHandler(admin_show_bookings, pattern="^admin_show_bookings(:\\d+)?$"))
+        self.app.add_handler(CallbackQueryHandler(admin_show_holiday_bookings, pattern="^admin_show_holiday_bookings(:\\d+)?$"))
         # --- ПОЧАТОК ЗМІН (Музей) --- 03/11/2025
         # 1. Новий обробник для "Інфо" (фото + текст)
         self.app.add_handler(CallbackQueryHandler(show_museum_info, pattern="^museum:info$"))
