@@ -59,15 +59,18 @@ class MuseumService:
             dt_value = dt_value.replace(tzinfo=timezone.utc)
         return dt_value.astimezone(ZoneInfo("Europe/Kyiv"))
 
-    async def get_last_bookings(self, limit: int = 50) -> list:
+    async def get_last_bookings(self, limit: int = 15, offset: int = 0) -> list:
         """
-        Повертає останні бронювання з локальної бази даних SQLite.
+        Повертає останні бронювання з локальної бази даних SQLite з підтримкою пагінації.
         Повертає «сирі» дані у вигляді списку списків для сумісності з попереднім кодом, включно з заголовком.
         """
         try:
             async with AsyncSessionLocal() as session:
                 result = await session.execute(
-                    select(MuseumBooking).order_by(MuseumBooking.created_at.desc()).limit(limit)
+                    select(MuseumBooking)
+                    .order_by(MuseumBooking.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
                 )
                 bookings = result.scalars().all()
 
@@ -84,7 +87,7 @@ class MuseumService:
                         b.user_phone
                     ])
                     
-                logger.info(f"✅ Museum bookings: loaded {len(bookings)} rows from SQLite")
+                logger.info(f"✅ Museum bookings: loaded {len(bookings)} rows from SQLite (offset={offset}, limit={limit})")
                 return formatted_data
         except Exception as e:
             logger.error(f"❌ Error getting bookings from DB: {e}")

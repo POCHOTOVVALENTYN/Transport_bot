@@ -560,27 +560,57 @@ async def admin_del_date_confirm(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показує список останніх бронювань з 'MuseumBookings'."""
+    """Показує список останніх бронювань з 'MuseumBookings' з пагінацією."""
     query = update.callback_query
     await query.answer()
     if query.from_user.id != MUSEUM_ADMIN_ID: return
 
-    try:
-        # Читаємо останні 50 бронювань (включно з заголовком) через сервіс
-        bookings_data = await museum_service.get_last_bookings(limit=50)
+    # Визначаємо offset з callback_data (наприклад, "admin_show_bookings:15")
+    offset = 0
+    if query.data and ":" in query.data:
+        try:
+            offset = int(query.data.split(":")[1])
+        except (ValueError, IndexError):
+            offset = 0
 
-        if not bookings_data or len(bookings_data) < 2: # Якщо є тільки заголовок
-            await query.edit_message_text(
-                "📋 Наразі немає жодного бронювання.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]])
-            )
+    limit = 15
+    try:
+        # Читаємо на 1 більше, щоб зрозуміти чи є наступна сторінка
+        bookings_data = await museum_service.get_last_bookings(limit=limit + 1, offset=offset)
+
+        # Перевіряємо наявність наступної сторінки (якщо отримали більше ніж limit + 1 елементів з урахуванням заголовка)
+        has_next = len(bookings_data) > (limit + 1)
+        
+        # Залишаємо тільки 15 елементів (+ заголовок)
+        display_data = bookings_data[:limit + 1] if has_next else bookings_data
+
+        if not display_data or len(display_data) < 2: # Якщо є тільки заголовок
+            if offset > 0:
+                keyboard = []
+                nav_buttons = []
+                nav_buttons.append(InlineKeyboardButton("⬅️ Попередні 15", callback_data=f"admin_show_bookings:{max(0, offset - limit)}"))
+                keyboard.append(nav_buttons)
+                keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
+                
+                await query.edit_message_text(
+                    "📋 Більше немає заявок.",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                await query.edit_message_text(
+                    "📋 Наразі немає жодного бронювання.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]])
+                )
             return
 
-        text_list = "📋 <b>Останні заявки на екскурсії:</b>\n\n"
-        # Пропускаємо заголовок (bookings_data[0]) і беремо дані
-        for row in bookings_data[1:]:
-            # A: Дата реєстрації, B: Дата екскурсії, C: Кількість, D: ПІБ, E: Телефон
-            if row: # Переконуємося, що рядок не пустий
+        # Відображення діапазону заявок
+        start_num = offset + 1
+        end_num = offset + len(display_data) - 1
+        text_list = f"📋 <b>Останні заявки на екскурсії ({start_num}-{end_num}):</b>\n\n"
+        
+        # Пропускаємо заголовок (display_data[0]) і беремо дані
+        for row in display_data[1:]:
+            if row:
                 reg_date = html.escape(str(row[0]))
                 excursion_date = html.escape(str(row[1])) if len(row) > 1 else "N/A"
                 count = html.escape(str(row[2])) if len(row) > 2 else "N/A"
@@ -594,7 +624,18 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
                     f"---------------------\n"
                 )
 
-        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
+        # Кнопки навігації
+        keyboard = []
+        nav_buttons = []
+        if offset > 0:
+            nav_buttons.append(InlineKeyboardButton("⬅️ Попередні 15", callback_data=f"admin_show_bookings:{max(0, offset - limit)}"))
+        if has_next:
+            nav_buttons.append(InlineKeyboardButton("Наступні 15 ➡️", callback_data=f"admin_show_bookings:{offset + limit}"))
+        
+        if nav_buttons:
+            keyboard.append(nav_buttons)
+            
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
 
         # Використовуємо HTML для форматування
         await query.edit_message_text(

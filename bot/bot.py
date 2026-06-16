@@ -401,7 +401,7 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(handle_ticket_static, pattern="^tickets:"))
         self.app.add_handler(CallbackQueryHandler(send_rules_pdf, pattern="^info:rules$"))
         self.app.add_handler(CallbackQueryHandler(handle_info_static, pattern="^info:"))
-        self.app.add_handler(CallbackQueryHandler(admin_show_bookings, pattern="^admin_show_bookings$"))
+        self.app.add_handler(CallbackQueryHandler(admin_show_bookings, pattern="^admin_show_bookings(:\\d+)?$"))
         # --- ПОЧАТОК ЗМІН (Музей) --- 03/11/2025
         # 1. Новий обробник для "Інфо" (фото + текст)
         self.app.add_handler(CallbackQueryHandler(show_museum_info, pattern="^museum:info$"))
