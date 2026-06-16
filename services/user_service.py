@@ -54,3 +54,9 @@ class UserService:
             total = await session.scalar(select(func.count(BotUser.id)))
             subscribed = await session.scalar(select(func.count(BotUser.id)).where(BotUser.is_subscribed == True))
             return {"total_users": total, "subscribed_users": subscribed}
+
+    async def get_all_users(self):
+        """Повертає список усіх зареєстрованих користувачів"""
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(BotUser).order_by(BotUser.joined_at.asc()))
+            return result.scalars().all()

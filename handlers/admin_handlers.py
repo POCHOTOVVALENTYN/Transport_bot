@@ -118,8 +118,67 @@ async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• Інше: <b>{other_count}</b>\n"
     )
 
-    back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]])
+    keyboard = [
+        [InlineKeyboardButton("📥 Вивантажити користувачів (CSV)", callback_data="admin_export_users")],
+        [InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]
+    ]
+    back_btn = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text, reply_markup=back_btn, parse_mode=ParseMode.HTML)
+
+
+async def admin_export_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Експортує список усіх користувачів у CSV файл та надсилає його"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    try:
+        users = await user_service.get_all_users()
+        
+        import io
+        import csv
+        from datetime import timezone
+        from zoneinfo import ZoneInfo
+
+        output = io.StringIO()
+        # Використовуємо крапку з комою як роздільник (для автоматичного відкриття в Excel)
+        writer = csv.writer(output, delimiter=';')
+        
+        writer.writerow(["Telegram ID", "ПІБ", "Username", "Дата реєстрації", "Підписка на новини"])
+        
+        for u in users:
+            local_dt = "N/A"
+            if u.joined_at:
+                dt_val = u.joined_at
+                if dt_val.tzinfo is None:
+                    dt_val = dt_val.replace(tzinfo=timezone.utc)
+                local_dt = dt_val.astimezone(ZoneInfo("Europe/Kyiv")).strftime("%d.%m.%Y %H:%M")
+
+            subscribed_str = "Так" if u.is_subscribed else "Ні"
+            
+            writer.writerow([
+                str(u.telegram_id),
+                str(u.first_name or ""),
+                str(u.username or ""),
+                local_dt,
+                subscribed_str
+            ])
+            
+        csv_data = output.getvalue().encode('utf-8-sig')
+        output.close()
+
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=io.BytesIO(csv_data),
+            filename="users_export.csv",
+            caption=f"📊 Вивантажено список усіх користувачів бота.\nВсього записів: <b>{len(users)}</b>",
+            parse_mode=ParseMode.HTML
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to export users: {e}", exc_info=True)
+        await query.message.reply_text(f"❌ Сталася помилка при експорті користувачів: {e}")
 
 
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
