@@ -392,8 +392,6 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # Ми більше не перевіряємо "other", оскільки такої кнопки немає
-
     selected_date = query.data.split(":", 1)[1]
     context.user_data['museum_date'] = selected_date
 
@@ -403,11 +401,27 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _clear_museum_edit_flags(context)
         return await museum_show_confirm(update, context)
 
+    excursion_type = context.user_data.get('museum_type', 'regular')
+    if excursion_type == 'holiday':
+        count_exist = await museum_service.get_holiday_bookings_count(selected_date)
+        if count_exist >= 20:
+            keyboard_back = await get_back_keyboard("museum_menu")
+            await query.edit_message_text(
+                text="😔 Вільні місця закінчилися. КП 'ОМЕТ' приносить свої вибачення, потрібно очікувати іншу доступну святкову екскурсію. 🏛️",
+                reply_markup=keyboard_back
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+        
+        people_prompt = "Вкажіть кількість осіб у вашій групі (напишіть цифрою). Зверніть увагу: для святкової екскурсії максимальна кількість осіб в одній заявці — 3 людей:"
+    else:
+        people_prompt = "Вкажіть кількість осіб у вашій групі (напишіть цифрою):"
+
     # 2. Редагуємо повідомлення зі списком дат на наступне питання
     context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
         context,
         update.effective_chat.id,
-        "Вкажіть кількість осіб у вашій групі (напишіть цифрою):",
+        people_prompt,
         keyboard
     )
 
@@ -426,7 +440,7 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
 
     keyboard = await get_cancel_keyboard("museum_menu")
 
-    # ВАЛІДАЦІЯ (як у вас і було)
+    # ВАЛІДАЦІЯ
     if count <= 0:
         context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
             context,
@@ -436,18 +450,30 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
         )
         return States.MUSEUM_PEOPLE_COUNT # Повертаємо на той самий крок
 
-    if count > 10:
-        # Це кінець діалогу, просто надсилаємо повідомлення (ID не зберігаємо)
-        await _edit_museum_dialog_message(
-            context,
-            update.effective_chat.id,
-            "Для груп понад 10 осіб потрібна індивідуальна домовленість.\n"
-            "Будь ласка, зателефонуйте організатору за номером <code>050-399-42-11</code>.",
-            await get_back_keyboard("museum_menu"), # Кнопка "Назад"
-            ParseMode.HTML
-        )
-        context.user_data.clear()
-        return ConversationHandler.END # Завершуємо
+    excursion_type = context.user_data.get('museum_type', 'regular')
+
+    if excursion_type == 'holiday':
+        if count > 3:
+            context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                "❌ Для святкової екскурсії максимальна кількість осіб в одній заявці — 3 людей. Будь ласка, введіть число від 1 до 3:",
+                keyboard
+            )
+            return States.MUSEUM_PEOPLE_COUNT
+    else:
+        if count > 10:
+            # Це кінець діалогу, просто надсилаємо повідомлення (ID не зберігаємо)
+            await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                "Для груп понад 10 осіб потрібна індивідуальна домовленість.\n"
+                "Будь ласка, зателефонуйте організатору за номером <code>050-399-42-11</code>.",
+                await get_back_keyboard("museum_menu"), # Кнопка "Назад"
+                ParseMode.HTML
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
 
     # Валідація пройдена:
     context.user_data['museum_people_count'] = count
@@ -549,6 +575,19 @@ async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Це відбувається миттєво
     excursion_type = context.user_data.get('museum_type', 'regular')
     if excursion_type == 'holiday':
+        # Перевіряємо ліміт ще раз (на випадок одночасних запитів)
+        count_exist = await museum_service.get_holiday_bookings_count(date)
+        if count_exist >= 20:
+            keyboard_final = await get_back_keyboard("museum_menu")
+            await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                "😔 Вільні місця закінчилися. КП 'ОМЕТ' приносить свої вибачення, потрібно очікувати іншу доступну святкову екскурсію. 🏛️",
+                keyboard_final
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+            
         success = await museum_service.create_holiday_booking(date, count, name, phone)
     else:
         success = await museum_service.create_booking(date, count, name, phone)

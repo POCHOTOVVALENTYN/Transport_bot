@@ -317,3 +317,18 @@ class MuseumService:
                     logger.info(f"✅ Sync to Sheets successful for holiday booking ID {booking_id}")
         except Exception as e:
             logger.error(f"❌ Background holiday sync failed: {e}")
+
+    async def get_holiday_bookings_count(self, excursion_date: str) -> int:
+        """
+        Повертає кількість наявних святкових заявок на певну дату.
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                from sqlalchemy import func
+                result = await session.execute(
+                    select(func.count(MuseumHolidayBooking.id)).where(MuseumHolidayBooking.excursion_date == excursion_date)
+                )
+                return result.scalar() or 0
+        except Exception as e:
+            logger.error(f"❌ Error counting holiday bookings: {e}")
+            return 0
