@@ -9,8 +9,15 @@ class States:
     """Стани для ConversationHandlers"""
 
     # ========== СКАРГИ ==========
-    COMPLAINT_AWAIT_TEXT = 1
+    COMPLAINT_CHOOSE_TYPE = "COMPLAINT_CHOOSE_TYPE"
+    COMPLAINT_ROUTE = "COMPLAINT_ROUTE"
+    COMPLAINT_BOARD = "COMPLAINT_BOARD"
+    COMPLAINT_TEXT = "COMPLAINT_TEXT"
+    COMPLAINT_NAME = "COMPLAINT_NAME"
+    COMPLAINT_PHONE = "COMPLAINT_PHONE"
+    COMPLAINT_EMAIL = "COMPLAINT_EMAIL"
     COMPLAINT_CONFIRMATION = "COMPLAINT_CONFIRMATION"
+    COMPLAINT_EDIT_CHOICE = "COMPLAINT_EDIT_CHOICE"
 
     # ========== ПОДЯКИ (V2 - Апгрейд) ==========
     # Крок 0: Вибір типу подяки

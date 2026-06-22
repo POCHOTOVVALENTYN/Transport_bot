@@ -8,7 +8,10 @@ from telegram.ext import (
 # --- Старі імпорти ---
 from handlers.command_handlers import cmd_start, cmd_help
 from handlers.complaint_handlers import (
-    complaint_start_simplified, complaint_confirm_step,
+    complaint_start_simplified, complaint_choose_type_step,
+    complaint_route_step, complaint_board_step, complaint_text_step,
+    complaint_name_step, complaint_phone_step, complaint_email_step,
+    complaint_edit_menu, complaint_edit_field_handler, complaint_edit_back,
     complaint_save_final
 )
 from handlers.menu_handlers import main_menu
@@ -211,21 +214,38 @@ class TransportBot:
         complaint_conv = ConversationHandler(
             entry_points=[CallbackQueryHandler(complaint_start_simplified, pattern="^complaint$", block=False)],
             states={
-                # Крок 1: Очікування тексту -> Перехід до ПІДТВЕРДЖЕННЯ
-                States.COMPLAINT_AWAIT_TEXT: [
-                    # ТУТ БУЛА ПОМИЛКА: замість 'complaint_save_simplified' ставимо 'complaint_confirm_step'
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_confirm_step),
-
-                    CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
-                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                States.COMPLAINT_CHOOSE_TYPE: [
+                    CallbackQueryHandler(complaint_choose_type_step, pattern="^complaint_type:")
                 ],
-
-                # Крок 2 (НОВИЙ): Підтвердження -> Збереження
+                States.COMPLAINT_ROUTE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_route_step)
+                ],
+                States.COMPLAINT_BOARD: [
+                    CallbackQueryHandler(complaint_board_step, pattern="^complaint_skip_board$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_board_step)
+                ],
+                States.COMPLAINT_TEXT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_text_step)
+                ],
+                States.COMPLAINT_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_name_step)
+                ],
+                States.COMPLAINT_PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_phone_step)
+                ],
+                States.COMPLAINT_EMAIL: [
+                    CallbackQueryHandler(complaint_email_step, pattern="^complaint_skip_email$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_email_step)
+                ],
                 States.COMPLAINT_CONFIRMATION: [
                     CallbackQueryHandler(complaint_save_final, pattern="^complaint_confirm_send$"),
-                    # Якщо хоче переписати - запускаємо знову старт
+                    CallbackQueryHandler(complaint_edit_menu, pattern="^complaint_edit_menu$"),
                     CallbackQueryHandler(complaint_start_simplified, pattern="^complaint$"),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$")
+                ],
+                States.COMPLAINT_EDIT_CHOICE: [
+                    CallbackQueryHandler(complaint_edit_field_handler, pattern="^complaint_edit:"),
+                    CallbackQueryHandler(complaint_edit_back, pattern="^complaint_edit_back$")
                 ]
             },
             fallbacks=[
