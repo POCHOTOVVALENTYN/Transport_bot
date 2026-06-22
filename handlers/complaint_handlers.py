@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from services.tickets_service import TicketsService
@@ -8,7 +9,7 @@ from bot.states import States
 from handlers.common import get_feedback_cancel_keyboard, safe_edit_prev_message
 
 
-def clean_phone(phone_text: str) -> str | None:
+def clean_phone(phone_text: str) -> Optional[str]:
     """Очищає та валідує номер телефону. Повертає формат +380... або None"""
     digits = re.sub(r'\D', '', phone_text)
     if len(digits) == 10 and digits.startswith('0'):
