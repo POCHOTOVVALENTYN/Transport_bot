@@ -43,8 +43,11 @@ def _build_complaint_summary(context: ContextTypes.DEFAULT_TYPE) -> str:
         f"📌 <b>Тип скарги:</b> {type_str}\n"
     )
     if ctype == 'specific':
+        ttype = context.user_data.get('complaint_transport_type')
+        ttype_str = "Трамвай 🚋" if ttype == 'tram' else "Тролейбус 🎛️" if ttype == 'trolleybus' else "Не вказано"
         summary += (
-            f"🚋 <b>Маршрут:</b> {route}\n"
+            f"🚋 <b>Вид транспорту:</b> {ttype_str}\n"
+            f"🔢 <b>Маршрут:</b> {route}\n"
             f"🔢 <b>Бортовий номер:</b> {board}\n"
         )
 
@@ -65,7 +68,10 @@ def _build_complaint_edit_keyboard(context: ContextTypes.DEFAULT_TYPE) -> Inline
 
     if ctype == 'specific':
         keyboard.append([
-            InlineKeyboardButton("🚋 Маршрут", callback_data="complaint_edit:route"),
+            InlineKeyboardButton("🚋 Вид транспорту", callback_data="complaint_edit:transport_type"),
+            InlineKeyboardButton("🚋 Маршрут", callback_data="complaint_edit:route")
+        ])
+        keyboard.append([
             InlineKeyboardButton("🔢 Бортовий номер", callback_data="complaint_edit:board")
         ])
 
@@ -107,6 +113,7 @@ async def complaint_start_simplified(update: Update, context: ContextTypes.DEFAU
 
     # Очищуємо попередній стан
     context.user_data.pop('complaint_type', None)
+    context.user_data.pop('complaint_transport_type', None)
     context.user_data.pop('complaint_route', None)
     context.user_data.pop('complaint_board', None)
     context.user_data.pop('complaint_text', None)
@@ -156,14 +163,42 @@ async def complaint_choose_type_step(update: Update, context: ContextTypes.DEFAU
         return States.COMPLAINT_TEXT
 
     else:
-        # Для конкретної скарги просимо вказати маршрут
+        # Для конкретної скарги просимо обрати вид транспорту
         text = (
-            "🚋 <b>Крок 1: Номер маршруту</b>\n\n"
-            "Будь ласка, введіть номер маршруту (наприклад: 3, 10, 28):"
+            "🚋 <b>Крок 1: Вид транспорту</b>\n\n"
+            "Будь ласка, оберіть вид транспорту, на який Ви скаржитесь:"
         )
-        keyboard = await get_feedback_cancel_keyboard("feedback_menu")
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Трамвай 🚋", callback_data="complaint_transport:tram")],
+            [InlineKeyboardButton("Тролейбус 🎛️", callback_data="complaint_transport:trolleybus")],
+            [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+        ])
         await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode='HTML')
-        return States.COMPLAINT_ROUTE
+        return States.COMPLAINT_TRANSPORT_TYPE
+
+
+async def complaint_transport_type_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору виду транспорту"""
+    query = update.callback_query
+    await query.answer()
+
+    ttype = query.data.split(":", 1)[1]
+    context.user_data['complaint_transport_type'] = ttype
+
+    if context.user_data.get('complaint_edit_mode'):
+        context.user_data.pop('complaint_edit_mode', None)
+        return await complaint_show_confirm(update, context)
+
+    # Переходимо до запиту маршруту
+    t_name = "трамвая" if ttype == "tram" else "тролейбуса"
+    t_emoji = "🚋" if ttype == "tram" else "🎛️"
+    text = (
+        f"{t_emoji} <b>Крок 2: Номер маршруту</b>\n\n"
+        f"Будь ласка, введіть номер маршруту {t_name} (наприклад: 3, 10, 28):"
+    )
+    keyboard = await get_feedback_cancel_keyboard("feedback_menu")
+    await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode='HTML')
+    return States.COMPLAINT_ROUTE
 
 
 async def complaint_route_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -177,9 +212,11 @@ async def complaint_route_step(update: Update, context: ContextTypes.DEFAULT_TYP
         return await complaint_show_confirm(update, context)
 
     # Переходимо до запиту бортового номера
+    ttype = context.user_data.get('complaint_transport_type', 'tram')
+    t_name = "трамвая" if ttype == "tram" else "тролейбуса"
     text = (
-        "🔢 <b>Крок 2: Бортовий номер</b>\n\n"
-        "Будь ласка, введіть бортовий номер транспортного засобу (наприклад: 3012, 4015).\n\n"
+        f"🔢 <b>Крок 3: Бортовий номер</b>\n\n"
+        f"Будь ласка, введіть бортовий номер {t_name} (наприклад: 3012, 4015).\n\n"
         "<i>Якщо Ви не пам'ятаєте бортовий номер, натисніть кнопку «Пропустити» нижче 👇</i>"
     )
     keyboard = InlineKeyboardMarkup([
@@ -217,7 +254,7 @@ async def complaint_board_step(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # Переходимо до запиту тексту скарги
     text = (
-        "✍️ <b>Крок 3: Опис скарги</b>\n\n"
+        "✍️ <b>Крок 4: Опис скарги</b>\n\n"
         "Будь ласка, опишіть суть Вашої проблеми детально:"
     )
     keyboard = await get_feedback_cancel_keyboard("feedback_menu")
@@ -247,7 +284,7 @@ async def complaint_text_step(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Переходимо до запиту імені
     prompt = (
-        "👤 <b>Крок 4: Ваше П.І.Б.</b>\n\n"
+        "👤 <b>Крок 5: Ваше П.І.Б.</b>\n\n"
         "Будь ласка, введіть Ваше ім'я та прізвище для офіційної реєстрації звернення:"
     )
     keyboard = await get_feedback_cancel_keyboard("feedback_menu")
@@ -273,7 +310,7 @@ async def complaint_name_step(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Переходимо до запиту телефону
     prompt = (
-        "📞 <b>Крок 5: Номер телефону</b>\n\n"
+        "📞 <b>Крок 6: Номер телефону</b>\n\n"
         "Будь ласка, введіть Ваш контактний номер телефону (наприклад: 0951234567):"
     )
     keyboard = await get_feedback_cancel_keyboard("feedback_menu")
@@ -317,7 +354,7 @@ async def complaint_phone_step(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # Переходимо до запиту Email
     prompt = (
-        "📧 <b>Крок 6: E-mail для відповіді</b>\n\n"
+        "📧 <b>Крок 7: E-mail для відповіді</b>\n\n"
         "Будь ласка, введіть Вашу адресу електронної пошти:\n\n"
         "<i>Якщо Ви не хочете вказувати email, натисніть кнопку «Пропустити» нижче 👇</i>"
     )
@@ -404,14 +441,28 @@ async def complaint_edit_field_handler(update: Update, context: ContextTypes.DEF
 
     keyboard = await get_feedback_cancel_keyboard("feedback_menu")
 
-    if field == "route":
-        text = "🚋 <b>Введіть новий номер маршруту:</b>"
+    if field == "transport_type":
+        text = "🚋 <b>Оберіть новий вид транспорту:</b>"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Трамвай 🚋", callback_data="complaint_transport:tram")],
+            [InlineKeyboardButton("Тролейбус 🎛️", callback_data="complaint_transport:trolleybus")],
+            [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+        ])
+        await query.edit_message_text(text=text, reply_markup=kb, parse_mode='HTML')
+        return States.COMPLAINT_TRANSPORT_TYPE
+
+    elif field == "route":
+        ttype = context.user_data.get('complaint_transport_type', 'tram')
+        t_name = "трамвая" if ttype == "tram" else "тролейбуса"
+        text = f"🚋 <b>Введіть новий номер маршруту {t_name}:</b>"
         await query.edit_message_text(text=text, reply_markup=keyboard, parse_mode='HTML')
         return States.COMPLAINT_ROUTE
 
     elif field == "board":
+        ttype = context.user_data.get('complaint_transport_type', 'tram')
+        t_name = "трамвая" if ttype == "tram" else "тролейбуса"
         text = (
-            "🔢 <b>Введіть новий бортовий номер:</b>\n\n"
+            f"🔢 <b>Введіть новий бортовий номер {t_name}:</b>\n\n"
             "<i>Або натисніть кнопку нижче, якщо не пам'ятаєте:</i>"
         )
         kb = InlineKeyboardMarkup([
@@ -466,6 +517,7 @@ async def complaint_save_final(update: Update, context: ContextTypes.DEFAULT_TYP
     problem = context.user_data.get('complaint_text')
     route = context.user_data.get('complaint_route', 'N/A')
     board = context.user_data.get('complaint_board', 'N/A')
+    transport_type = context.user_data.get('complaint_transport_type')
     name = context.user_data.get('complaint_name')
     phone = context.user_data.get('complaint_phone')
     email = context.user_data.get('complaint_email', 'Не вказано')
@@ -474,11 +526,13 @@ async def complaint_save_final(update: Update, context: ContextTypes.DEFAULT_TYP
     if ctype == 'general':
         route = 'Загальна скарга'
         board = 'Загальна скарга'
+        transport_type = None
 
     complaint_data = {
         "problem": problem,
         "route": route,
         "board_number": board,
+        "transport_type": transport_type,
         "user_name": name,
         "user_phone": phone,
         "user_email": email
@@ -490,6 +544,7 @@ async def complaint_save_final(update: Update, context: ContextTypes.DEFAULT_TYP
 
         # Видаляємо всі тимчасові дані з сесії
         context.user_data.pop('complaint_type', None)
+        context.user_data.pop('complaint_transport_type', None)
         context.user_data.pop('complaint_route', None)
         context.user_data.pop('complaint_board', None)
         context.user_data.pop('complaint_text', None)

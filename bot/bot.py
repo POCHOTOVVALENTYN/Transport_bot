@@ -9,6 +9,7 @@ from telegram.ext import (
 from handlers.command_handlers import cmd_start, cmd_help
 from handlers.complaint_handlers import (
     complaint_start_simplified, complaint_choose_type_step,
+    complaint_transport_type_step,
     complaint_route_step, complaint_board_step, complaint_text_step,
     complaint_name_step, complaint_phone_step, complaint_email_step,
     complaint_edit_menu, complaint_edit_field_handler, complaint_edit_back,
@@ -216,6 +217,9 @@ class TransportBot:
             states={
                 States.COMPLAINT_CHOOSE_TYPE: [
                     CallbackQueryHandler(complaint_choose_type_step, pattern="^complaint_type:")
+                ],
+                States.COMPLAINT_TRANSPORT_TYPE: [
+                    CallbackQueryHandler(complaint_transport_type_step, pattern="^complaint_transport:")
                 ],
                 States.COMPLAINT_ROUTE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_route_step)

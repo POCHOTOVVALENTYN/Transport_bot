@@ -24,6 +24,7 @@ async def test_create_complaint_ticket_db():
         "problem": "Тестова скарга на водія",
         "route": "10",
         "board_number": "3028",
+        "transport_type": "tram",
         "user_name": "Іван Іванов",
         "user_phone": "+380951234567",
         "user_email": "ivan@example.com"
@@ -42,6 +43,7 @@ async def test_create_complaint_ticket_db():
         assert feedback.text == "Тестова скарга на водія"
         assert feedback.route == "10"
         assert feedback.board_number == "3028"
+        assert feedback.transport_type == "tram"
         assert feedback.user_name == "Іван Іванов"
         assert feedback.user_phone == "+380951234567"
         assert feedback.user_email == "ivan@example.com"

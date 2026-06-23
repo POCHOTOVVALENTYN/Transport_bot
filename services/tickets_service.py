@@ -61,6 +61,7 @@ class TicketsService:
             "text": complaint_data.get("problem"),
             "route": complaint_data.get("route"),
             "board_number": complaint_data.get("board_number"),
+            "transport_type": complaint_data.get("transport_type"),
             "user_name": complaint_data.get("user_name"),
             "user_phone": complaint_data.get("user_phone"),
             "user_email": complaint_data.get("user_email"),
@@ -145,12 +146,18 @@ class TicketsService:
                     else ""
                 )
 
+                route_val = item.route or "N/A"
+                if item.category == "complaint" and item.transport_type:
+                    t_prefix = "Трамвай" if item.transport_type == "tram" else "Тролейбус"
+                    if item.route and item.route not in ("Загальна скарга", "N/A"):
+                        route_val = f"{t_prefix} № {item.route}"
+
                 row = [
                     created_at_str,
                     item.ticket_id,
                     "🆕 Нова (БД)",
                     "БД",
-                    item.route or "N/A",
+                    route_val,
                     item.text,
                     item.board_number or "N/A",
                     item.user_name,
