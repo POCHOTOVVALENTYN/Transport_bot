@@ -16,6 +16,7 @@ async def get_main_menu_keyboard(user_id: int):
         [InlineKeyboardButton("♿ Пошук низькопідлогового транспорту", callback_data="accessible_start")],
         [InlineKeyboardButton("🎫 Квитки та тарифи", callback_data="tickets_menu")],
         [InlineKeyboardButton("✍️ Звернення та пропозиції", callback_data="feedback_menu")],
+        [InlineKeyboardButton("🔍 Загублені речі", callback_data="lost_items")],
         [InlineKeyboardButton("ℹ️ Довідкова інформація", callback_data="info_menu")],
         [InlineKeyboardButton("👔 Вакансії", callback_data="vacancies_menu")],
         [InlineKeyboardButton("🎓 Учбово-курсовий комбінат", callback_data="education_menu")],
