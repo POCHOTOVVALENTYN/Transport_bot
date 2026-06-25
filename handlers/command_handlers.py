@@ -2,7 +2,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from config.messages import MESSAGES
 from utils.logger import logger
-from config.settings import MUSEUM_ADMIN_ID, GENERAL_ADMIN_IDS
+from config.settings import MUSEUM_ADMIN_IDS, GENERAL_ADMIN_IDS
 from services.user_service import UserService
 
 # Ініціалізація
@@ -25,7 +25,7 @@ async def get_main_menu_keyboard(user_id: int):
         [InlineKeyboardButton("🔔 Сповіщення від бота", callback_data="subscription_menu")]
     ]
     # 1. Якщо це Максим -> Додаємо кнопку Музею
-    if user_id == MUSEUM_ADMIN_ID:
+    if user_id in MUSEUM_ADMIN_IDS:
         keyboard.append([InlineKeyboardButton("🏛️ Адмін-панель (Музей)", callback_data="admin_museum_menu")])
 
     # 2. Якщо це Ви або Тетяна -> Додаємо кнопку Загальної Адмінки

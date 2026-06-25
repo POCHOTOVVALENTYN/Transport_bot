@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from telegram.constants import ParseMode
 
 from config.messages import MESSAGES
-from config.settings import MUSEUM_LOGO_IMAGE, MUSEUM_ADMIN_ID # GOOGLE_SHEETS_ID вже не потрібен тут
+from config.settings import MUSEUM_LOGO_IMAGE, MUSEUM_ADMIN_ID, MUSEUM_ADMIN_IDS # GOOGLE_SHEETS_ID вже не потрібен тут
 from handlers.common import get_back_keyboard, get_cancel_keyboard
 from bot.states import States
 from utils.logger import logger
@@ -623,13 +623,19 @@ async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
             [InlineKeyboardButton("⚙️ Адмін-панель", callback_data="admin_menu_show")]
         ]
 
-        await context.bot.send_message(
-            chat_id=MUSEUM_ADMIN_ID,
-            text=admin_message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(keyboard_admin)
-        )
-        logger.info(f"✅ Museum notification sent to admin {MUSEUM_ADMIN_ID}")
+        for admin_id in MUSEUM_ADMIN_IDS:
+            if not admin_id:
+                continue
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=admin_message,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=InlineKeyboardMarkup(keyboard_admin)
+                )
+                logger.info(f"✅ Museum notification sent to admin {admin_id}")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to send admin notification to {admin_id}: {e}")
 
     except Exception as e:
         # Якщо не вдалося відправити адміну, просто логуємо.

@@ -7,7 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler,
                           filters)
-from config.settings import MUSEUM_ADMIN_ID, GOOGLE_SHEETS_ID, GENERAL_ADMIN_IDS, BROADCAST_BATCH_SIZE, BROADCAST_PAUSE_SEC
+from config.settings import MUSEUM_ADMIN_ID, MUSEUM_ADMIN_IDS, GOOGLE_SHEETS_ID, GENERAL_ADMIN_IDS, BROADCAST_BATCH_SIZE, BROADCAST_PAUSE_SEC
 from integrations.google_sheets.client import GoogleSheetsClient
 from utils.logger import logger
 from bot.states import States
@@ -387,12 +387,12 @@ async def admin_museum_menu_show(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     if query: await query.answer()
 
-    # Перевірка на Максима
-    if update.effective_user.id != MUSEUM_ADMIN_ID:
+    # Перевірка на адміна
+    if update.effective_user.id not in MUSEUM_ADMIN_IDS:
         return ConversationHandler.END
 
     keyboard = await get_admin_main_menu_keyboard()
-    text = "👋 Вітаю, Максиме! Ви в адмін-панелі Музею."
+    text = "👋 Вітаємо в адмін-панелі Музею!"
 
     if query:
         await query.edit_message_text(text, reply_markup=keyboard)
@@ -408,7 +408,7 @@ async def admin_museum_menu_show(update: Update, context: ContextTypes.DEFAULT_T
 
 # Перевірка, чи є користувач адміном
 async def is_admin(update: Update) -> bool:
-    is_admin_user = update.effective_user.id == MUSEUM_ADMIN_ID
+    is_admin_user = update.effective_user.id in MUSEUM_ADMIN_IDS
     if not is_admin_user:
         logger.warning(f"Non-admin user {update.effective_user.id} tried to access admin functions.")
         await update.message.reply_text("❌ У вас немає прав доступу до цієї команди.")
@@ -435,9 +435,9 @@ async def admin_add_date_start(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
 
     user_id = query.from_user.id
-    logger.info(f"📢 Admin attempt by user_id: {user_id}. Expected: {MUSEUM_ADMIN_ID}")  # <-- ЛОГ
+    logger.info(f"📢 Admin attempt by user_id: {user_id}. Expected: {MUSEUM_ADMIN_IDS}")  # <-- ЛОГ
 
-    if user_id != MUSEUM_ADMIN_ID:
+    if user_id not in MUSEUM_ADMIN_IDS:
         await query.message.reply_text(f"⛔ Помилка доступу. Ваш ID: {user_id}")  # <-- ПОВІДОМЛЕННЯ
         return ConversationHandler.END
 
@@ -460,7 +460,7 @@ async def admin_add_date_start(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def admin_add_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != MUSEUM_ADMIN_ID: return ConversationHandler.END
+    if update.effective_user.id not in MUSEUM_ADMIN_IDS: return ConversationHandler.END
 
     date_text = update.message.text.strip()
 
@@ -518,7 +518,7 @@ async def admin_del_date_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Одразу відповідаємо, щоб телеграм не показував "годинничок"
     await query.answer()
 
-    if query.from_user.id != MUSEUM_ADMIN_ID:
+    if query.from_user.id not in MUSEUM_ADMIN_IDS:
         return ConversationHandler.END
 
     # Показуємо "Зачекайте", бо читання може бути довгим
@@ -561,7 +561,7 @@ async def admin_del_date_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def admin_del_date_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.from_user.id != MUSEUM_ADMIN_ID: return ConversationHandler.END
+    if query.from_user.id not in MUSEUM_ADMIN_IDS: return ConversationHandler.END
 
     cell_to_delete = query.data.split(":")[1] # "A5"
 
@@ -622,7 +622,7 @@ async def admin_show_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Показує список останніх бронювань з 'MuseumBookings' з пагінацією."""
     query = update.callback_query
     await query.answer()
-    if query.from_user.id != MUSEUM_ADMIN_ID: return
+    if query.from_user.id not in MUSEUM_ADMIN_IDS: return
 
     # Визначаємо offset з callback_data (наприклад, "admin_show_bookings:15")
     offset = 0
@@ -723,7 +723,7 @@ async def admin_menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Працює і з командами (/admin_museum), і з кнопками (Назад).
     """
     keyboard = await get_admin_main_menu_keyboard()
-    text = "👋 Вітаю, Максиме! Ви в адмін-панелі Музею."
+    text = "👋 Вітаємо в адмін-панелі Музею!"
 
     if update.callback_query:
         # Якщо це натискання кнопки
@@ -757,7 +757,7 @@ async def admin_add_holiday_date_start(update: Update, context: ContextTypes.DEF
     await query.answer()
 
     user_id = query.from_user.id
-    if user_id != MUSEUM_ADMIN_ID:
+    if user_id not in MUSEUM_ADMIN_IDS:
         await query.message.reply_text(f"⛔ Помилка доступу. Ваш ID: {user_id}")
         return ConversationHandler.END
 
@@ -779,7 +779,7 @@ async def admin_add_holiday_date_start(update: Update, context: ContextTypes.DEF
 
 
 async def admin_add_holiday_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != MUSEUM_ADMIN_ID: return ConversationHandler.END
+    if update.effective_user.id not in MUSEUM_ADMIN_IDS: return ConversationHandler.END
 
     date_text = update.message.text.strip()
 
@@ -847,7 +847,7 @@ async def admin_del_holiday_date_menu(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
 
-    if query.from_user.id != MUSEUM_ADMIN_ID:
+    if query.from_user.id not in MUSEUM_ADMIN_IDS:
         return ConversationHandler.END
 
     await query.edit_message_text("⏳ Завантажую список святкових дат...")
@@ -884,7 +884,7 @@ async def admin_del_holiday_date_menu(update: Update, context: ContextTypes.DEFA
 async def admin_del_holiday_date_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if query.from_user.id != MUSEUM_ADMIN_ID: return ConversationHandler.END
+    if query.from_user.id not in MUSEUM_ADMIN_IDS: return ConversationHandler.END
 
     cell_to_delete = query.data.split(":")[1]
 
@@ -930,7 +930,7 @@ async def admin_show_holiday_bookings(update: Update, context: ContextTypes.DEFA
     """Показує список останніх святкових бронювань з пагінацією."""
     query = update.callback_query
     await query.answer()
-    if query.from_user.id != MUSEUM_ADMIN_ID: return
+    if query.from_user.id not in MUSEUM_ADMIN_IDS: return
 
     offset = 0
     if query.data and ":" in query.data:

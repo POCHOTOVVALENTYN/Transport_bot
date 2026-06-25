@@ -27,6 +27,10 @@ DEBUG = os.getenv("DEBUG", "False") == "True"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DEVELOPER_ID = int(os.getenv("DEVELOPER_ID", 0))
 MUSEUM_ADMIN_ID = int(os.getenv("MUSEUM_ADMIN_ID", 0))
+MUSEUM_ADMIN_IDS = [
+    MUSEUM_ADMIN_ID,
+    5077309503
+]
 GENERAL_ADMIN_IDS = [
     830196453,  # Валентин
     384349401   # Тетяна
