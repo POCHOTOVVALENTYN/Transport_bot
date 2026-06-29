@@ -8,6 +8,9 @@ from database.db import Database
 from utils.logger import logger
 from handlers.common import safe_edit_prev_message
 
+# Імпортуємо clean_phone з complaint_handlers
+from handlers.complaint_handlers import clean_phone
+
 db = Database()
 
 
@@ -28,7 +31,7 @@ async def get_navigation_buttons(back_callback="feedback_menu"):
     return InlineKeyboardMarkup(keyboard)
 
 
-# --- Валідатори (без змін) ---
+# --- Валідатори ---
 def validate_name(name: str) -> bool:
     return len(name.strip()) >= 5 and bool(re.match(r"^[А-Яа-яЇїІіЄєҐґA-Za-z\s'-]+$", name))
 
@@ -52,6 +55,16 @@ def validate_message(message: str) -> bool:
 async def thanks_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    # Очищення старих даних
+    context.user_data.pop('thanks_type', None)
+    context.user_data.pop('transport_type', None)
+    context.user_data.pop('board_number', None)
+    context.user_data.pop('reason', None)
+    context.user_data.pop('message', None)
+    context.user_data.pop('user_name', None)
+    context.user_data.pop('phone', None)
+    context.user_data.pop('email', None)
 
     text = "🙏 <b>Дякуємо за відгук!</b>\n\nВаша подяка стосується конкретного транспорту чи загальна?"
     keyboard = [
@@ -134,7 +147,7 @@ async def thanks_skip_board(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _ask_specific_reason(update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback=False):
-    text = "📝 <b>Напишіть текст подяки:</b>\n\n(За що вдячні? ПІБ водія. Дата події. Ваш номер телефону.)"
+    text = "📝 <b>Напишіть текст подяки:</b>\n\n(За що вдячні? ПІБ водія, дата події тощо. Мінімум 10 символів):"
     markup = await get_navigation_buttons()
 
     if is_callback:
@@ -159,30 +172,85 @@ async def thanks_reason_input(update: Update, context: ContextTypes.DEFAULT_TYPE
         await safe_edit_prev_message(
             context,
             update.effective_chat.id,
-            text="❌ Текст надто короткий. Мінімум 10 символів.",
+            text="❌ Текст подяки надто короткий. Мінімум 10 символів. Спробуйте ще раз:",
             reply_markup=await get_navigation_buttons()
         )
         return States.THANKS_SPECIFIC_REASON
 
     context.user_data['reason'] = text
+
+    # Запит телефону
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Пропустити ⏭️", callback_data="thanks:skip_phone")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+    ])
     await safe_edit_prev_message(
         context,
         update.effective_chat.id,
-        text="✉️ <b>Введіть Ваш Email</b> для зворотного зв'язку:",
-        reply_markup=await get_navigation_buttons(),
+        text="📞 <b>Введіть Ваш контактний номер телефону</b> (або пропустіть):",
+        reply_markup=kb,
         parse_mode=ParseMode.HTML
     )
-    return States.THANKS_SPECIFIC_EMAIL
+    return States.THANKS_SPECIFIC_PHONE
+
+
+async def thanks_phone_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вводу телефону (текст або кнопка пропуску)"""
+    is_callback = update.callback_query is not None
+
+    if is_callback:
+        query = update.callback_query
+        await query.answer()
+        phone = "Не вказано"
+    else:
+        await update.message.delete()
+        raw_phone = update.message.text.strip()
+        phone = clean_phone(raw_phone)
+
+        if not phone:
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Пропустити ⏭️", callback_data="thanks:skip_phone")],
+                [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+            ])
+            await safe_edit_prev_message(
+                context,
+                update.effective_chat.id,
+                text="⚠️ <b>Некоректний формат телефону!</b>\n\nВведіть ще раз (наприклад: 0951234567) або пропустіть:",
+                reply_markup=kb,
+                parse_mode=ParseMode.HTML
+            )
+            # Залишаємося в поточному стані відповідно до типу
+            thanks_type = context.user_data.get('thanks_type')
+            return States.THANKS_SPECIFIC_PHONE if thanks_type == 'specific' else States.THANKS_GENERAL_PHONE
+
+    context.user_data['phone'] = phone
+
+    # Переходимо до Email
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Пропустити Email ⏭️", callback_data="thanks:skip_email")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+    ])
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text="✉️ <b>Введіть Ваш Email</b> для зворотного зв'язку (або пропустіть):",
+        reply_markup=kb,
+        parse_mode=ParseMode.HTML
+    )
+
+    thanks_type = context.user_data.get('thanks_type')
+    return States.THANKS_SPECIFIC_EMAIL if thanks_type == 'specific' else States.THANKS_GENERAL_EMAIL
 
 
 # ============================================
-# ГІЛКА 2: ЗАГАЛЬНА (Скорочено для економії місця, логіка аналогічна)
+# ГІЛКА 2: ЗАГАЛЬНА
 # ============================================
+
 async def thanks_general_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data['thanks_type'] = 'general'
-    msg = await query.edit_message_text("📝 <b>Напишіть текст подяки:</b>", reply_markup=await get_navigation_buttons(),
+    msg = await query.edit_message_text("📝 <b>Напишіть текст подяки (мінімум 10 символів):</b>", reply_markup=await get_navigation_buttons(),
                                         parse_mode=ParseMode.HTML)
     context.user_data['last_bot_msg_id'] = msg.message_id
     return States.THANKS_GENERAL_MESSAGE
@@ -195,7 +263,7 @@ async def thanks_general_message(update: Update, context: ContextTypes.DEFAULT_T
         await safe_edit_prev_message(
             context,
             update.effective_chat.id,
-            text="❌ Мінімум 10 символів.",
+            text="❌ Мінімум 10 символів. Спробуйте ще раз:",
             reply_markup=await get_navigation_buttons()
         )
         return States.THANKS_GENERAL_MESSAGE
@@ -203,7 +271,7 @@ async def thanks_general_message(update: Update, context: ContextTypes.DEFAULT_T
     await safe_edit_prev_message(
         context,
         update.effective_chat.id,
-        text="👤 <b>Як до Вас звертатися? (ПІБ)</b>",
+        text="👤 <b>Як до Вас звертатися? (П.І.Б., мінімум 5 символів):</b>",
         reply_markup=await get_navigation_buttons(),
         parse_mode=ParseMode.HTML
     )
@@ -217,65 +285,88 @@ async def thanks_general_name(update: Update, context: ContextTypes.DEFAULT_TYPE
         await safe_edit_prev_message(
             context,
             update.effective_chat.id,
-            text="❌ Вкажіть коректне ім'я.",
+            text="❌ Вкажіть коректне П.І.Б. (лише літери, дефіс та апостроф, мінімум 5 символів):",
             reply_markup=await get_navigation_buttons()
         )
         return States.THANKS_GENERAL_NAME
     context.user_data['user_name'] = name
+
+    # Запит телефону для Загальної подяки
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Пропустити ⏭️", callback_data="thanks:skip_phone")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+    ])
     await safe_edit_prev_message(
         context,
         update.effective_chat.id,
-        text="✉️ <b>Введіть Ваш Email:</b>",
-        reply_markup=await get_navigation_buttons(),
+        text="📞 <b>Введіть Ваш контактний номер телефону</b> (або пропустіть):",
+        reply_markup=kb,
         parse_mode=ParseMode.HTML
     )
-    return States.THANKS_GENERAL_EMAIL
+    return States.THANKS_GENERAL_PHONE
 
 
 # ============================================
-# ФІНАЛ: ПІДТВЕРДЖЕННЯ (Спільне для обох гілок)
+# ФІНАЛ: ПІДТВЕРДЖЕННЯ
 # ============================================
 
 async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Цей хендлер ловить введення Email (останній крок),
-    але ЗАМІСТЬ збереження — показує Summary.
+    Цей хендлер ловить введення Email (останній крок або пропуск),
+    та показує Summary.
     """
-    await update.message.delete()
-    email = update.message.text.strip()
-    if not validate_email(email):
-        await safe_edit_prev_message(
-            context,
-            update.effective_chat.id,
-            text="❌ Невірний формат Email. Спробуйте ще раз:",
-            reply_markup=await get_navigation_buttons()
-        )
-        # Повертаємось у той стан, з якого прийшли (залежить від типу)
-        if context.user_data.get('thanks_type') == 'specific':
-            return States.THANKS_SPECIFIC_EMAIL
-        else:
-            return States.THANKS_GENERAL_EMAIL
+    is_callback = update.callback_query is not None
+
+    if is_callback:
+        query = update.callback_query
+        await query.answer()
+        email = "Не вказано"
+    else:
+        await update.message.delete()
+        raw_email = update.message.text.strip()
+
+        if not validate_email(raw_email):
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Пропустити Email ⏭️", callback_data="thanks:skip_email")],
+                [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+            ])
+            await safe_edit_prev_message(
+                context,
+                update.effective_chat.id,
+                text="❌ Невірний формат Email. Спробуйте ще раз або пропустіть:",
+                reply_markup=kb
+            )
+            # Повертаємось у той стан, з якого прийшли
+            thanks_type = context.user_data.get('thanks_type')
+            return States.THANKS_SPECIFIC_EMAIL if thanks_type == 'specific' else States.THANKS_GENERAL_EMAIL
+
+        email = raw_email
 
     context.user_data['email'] = email
 
     # ФОРМУЄМО ЗВІТ ДЛЯ ПЕРЕВІРКИ
     thanks_type = context.user_data.get('thanks_type')
+    phone = context.user_data.get('phone', 'Не вказано')
 
     if thanks_type == 'specific':
         summary = (
             f"🔍 <b>Перевірте Ваші дані:</b>\n\n"
-            f"🔹 <b>Тип:</b> Конкретне звернення ({context.user_data.get('transport_type')})\n"
-            f"🔹 <b>Борт. номер:</b> {context.user_data.get('board_number')}\n"
-            f"🔹 <b>Текст:</b> {context.user_data.get('reason')}\n"
-            f"🔹 <b>Email:</b> {email}"
+            f"📌 <b>Тип:</b> Конкретне звернення ({context.user_data.get('transport_type')})\n"
+            f"🔢 <b>Борт. номер:</b> {context.user_data.get('board_number')}\n"
+            f"✍️ <b>Текст:</b> {context.user_data.get('reason')}\n"
+            f"📞 <b>Телефон:</b> {phone}\n"
+            f"📧 <b>Email:</b> {email}\n\n"
+            "Все вірно?"
         )
     else:
         summary = (
             f"🔍 <b>Перевірте Ваші дані:</b>\n\n"
-            f"🔹 <b>Тип:</b> Загальне звернення\n"
-            f"🔹 <b>Ім'я:</b> {context.user_data.get('user_name')}\n"
-            f"🔹 <b>Текст:</b> {context.user_data.get('message')}\n"
-            f"🔹 <b>Email:</b> {email}"
+            f"📌 <b>Тип:</b> Загальне звернення\n"
+            f"👤 <b>Ім'я:</b> {context.user_data.get('user_name')}\n"
+            f"✍️ <b>Текст:</b> {context.user_data.get('message')}\n"
+            f"📞 <b>Телефон:</b> {phone}\n"
+            f"📧 <b>Email:</b> {email}\n\n"
+            "Все вірно?"
         )
 
     # КНОПКИ ПІДТВЕРДЖЕННЯ
@@ -293,33 +384,32 @@ async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.D
         parse_mode=ParseMode.HTML
     )
 
-    # Переходимо в новий стан очікування кліку
     return States.THANKS_CONFIRMATION
 
 
 async def thanks_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Кінцеве збереження, яке спрацьовує ТІЛЬКИ після кнопки 'Все вірно'.
+    Кінцеве збереження у БД
     """
     query = update.callback_query
     await query.answer()
 
-    # ... Логіка збереження в БД (така ж, як була раніше) ...
     reg_number = generate_registration_number()
     data = {
         'thanks_type': context.user_data.get('thanks_type'),
-        'email': context.user_data.get('email'),
+        'user_email': context.user_data.get('email', 'Не вказано'),
+        'user_phone': context.user_data.get('phone', 'Не вказано'),
         'user_id': update.effective_user.id,
         'username': update.effective_user.username,
         'category': 'Подяки'
     }
 
-    # Додаємо специфічні поля залежно від типу
+    # Додаємо специфічні поля
     if data['thanks_type'] == 'specific':
         data.update({
             'transport_type': context.user_data.get('transport_type'),
             'board_number': context.user_data.get('board_number'),
-            'text': context.user_data.get('reason'),  # Уніфікуємо ключ 'text' для БД
+            'text': context.user_data.get('reason'),
             'route': "N/A"
         })
     else:
@@ -356,7 +446,15 @@ async def thanks_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
             text="❌ Помилка збереження."
         )
 
-    context.user_data.clear()
+    context.user_data.pop('thanks_type', None)
+    context.user_data.pop('transport_type', None)
+    context.user_data.pop('board_number', None)
+    context.user_data.pop('reason', None)
+    context.user_data.pop('message', None)
+    context.user_data.pop('user_name', None)
+    context.user_data.pop('phone', None)
+    context.user_data.pop('email', None)
+
     return ConversationHandler.END
 
 
@@ -373,7 +471,6 @@ def register_thanks_handlers():
                 ('callback', 'thanks:general', thanks_general_start),
             ],
             States.THANKS_SPECIFIC_CHOOSE_TRANSPORT: [
-                # .* означає "будь-які символи після двокрапки"
                 ('callback', 'thanks:transport:.*', thanks_transport_selected),
             ],
             States.THANKS_SPECIFIC_BOARD_NUMBER: [
@@ -381,22 +478,35 @@ def register_thanks_handlers():
                 ('callback', 'thanks:skip_board', thanks_skip_board)
             ],
             States.THANKS_SPECIFIC_REASON: [('message', None, thanks_reason_input)],
+            
+            States.THANKS_SPECIFIC_PHONE: [
+                ('message', None, thanks_phone_step),
+                ('callback', 'thanks:skip_phone', thanks_phone_step)
+            ],
+            States.THANKS_GENERAL_PHONE: [
+                ('message', None, thanks_phone_step),
+                ('callback', 'thanks:skip_phone', thanks_phone_step)
+            ],
 
-            # ТУТ ЗМІНА: Обидва Email хендлери ведуть на функцію input_email_and_confirm
-            States.THANKS_SPECIFIC_EMAIL: [('message', None, thanks_input_email_and_confirm)],
-            States.THANKS_GENERAL_EMAIL: [('message', None, thanks_input_email_and_confirm)],
+            States.THANKS_SPECIFIC_EMAIL: [
+                ('message', None, thanks_input_email_and_confirm),
+                ('callback', 'thanks:skip_email', thanks_input_email_and_confirm)
+            ],
+            States.THANKS_GENERAL_EMAIL: [
+                ('message', None, thanks_input_email_and_confirm),
+                ('callback', 'thanks:skip_email', thanks_input_email_and_confirm)
+            ],
 
             States.THANKS_GENERAL_MESSAGE: [('message', None, thanks_general_message)],
             States.THANKS_GENERAL_NAME: [('message', None, thanks_general_name)],
 
-            # НОВИЙ СТАН: Чекаємо натискання "Все вірно"
             States.THANKS_CONFIRMATION: [
                 ('callback', 'confirm_send', thanks_confirm_save),
-                ('callback', 'thanks', thanks_start),  # Кнопка "Заповнити заново"
+                ('callback', 'thanks', thanks_start),
             ]
         },
         'fallbacks': [
-            ('callback', 'feedback_menu', thanks_start),  # Тут можна додати Cancel хендлер
-            ('callback', 'main_menu', thanks_start)  # Або посилання на menu handler
+            ('callback', 'feedback_menu', thanks_start),
+            ('callback', 'main_menu', thanks_start)
         ]
     }

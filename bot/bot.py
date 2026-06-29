@@ -54,7 +54,7 @@ from handlers.museum_handlers import (
 from handlers.thanks_handlers import (
     thanks_start, thanks_specific_type_selection, thanks_transport_selected,
     thanks_board_number_input, thanks_skip_board, thanks_reason_input,
-    thanks_general_start, thanks_general_message,
+    thanks_phone_step, thanks_general_start, thanks_general_message,
     thanks_general_name, register_thanks_handlers,
     thanks_input_email_and_confirm, thanks_confirm_save
 )

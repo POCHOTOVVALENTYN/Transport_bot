@@ -28,11 +28,13 @@ class States:
     THANKS_SPECIFIC_CHOOSE_TRANSPORT = 3  # Вибір: Трамвай чи Тролейбус?
     THANKS_SPECIFIC_BOARD_NUMBER = 4  # Введення бортового номера
     THANKS_SPECIFIC_REASON = 5  # За що вдячні? + ПІБ водія
+    THANKS_SPECIFIC_PHONE = "THANKS_SPECIFIC_PHONE"
     THANKS_SPECIFIC_EMAIL = 6  # Email
 
     # ГІЛКА 2: ЗАГАЛЬНА ПОДЯКА
     THANKS_GENERAL_MESSAGE = 7  # Суть вдячності
     THANKS_GENERAL_NAME = 8  # П.І.Б. користувача
+    THANKS_GENERAL_PHONE = "THANKS_GENERAL_PHONE"
     THANKS_GENERAL_EMAIL = 9  # Email
     THANKS_CONFIRMATION = "THANKS_CONFIRMATION"
 

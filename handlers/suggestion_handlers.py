@@ -9,6 +9,10 @@ from bot.states import States
 from utils.logger import logger
 from config.messages import MESSAGES
 
+# Імпортуємо загальні валідатори
+from handlers.complaint_handlers import clean_phone, is_valid_email
+from handlers.thanks_handlers import validate_name
+
 
 # === ДОПОМІЖНІ ===
 async def _ask_next_step(update, context, text, keyboard_markup=None):
@@ -31,6 +35,12 @@ async def suggestion_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    # Очищення старих даних
+    context.user_data.pop('suggestion_text', None)
+    context.user_data.pop('suggestion_name', None)
+    context.user_data.pop('suggestion_phone', None)
+    context.user_data.pop('suggestion_email', None)
+
     keyboard = await get_feedback_cancel_keyboard("feedback_menu")
     msg = await query.edit_message_text(text=MESSAGES['suggestion_start'], reply_markup=keyboard)
     context.user_data['last_bot_msg_id'] = msg.message_id
@@ -40,7 +50,16 @@ async def suggestion_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def suggestion_ask_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
 
-    context.user_data['suggestion_text'] = update.message.text
+    text = update.message.text.strip()
+    if len(text) < 10:
+        await _ask_next_step(
+            update,
+            context,
+            "⚠️ <b>Опис пропозиції занадто короткий!</b>\n\nБудь ласка, опишіть Вашу ідею детальніше (мінімум 10 символів):"
+        )
+        return States.SUGGESTION_TEXT
+
+    context.user_data['suggestion_text'] = text
     # Переходимо до запиту імені
     await _ask_next_step(update, context, MESSAGES['suggestion_name'])
     return States.SUGGESTION_GET_NAME
@@ -50,9 +69,13 @@ async def suggestion_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.delete()
 
     name = update.message.text.strip()
-    if len(name) < 5:
+    if not validate_name(name):
         # Помилка - питаємо знову
-        await _ask_next_step(update, context, "❌ П.І.Б. надто коротке. Введіть ще раз:")
+        await _ask_next_step(
+            update,
+            context,
+            "⚠️ <b>Некоректне ім'я!</b>\n\nБудь ласка, введіть П.І.Б. ще раз (лише літери, дефіс та апостроф, мінімум 5 символів):"
+        )
         return States.SUGGESTION_GET_NAME
 
     context.user_data['suggestion_name'] = name
@@ -63,14 +86,21 @@ async def suggestion_get_name(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.delete()
 
-    phone = update.message.text.strip()
-    # (Тут можна додати regex валідацію телефону, якщо треба)
+    raw_phone = update.message.text.strip()
+    phone = clean_phone(raw_phone)
+    if not phone:
+        await _ask_next_step(
+            update,
+            context,
+            "⚠️ <b>Некоректний формат телефону!</b>\n\nБудь ласка, введіть дійсний номер (наприклад: 0951234567):"
+        )
+        return States.SUGGESTION_GET_PHONE
 
     context.user_data['suggestion_phone'] = phone
 
     # Кнопка "Пропустити" для Email
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("➡️ Пропустити Email", callback_data="suggestion_skip_email")],
+        [InlineKeyboardButton("Пропустити Email ⏭️", callback_data="suggestion_skip_email")],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
     ])
 
@@ -83,21 +113,35 @@ async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYP
     return States.SUGGESTION_EMAIL
 
 
-# === ЕТАП ПІДТВЕРДЖЕННЯ (Новий) ===
+# === ЕТАП ПІДТВЕРДЖЕННЯ ===
 
 async def suggestion_check_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Формує звіт і просить підтвердження"""
+    is_callback = update.callback_query is not None
 
-    # Визначаємо джерело (текст чи кнопка "Пропустити")
-    if update.callback_query:
-        await update.callback_query.answer()
+    if is_callback:
+        query = update.callback_query
+        await query.answer()
         email = "Не вказано"
-        # Редагуємо повідомлення, якщо це колбек
-        msg_func = update.callback_query.edit_message_text
     else:
         await update.message.delete()
-        email = update.message.text.strip()
-        msg_func = None
+        raw_email = update.message.text.strip()
+
+        if not is_valid_email(raw_email):
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Пропустити Email ⏭️", callback_data="suggestion_skip_email")],
+                [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+            ])
+            await safe_edit_prev_message(
+                context,
+                update.effective_chat.id,
+                text="⚠️ <b>Некоректний формат E-mail!</b>\n\nБудь ласка, введіть дійсну адресу (наприклад: user@example.com) або пропустіть:",
+                reply_markup=kb,
+                parse_mode=ParseMode.HTML
+            )
+            return States.SUGGESTION_EMAIL
+
+        email = raw_email
 
     context.user_data['suggestion_email'] = email
 
@@ -106,7 +150,8 @@ async def suggestion_check_data(update: Update, context: ContextTypes.DEFAULT_TY
         f"📝 <b>Текст:</b> {context.user_data.get('suggestion_text')}\n"
         f"👤 <b>Ім'я:</b> {context.user_data.get('suggestion_name')}\n"
         f"📞 <b>Телефон:</b> {context.user_data.get('suggestion_phone')}\n"
-        f"📧 <b>Email:</b> {email}"
+        f"📧 <b>Email:</b> {email}\n\n"
+        "Усе правильно?"
     )
 
     keyboard = [
@@ -115,18 +160,13 @@ async def suggestion_check_data(update: Update, context: ContextTypes.DEFAULT_TY
          InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
     ]
 
-    if msg_func:
-        msg = await msg_func(text=summary, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
-        if hasattr(msg, 'message_id'):
-            context.user_data['last_bot_msg_id'] = msg.message_id
-    else:
-        await safe_edit_prev_message(
-            context,
-            update.effective_chat.id,
-            text=summary,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.HTML
-        )
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text=summary,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode=ParseMode.HTML
+    )
 
     return States.SUGGESTION_CONFIRMATION
 
@@ -151,7 +191,8 @@ async def suggestion_save_final(update: Update, context: ContextTypes.DEFAULT_TY
             context,
             update.effective_chat.id,
             text=result['message'],
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]),
+            parse_mode=ParseMode.HTML
         )
     except Exception as e:
         logger.error(f"Save error: {e}")
@@ -161,5 +202,9 @@ async def suggestion_save_final(update: Update, context: ContextTypes.DEFAULT_TY
             text="❌ Помилка збереження."
         )
 
-    context.user_data.clear()
+    # Очищення сесії
+    context.user_data.pop('suggestion_text', None)
+    context.user_data.pop('suggestion_name', None)
+    context.user_data.pop('suggestion_phone', None)
+    context.user_data.pop('suggestion_email', None)
     return ConversationHandler.END
