@@ -92,6 +92,15 @@ FEEDBACK_SYNC_MAX_ROWS = int(os.getenv("FEEDBACK_SYNC_MAX_ROWS", "500"))
 BROADCAST_BATCH_SIZE = int(os.getenv("BROADCAST_BATCH_SIZE", "50"))
 BROADCAST_PAUSE_SEC = float(os.getenv("BROADCAST_PAUSE_SEC", "0.2"))
 
+# ===============================================
+# 7. SMTP НАЛАШТУВАННЯ ДЛЯ EMAIL
+# ===============================================
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.ukr.net")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_TARGET_EMAIL = os.getenv("SMTP_TARGET_EMAIL", "omet@omr.gov.ua")
+
 # Іконки для джерел часу
 TIME_SOURCE_ICONS = {
     "gps": "🛰️",

@@ -18,3 +18,4 @@ cachetools==5.3.2
 aiosqlite==0.19.0
 tenacity>=8.2.0
 geopy
+fpdf2>=2.7.0

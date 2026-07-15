@@ -419,12 +419,16 @@ async def thanks_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         })
 
     try:
-        # Зберігаємо
-        await db.create_feedback(data)
+        # Зберігаємо та отримуємо справжній ticket_id з БД
+        ticket_id = await db.create_feedback(data)
+
+        # Надсилаємо картку модерації адмінам
+        from handlers.admin_handlers import send_moderation_card_to_admins
+        await send_moderation_card_to_admins(context.bot, ticket_id)
 
         success_text = (
             f"✅ <b>Подяка успішно надіслана!</b>\n\n"
-            f"🆔 <b>Номер звернення:</b> <code>{reg_number}</code>\n"
+            f"🆔 <b>Номер звернення:</b> <code>{ticket_id}</code>\n"
             f"🙏 Дякуємо, що допомагаєте нам ставати кращими!"
         )
         await safe_edit_prev_message(

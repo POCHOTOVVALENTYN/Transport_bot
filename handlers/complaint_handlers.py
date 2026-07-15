@@ -542,6 +542,10 @@ async def complaint_save_final(update: Update, context: ContextTypes.DEFAULT_TYP
         service = TicketsService()
         result = await service.create_complaint_ticket(update.effective_user.id, complaint_data)
 
+        # Надсилаємо картку модерації адмінам
+        from handlers.admin_handlers import send_moderation_card_to_admins
+        await send_moderation_card_to_admins(context.bot, result['ticket_id'])
+
         # Видаляємо всі тимчасові дані з сесії
         context.user_data.pop('complaint_type', None)
         context.user_data.pop('complaint_transport_type', None)

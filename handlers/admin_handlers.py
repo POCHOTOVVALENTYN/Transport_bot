@@ -28,6 +28,225 @@ museum_service = MuseumService()
 #(ADMIN_STATE_ADD_DATE, ADMIN_STATE_DEL_DATE_CONFIRM) = range(16, 18)  # Використовуємо нові стани
 
 
+from database.db import AsyncSessionLocal, Feedback
+from sqlalchemy import select
+
+async def send_moderation_card_to_admins(bot, ticket_id: str):
+    """Надсилає картку нового звернення адміністраторам для перевірки"""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Feedback).where(Feedback.ticket_id == ticket_id))
+        feedback = result.scalar_one_or_none()
+        if not feedback:
+            logger.error(f"❌ Звернення {ticket_id} не знайдено для відправки модерації")
+            return
+
+        category_ua = {
+            "complaint": "СКАРГА ⚠️",
+            "thanks": "ПОДЯКА ❤️",
+            "suggestion": "ПРОПОЗИЦІЯ 💡"
+        }.get(feedback.category, feedback.category.upper())
+
+        text = (
+            f"📥 <b>Нове звернення громадян: {category_ua}</b>\n"
+            f"🆔 <b>ID:</b> <code>{feedback.ticket_id}</code>\n"
+            f"📅 <b>Дата:</b> {feedback.created_at.strftime('%d.%m.%Y %H:%M') if feedback.created_at else ''}\n"
+            f"----------------------------------------\n"
+            f"👤 <b>Заявник:</b> {feedback.user_name or 'Не вказано'}\n"
+            f"📞 <b>Телефон:</b> {feedback.user_phone or 'Не вказано'}\n"
+            f"📧 <b>Email:</b> {feedback.user_email or 'Не вказано'}\n"
+        )
+
+        if feedback.category in ("complaint", "thanks") and (feedback.route or feedback.board_number or feedback.transport_type):
+            t_prefix = "Трамвай" if feedback.transport_type == "tram" else "Тролейбус" if feedback.transport_type == "trolleybus" else ""
+            route_str = f"{t_prefix} № {feedback.route}" if t_prefix and feedback.route else (feedback.route or "")
+            text += (
+                f"🚊 <b>Транспорт:</b> {route_str or 'Не вказано'}\n"
+                f"🔢 <b>Бортовий номер:</b> {feedback.board_number or 'Не вказано'}\n"
+            )
+
+        text += (
+            f"----------------------------------------\n"
+            f"📝 <b>Текст звернення:</b>\n{feedback.text}\n"
+        )
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Затвердити та надіслати", callback_data=f"feed_mod:approve:{feedback.ticket_id}")],
+            [InlineKeyboardButton("❌ Відхилити", callback_data=f"feed_mod:reject:{feedback.ticket_id}")]
+        ])
+
+        for admin_id in GENERAL_ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    chat_id=admin_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error(f"❌ Не вдалося надіслати картку модерації адміну {admin_id}: {e}")
+
+
+async def moderate_approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробник затвердження звернення модератором"""
+    query = update.callback_query
+    await query.answer()
+
+    ticket_id = query.data.split(":")[2]
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Feedback).where(Feedback.ticket_id == ticket_id))
+        feedback = result.scalar_one_or_none()
+        if not feedback:
+            await query.edit_message_text("❌ Звернення не знайдено в базі даних.")
+            return
+
+        if feedback.email_status == "sent":
+            await query.edit_message_text(f"⚠️ Звернення {ticket_id} вже було надіслано на пошту.")
+            return
+        elif feedback.email_status == "rejected":
+            await query.edit_message_text(f"⚠️ Звернення {ticket_id} вже було відхилено.")
+            return
+
+        # Зберігаємо статус "sent"
+        feedback.email_status = "sent"
+        await session.commit()
+
+        # Повідомляємо адміна про старт генерації
+        await query.edit_message_text(f"⏳ Обробка звернення {ticket_id}... Генеруємо PDF...")
+
+        from services.pdf_service import generate_feedback_pdf
+        from services.email_service import send_feedback_email
+        import os
+
+        pdf_path = None
+        try:
+            # Генеруємо PDF
+            pdf_path = generate_feedback_pdf(feedback)
+
+            # Відправляємо Email у фоновому пулі потоків
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(
+                None,
+                send_feedback_email,
+                pdf_path,
+                feedback.ticket_id,
+                feedback.category
+            )
+
+            if success:
+                admin_name = update.effective_user.first_name or update.effective_user.username or "Адмін"
+                time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+                # Формуємо новий текст без кнопок
+                category_ua = {
+                    "complaint": "СКАРГА ⚠️",
+                    "thanks": "ПОДЯКА ❤️",
+                    "suggestion": "ПРОПОЗИЦІЯ 💡"
+                }.get(feedback.category, feedback.category.upper())
+
+                new_text = (
+                    f"📥 <b>Звернення громадян: {category_ua}</b>\n"
+                    f"🆔 <b>ID:</b> <code>{feedback.ticket_id}</code>\n"
+                    f"👤 <b>Заявник:</b> {feedback.user_name or 'Не вказано'}\n"
+                    f"📞 <b>Телефон:</b> {feedback.user_phone or 'Не вказано'}\n"
+                    f"📧 <b>Email:</b> {feedback.user_email or 'Не вказано'}\n"
+                    f"📝 <b>Текст звернення:</b>\n{feedback.text}\n"
+                    f"----------------------------------------\n"
+                    f"<b>✅ Затверджено та надіслано на Email секретаря</b>\n"
+                    f"👤 Модератор: {admin_name}\n"
+                    f"🕒 Час: {time_str}"
+                )
+
+                await query.edit_message_text(text=new_text, parse_mode="HTML")
+
+                # Сповіщаємо користувача
+                try:
+                    await context.bot.send_message(
+                        chat_id=feedback.user_id,
+                        text=f"✉️ <b>Ваше звернення {feedback.ticket_id} було розглянуто модератором та успішно надіслано до реєстрації секретарем КП ОГЕТ!</b>",
+                        parse_mode="HTML"
+                    )
+                except Exception as user_err:
+                    logger.error(f"Не вдалося сповістити користувача {feedback.user_id}: {user_err}")
+            else:
+                feedback.email_status = "pending"
+                await session.commit()
+                await query.edit_message_text(
+                    f"❌ Помилка відправки листа для {ticket_id}. Перевірте налаштування SMTP у .env файлі.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔄 Спробувати знову", callback_data=f"feed_mod:approve:{ticket_id}")],
+                        [InlineKeyboardButton("❌ Відхилити", callback_data=f"feed_mod:reject:{ticket_id}")]
+                    ])
+                )
+        except Exception as err:
+            logger.error(f"❌ Помилка при затвердженні звернення {ticket_id}: {err}")
+            feedback.email_status = "pending"
+            await session.commit()
+            await query.edit_message_text(f"❌ Помилка обробки звернення: {err}")
+        finally:
+            if pdf_path and os.path.exists(pdf_path):
+                try:
+                    os.remove(pdf_path)
+                except Exception as del_err:
+                    logger.error(f"Не вдалося видалити тимчасовий PDF {pdf_path}: {del_err}")
+
+
+async def moderate_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробник відхилення звернення модератором"""
+    query = update.callback_query
+    await query.answer()
+
+    ticket_id = query.data.split(":")[2]
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Feedback).where(Feedback.ticket_id == ticket_id))
+        feedback = result.scalar_one_or_none()
+        if not feedback:
+            await query.edit_message_text("❌ Звернення не знайдено.")
+            return
+
+        if feedback.email_status in ("sent", "rejected"):
+            await query.edit_message_text(f"⚠️ Звернення {ticket_id} вже оброблено (статус: {feedback.email_status}).")
+            return
+
+        feedback.email_status = "rejected"
+        await session.commit()
+
+        admin_name = update.effective_user.first_name or update.effective_user.username or "Адмін"
+        time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+        category_ua = {
+            "complaint": "СКАРГА ⚠️",
+            "thanks": "ПОДЯКА ❤️",
+            "suggestion": "ПРОПОЗИЦІЯ 💡"
+        }.get(feedback.category, feedback.category.upper())
+
+        new_text = (
+            f"📥 <b>Звернення громадян: {category_ua}</b>\n"
+            f"🆔 <b>ID:</b> <code>{feedback.ticket_id}</code>\n"
+            f"👤 <b>Заявник:</b> {feedback.user_name or 'Не вказано'}\n"
+            f"📞 <b>Телефон:</b> {feedback.user_phone or 'Не вказано'}\n"
+            f"📧 <b>Email:</b> {feedback.user_email or 'Не вказано'}\n"
+            f"📝 <b>Текст звернення:</b>\n{feedback.text}\n"
+            f"----------------------------------------\n"
+            f"<b>❌ Відхилено модератором (некоректний вміст / спам)</b>\n"
+            f"👤 Модератор: {admin_name}\n"
+            f"🕒 Час: {time_str}"
+        )
+
+        await query.edit_message_text(text=new_text, parse_mode="HTML")
+
+        # Сповіщаємо користувача
+        try:
+            await context.bot.send_message(
+                chat_id=feedback.user_id,
+                text=f"⚠️ <b>Ваше звернення {feedback.ticket_id} було відхилено модератором через некоректний вміст (спам, нецензурну лексику чи відсутність конкретики).</b>",
+                parse_mode="HTML"
+            )
+        except Exception as user_err:
+            logger.error(f"Не вдалося сповістити користувача {feedback.user_id}: {user_err}")
+
+
 # --- НОВА ФУНКЦІЯ: Меню Загального Адміна (Валентин і Тетяна) ---
 async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Головне меню для новин та керування ботом"""

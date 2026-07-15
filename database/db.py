@@ -25,6 +25,12 @@ async def init_db():
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                # Перевіримо та додамо колонку email_status у таблицю feedbacks, якщо її немає
+                try:
+                    await conn.execute(text("ALTER TABLE feedbacks ADD COLUMN email_status VARCHAR DEFAULT 'pending'"))
+                    print("✅ Migration: added email_status column to feedbacks")
+                except Exception:
+                    pass
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_status ON feedbacks(status)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_created_at ON feedbacks(created_at)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_id ON users(telegram_id)"))
@@ -91,6 +97,7 @@ class Feedback(Base):
 
     category = Column(String)  # "Скарги", "Пропозиції", "Подяки"
     status = Column(String, default="new")  # "new" (в базі), "synced" (в гугл таблиці)
+    email_status = Column(String, default="pending")  # "pending", "sent", "rejected"
 
     # Дані користувача
     user_id = Column(BigInteger, nullable=False)

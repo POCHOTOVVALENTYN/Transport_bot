@@ -187,6 +187,10 @@ async def suggestion_save_final(update: Update, context: ContextTypes.DEFAULT_TY
         service = TicketsService()
         result = await service.create_suggestion_ticket(update.effective_user.id, data)
 
+        # Надсилаємо картку модерації адмінам
+        from handlers.admin_handlers import send_moderation_card_to_admins
+        await send_moderation_card_to_admins(context.bot, result['ticket_id'])
+
         await safe_edit_prev_message(
             context,
             update.effective_chat.id,

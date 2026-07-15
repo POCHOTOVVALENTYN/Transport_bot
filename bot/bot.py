@@ -74,7 +74,8 @@ from handlers.admin_handlers import (
     show_general_admin_menu, admin_museum_menu_show, admin_show_stats, # Нова функція зі списком
     admin_add_holiday_date_start, admin_add_holiday_date_save,
     admin_del_holiday_date_menu, admin_del_holiday_date_confirm,
-    admin_show_holiday_bookings, admin_export_users
+    admin_show_holiday_bookings, admin_export_users,
+    moderate_approve_callback, moderate_reject_callback
 )
 
 from utils.logger import logger
@@ -207,6 +208,10 @@ class TransportBot:
         # Кнопка статистики (Валентин/Тетяна)
         self.app.add_handler(CallbackQueryHandler(admin_show_stats, pattern="^admin_stats$"))
         self.app.add_handler(CallbackQueryHandler(admin_export_users, pattern="^admin_export_users$"))
+
+        # Модерація звернень (Затвердити / Відхилити)
+        self.app.add_handler(CallbackQueryHandler(moderate_approve_callback, pattern="^feed_mod:approve:"))
+        self.app.add_handler(CallbackQueryHandler(moderate_reject_callback, pattern="^feed_mod:reject:"))
 
         # Кнопка входу в Адмінку Музею (Максим)
         self.app.add_handler(CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"))
