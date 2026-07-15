@@ -13,21 +13,27 @@ def ensure_fonts():
     bold_path = FONTS_DIR / "DejaVuSans-Bold.ttf"
 
     if not regular_path.exists():
-        url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/resources/ttf/DejaVuSans.ttf"
+        url = "https://raw.githubusercontent.com/senotrusov/dejavu-fonts-ttf/master/ttf/DejaVuSans.ttf"
         try:
             urllib.request.urlretrieve(url, regular_path)
         except Exception as e:
             # Спробуємо дзеркало у разі помилки
-            fallback_url = "https://raw.githubusercontent.com/halfmoon-ui/halfmoon/master/fonts/dejavu-sans-mono/DejaVuSans.ttf"
-            urllib.request.urlretrieve(fallback_url, regular_path)
+            fallback_url = "https://raw.githubusercontent.com/go-fonts/dejavu/master/DejaVuSans.ttf"
+            try:
+                urllib.request.urlretrieve(fallback_url, regular_path)
+            except Exception:
+                raise Exception(f"Не вдалося завантажити шрифт DejaVuSans.ttf: {e}")
 
     if not bold_path.exists():
-        url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/master/resources/ttf/DejaVuSans-Bold.ttf"
+        url = "https://raw.githubusercontent.com/senotrusov/dejavu-fonts-ttf/master/ttf/DejaVuSans-Bold.ttf"
         try:
             urllib.request.urlretrieve(url, bold_path)
-        except Exception:
-            fallback_url = "https://raw.githubusercontent.com/android/platform_frameworks_base/master/data/fonts/DejaVuSans-Bold.ttf"
-            urllib.request.urlretrieve(fallback_url, bold_path)
+        except Exception as e:
+            fallback_url = "https://raw.githubusercontent.com/go-fonts/dejavu/master/DejaVuSans-Bold.ttf"
+            try:
+                urllib.request.urlretrieve(fallback_url, bold_path)
+            except Exception:
+                raise Exception(f"Не вдалося завантажити шрифт DejaVuSans-Bold.ttf: {e}")
 
 
 def generate_feedback_pdf(feedback) -> str:
