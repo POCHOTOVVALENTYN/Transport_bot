@@ -13,7 +13,7 @@ from handlers.complaint_handlers import (
     complaint_route_step, complaint_board_step, complaint_text_step,
     complaint_name_step, complaint_phone_step, complaint_email_step,
     complaint_edit_menu, complaint_edit_field_handler, complaint_edit_back,
-    complaint_save_final
+    complaint_save_final, complaint_response_need_step, complaint_home_address_step
 )
 from handlers.menu_handlers import main_menu
 
@@ -61,7 +61,8 @@ from handlers.thanks_handlers import (
 
 from handlers.suggestion_handlers import (
     suggestion_start, suggestion_ask_contact, suggestion_get_name,
-    suggestion_get_phone, suggestion_check_data, suggestion_save_final  # <-- 'suggestion_save_anonymously' видалено
+    suggestion_get_phone, suggestion_check_data, suggestion_save_final,
+    suggestion_response_need_step, suggestion_home_address_step
 )
 
 
@@ -251,8 +252,13 @@ class TransportBot:
                     MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_phone_step)
                 ],
                 States.COMPLAINT_EMAIL: [
-                    CallbackQueryHandler(complaint_email_step, pattern="^complaint_skip_email$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_email_step)
+                ],
+                States.COMPLAINT_RESPONSE_NEED: [
+                    CallbackQueryHandler(complaint_response_need_step, pattern="^complaint_resp:")
+                ],
+                States.COMPLAINT_HOME_ADDRESS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_home_address_step)
                 ],
                 States.COMPLAINT_CONFIRMATION: [
                     CallbackQueryHandler(complaint_save_final, pattern="^complaint_confirm_send$"),
@@ -308,14 +314,17 @@ class TransportBot:
 
                 # На етапі Email ми тепер йдемо на перевірку (check_data)
                 States.SUGGESTION_EMAIL: [
-                    MessageHandler(filters.TEXT, suggestion_check_data),
-                    CallbackQueryHandler(suggestion_check_data, pattern="^suggestion_skip_email$")
+                    MessageHandler(filters.TEXT, suggestion_check_data)
                 ],
-
-                # НОВИЙ СТАН
+                States.SUGGESTION_RESPONSE_NEED: [
+                    CallbackQueryHandler(suggestion_response_need_step, pattern="^suggestion_resp:")
+                ],
+                States.SUGGESTION_HOME_ADDRESS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, suggestion_home_address_step)
+                ],
                 States.SUGGESTION_CONFIRMATION: [
                     CallbackQueryHandler(suggestion_save_final, pattern="^suggestion_confirm_send$"),
-                    CallbackQueryHandler(suggestion_start, pattern="^suggestion$"),  # Переписати
+                    CallbackQueryHandler(suggestion_start, pattern="^suggestion$"),
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$")
                 ]
             },

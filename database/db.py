@@ -31,6 +31,16 @@ async def init_db():
                     print("✅ Migration: added email_status column to feedbacks")
                 except Exception:
                     pass
+                try:
+                    await conn.execute(text("ALTER TABLE feedbacks ADD COLUMN need_response VARCHAR"))
+                    print("✅ Migration: added need_response column to feedbacks")
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE feedbacks ADD COLUMN home_address VARCHAR"))
+                    print("✅ Migration: added home_address column to feedbacks")
+                except Exception:
+                    pass
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_status ON feedbacks(status)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_created_at ON feedbacks(created_at)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_id ON users(telegram_id)"))
@@ -104,6 +114,10 @@ class Feedback(Base):
     user_name = Column(String, nullable=True)
     user_phone = Column(String, nullable=True)
     user_email = Column(String, nullable=True)
+
+    # Потреба відповіді та адреса
+    need_response = Column(String, nullable=True)  # "email", "mail", "no"
+    home_address = Column(String, nullable=True)
 
     # Основний вміст
     text = Column(String, nullable=True)

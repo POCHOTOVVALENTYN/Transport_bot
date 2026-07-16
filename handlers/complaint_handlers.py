@@ -35,8 +35,15 @@ def _build_complaint_summary(context: ContextTypes.DEFAULT_TYPE) -> str:
     name = context.user_data.get('complaint_name', 'Не вказано')
     phone = context.user_data.get('complaint_phone', 'Не вказано')
     email = context.user_data.get('complaint_email', 'Не вказано')
+    need_resp = context.user_data.get('complaint_need_response', 'no')
+    home_address = context.user_data.get('complaint_home_address')
 
     type_str = "📝 Загальна скарга" if ctype == 'general' else "🚋 Скарга на конкретний транспорт"
+    need_resp_ua = (
+        "Так (Email) 📧" if need_resp == "email"
+        else "Так (Пошта) 📮" if need_resp == "mail"
+        else "Ні ❌"
+    )
 
     summary = (
         "🔍 <b>Перевірте правильність введених даних:</b>\n\n"
@@ -55,9 +62,13 @@ def _build_complaint_summary(context: ContextTypes.DEFAULT_TYPE) -> str:
         f"✍️ <b>Опис проблеми:</b> {text}\n"
         f"👤 <b>П.І.Б.:</b> {name}\n"
         f"📞 <b>Телефон:</b> {phone}\n"
-        f"📧 <b>E-mail:</b> {email}\n\n"
-        "Усе правильно?"
+        f"📧 <b>E-mail:</b> {email}\n"
+        f"❓ <b>Потрібна відповідь:</b> {need_resp_ua}\n"
     )
+    if need_resp == "mail" and home_address:
+        summary += f"🏠 <b>Адреса:</b> {home_address}\n"
+
+    summary += "\nУсе правильно?"
     return summary
 
 
@@ -80,7 +91,10 @@ def _build_complaint_edit_keyboard(context: ContextTypes.DEFAULT_TYPE) -> Inline
         InlineKeyboardButton("👤 П.І.Б.", callback_data="complaint_edit:name"),
         InlineKeyboardButton("📞 Телефон", callback_data="complaint_edit:phone")
     ])
-    keyboard.append([InlineKeyboardButton("📧 E-mail", callback_data="complaint_edit:email")])
+    keyboard.append([
+        InlineKeyboardButton("📧 E-mail", callback_data="complaint_edit:email"),
+        InlineKeyboardButton("❓ Відповідь / Адреса", callback_data="complaint_edit:response_need")
+    ])
     keyboard.append([InlineKeyboardButton("⬅️ Назад до підтвердження", callback_data="complaint_edit_back")])
 
     return InlineKeyboardMarkup(keyboard)
@@ -355,11 +369,9 @@ async def complaint_phone_step(update: Update, context: ContextTypes.DEFAULT_TYP
     # Переходимо до запиту Email
     prompt = (
         "📧 <b>Крок 7: E-mail для відповіді</b>\n\n"
-        "Будь ласка, введіть Вашу адресу електронної пошти:\n\n"
-        "<i>Якщо Ви не хочете вказувати email, натисніть кнопку «Пропустити» нижче 👇</i>"
+        "Будь ласка, введіть Вашу адресу електронної пошти (обов'язково):"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Пропустити ⏭️", callback_data="complaint_skip_email")],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
     ])
 
@@ -374,42 +386,100 @@ async def complaint_phone_step(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def complaint_email_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отримання та валідація email (або пропуск)"""
+    """Отримання та валідація email (обов'язково)"""
     is_callback = update.callback_query is not None
 
     if is_callback:
         query = update.callback_query
-        await query.answer()
-        email = "Не вказано"
-    else:
-        await update.message.delete()
-        raw_email = update.message.text.strip()
+        await query.answer("Цей крок є обов'язковим!", show_alert=True)
+        return States.COMPLAINT_EMAIL
 
-        if not is_valid_email(raw_email):
-            prompt = (
-                "⚠️ <b>Некоректний формат E-mail!</b>\n\n"
-                "Будь ласка, введіть дійсну пошту (наприклад: user@example.com) або натисніть «Пропустити»:"
-            )
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("Пропустити ⏭️", callback_data="complaint_skip_email")],
-                [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
-            ])
-            await safe_edit_prev_message(
-                context,
-                update.effective_chat.id,
-                text=prompt,
-                reply_markup=keyboard,
-                parse_mode='HTML'
-            )
-            return States.COMPLAINT_EMAIL
+    await update.message.delete()
+    raw_email = update.message.text.strip()
 
-        email = raw_email
+    if not is_valid_email(raw_email):
+        prompt = (
+            "⚠️ <b>Некоректний формат E-mail!</b>\n\n"
+            "Будь ласка, введіть дійсну пошту (наприклад: user@example.com):"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+        ])
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text=prompt,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return States.COMPLAINT_EMAIL
 
+    email = raw_email
     context.user_data['complaint_email'] = email
 
     if context.user_data.get('complaint_edit_mode'):
         context.user_data.pop('complaint_edit_mode', None)
+        return await complaint_show_confirm(update, context)
 
+    return await complaint_ask_response_need(update, context)
+
+
+async def complaint_ask_response_need(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Запит чи потрібна відповідь на звернення"""
+    prompt = (
+        "❓ <b>Чи потрібна вам офіційна відповідь на це звернення?</b>\n\n"
+        "Оберіть зручний для вас варіант нижче 👇"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📧 Так, електронною поштою", callback_data="complaint_resp:email")],
+        [InlineKeyboardButton("📮 Так, паперовим листом (Укрпошта)", callback_data="complaint_resp:mail")],
+        [InlineKeyboardButton("❌ Ні, відповідь не потрібна", callback_data="complaint_resp:no")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+    ])
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text=prompt,
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
+    return States.COMPLAINT_RESPONSE_NEED
+
+
+async def complaint_response_need_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору потреби у відповіді"""
+    query = update.callback_query
+    await query.answer()
+
+    choice = query.data.split(":")[1]
+    context.user_data['complaint_need_response'] = choice
+
+    if choice == "mail":
+        prompt = (
+            "🏠 <b>Вкажіть Вашу домашню адресу</b>\n\n"
+            "Будь ласка, введіть Вашу повну поштову адресу (вулиця, будинок, квартира, місто, область, поштовий індекс) для відправки відповіді паперовим листом:"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+        ])
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text=prompt,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return States.COMPLAINT_HOME_ADDRESS
+    else:
+        context.user_data['complaint_home_address'] = None
+        return await complaint_show_confirm(update, context)
+
+
+async def complaint_home_address_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отримання домашньої адреси"""
+    await update.message.delete()
+    address = update.message.text.strip()
+    context.user_data['complaint_home_address'] = address
     return await complaint_show_confirm(update, context)
 
 
@@ -488,13 +558,15 @@ async def complaint_edit_field_handler(update: Update, context: ContextTypes.DEF
         return States.COMPLAINT_PHONE
 
     elif field == "email":
-        text = "📧 <b>Введіть нову адресу E-mail (або пропустіть):</b>"
+        text = "📧 <b>Введіть нову адресу E-mail:</b>"
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Пропустити ⏭️", callback_data="complaint_skip_email")],
             [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
         ])
         await query.edit_message_text(text=text, reply_markup=kb, parse_mode='HTML')
         return States.COMPLAINT_EMAIL
+
+    elif field == "response_need":
+        return await complaint_ask_response_need(update, context)
 
 
 async def complaint_edit_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -521,6 +593,8 @@ async def complaint_save_final(update: Update, context: ContextTypes.DEFAULT_TYP
     name = context.user_data.get('complaint_name')
     phone = context.user_data.get('complaint_phone')
     email = context.user_data.get('complaint_email', 'Не вказано')
+    need_response = context.user_data.get('complaint_need_response', 'no')
+    home_address = context.user_data.get('complaint_home_address')
 
     # Якщо тип загальний, то фіксуємо це в полях маршруту та борта
     if ctype == 'general':
@@ -535,7 +609,9 @@ async def complaint_save_final(update: Update, context: ContextTypes.DEFAULT_TYP
         "transport_type": transport_type,
         "user_name": name,
         "user_phone": phone,
-        "user_email": email
+        "user_email": email,
+        "need_response": need_response,
+        "home_address": home_address
     }
 
     try:
@@ -555,6 +631,8 @@ async def complaint_save_final(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop('complaint_name', None)
         context.user_data.pop('complaint_phone', None)
         context.user_data.pop('complaint_email', None)
+        context.user_data.pop('complaint_need_response', None)
+        context.user_data.pop('complaint_home_address', None)
         context.user_data.pop('complaint_edit_mode', None)
         context.user_data.pop('complaint_edit_field', None)
 

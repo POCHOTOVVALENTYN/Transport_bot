@@ -65,14 +65,14 @@ class TicketsService:
             "user_name": complaint_data.get("user_name"),
             "user_phone": complaint_data.get("user_phone"),
             "user_email": complaint_data.get("user_email"),
+            "need_response": complaint_data.get("need_response"),
+            "home_address": complaint_data.get("home_address"),
             "status": "new"
         }
 
         if await self._save_to_db(db_data):
             return {"success": True, "ticket_id": ticket_id, "message": f"✅ Скарга прийнята (ID: {ticket_id})"}
         return {"success": False, "message": "❌ Помилка бази даних"}
-
-    # ... (Аналогічно оновіть create_suggestion_ticket та create_thanks_ticket, змінюючи лише category) ...
 
     async def create_suggestion_ticket(self, telegram_id: int, suggestion_data: dict) -> dict:
         ticket_id = format_ticket_id()
@@ -84,6 +84,8 @@ class TicketsService:
             "user_name": suggestion_data.get("user_name"),
             "user_phone": suggestion_data.get("user_phone"),
             "user_email": suggestion_data.get("user_email"),
+            "need_response": suggestion_data.get("need_response"),
+            "home_address": suggestion_data.get("home_address"),
             "status": "new"
         }
         if await self._save_to_db(db_data):
@@ -100,6 +102,10 @@ class TicketsService:
             "route": thanks_data.get("route"),
             "board_number": thanks_data.get("board_number"),
             "user_name": thanks_data.get("user_name"),
+            "user_phone": thanks_data.get("user_phone"),
+            "user_email": thanks_data.get("user_email"),
+            "need_response": thanks_data.get("need_response"),
+            "home_address": thanks_data.get("home_address"),
             "status": "new"
         }
         if await self._save_to_db(db_data):
@@ -152,6 +158,12 @@ class TicketsService:
                     if item.route and item.route not in ("Загальна скарга", "N/A"):
                         route_val = f"{t_prefix} № {item.route}"
 
+                need_resp_ua = (
+                    "Так (Email)" if item.need_response == "email"
+                    else "Так (Пошта)" if item.need_response == "mail"
+                    else "Ні"
+                )
+
                 row = [
                     created_at_str,
                     item.ticket_id,
@@ -162,7 +174,9 @@ class TicketsService:
                     item.board_number or "N/A",
                     item.user_name,
                     self._format_phone_for_sheet(item.user_phone),
-                    item.user_email or ""
+                    item.user_email or "",
+                    need_resp_ua,
+                    item.home_address or "Не вказано"
                 ]
 
                 rows_by_sheet.setdefault(sheet_name, []).append((item, row))

@@ -225,15 +225,14 @@ async def thanks_phone_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data['phone'] = phone
 
-    # Переходимо до Email
+    # Переходимо до Email (обов'язково)
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Пропустити Email ⏭️", callback_data="thanks:skip_email")],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
     ])
     await safe_edit_prev_message(
         context,
         update.effective_chat.id,
-        text="✉️ <b>Введіть Ваш Email</b> для зворотного зв'язку (або пропустіть):",
+        text="✉️ <b>Введіть Ваш Email</b> для зворотного зв'язку (обов'язково):",
         reply_markup=kb,
         parse_mode=ParseMode.HTML
     )
@@ -312,41 +311,110 @@ async def thanks_general_name(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Цей хендлер ловить введення Email (останній крок або пропуск),
-    та показує Summary.
+    Цей хендлер ловить введення Email (обов'язково),
+    та переходить до вибору потреби у відповіді.
     """
     is_callback = update.callback_query is not None
 
     if is_callback:
         query = update.callback_query
-        await query.answer()
-        email = "Не вказано"
-    else:
-        await update.message.delete()
-        raw_email = update.message.text.strip()
+        await query.answer("Цей крок є обов'язковим!", show_alert=True)
+        thanks_type = context.user_data.get('thanks_type')
+        return States.THANKS_SPECIFIC_EMAIL if thanks_type == 'specific' else States.THANKS_GENERAL_EMAIL
 
-        if not validate_email(raw_email):
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("Пропустити Email ⏭️", callback_data="thanks:skip_email")],
-                [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
-            ])
-            await safe_edit_prev_message(
-                context,
-                update.effective_chat.id,
-                text="❌ Невірний формат Email. Спробуйте ще раз або пропустіть:",
-                reply_markup=kb
-            )
-            # Повертаємось у той стан, з якого прийшли
-            thanks_type = context.user_data.get('thanks_type')
-            return States.THANKS_SPECIFIC_EMAIL if thanks_type == 'specific' else States.THANKS_GENERAL_EMAIL
+    await update.message.delete()
+    raw_email = update.message.text.strip()
 
-        email = raw_email
+    if not validate_email(raw_email):
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+        ])
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text="❌ Невірний формат Email. Будь ласка, спробуйте ще раз:",
+            reply_markup=kb
+        )
+        thanks_type = context.user_data.get('thanks_type')
+        return States.THANKS_SPECIFIC_EMAIL if thanks_type == 'specific' else States.THANKS_GENERAL_EMAIL
 
+    email = raw_email
     context.user_data['email'] = email
+    return await thanks_ask_response_need(update, context)
 
-    # ФОРМУЄМО ЗВІТ ДЛЯ ПЕРЕВІРКИ
+
+async def thanks_ask_response_need(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Запит чи потрібна відповідь на подяку"""
+    prompt = (
+        "❓ <b>Чи потрібна вам офіційна відповідь на це звернення?</b>\n\n"
+        "Оберіть зручний для вас варіант нижче 👇"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📧 Так, електронною поштою", callback_data="thanks_resp:email")],
+        [InlineKeyboardButton("📮 Так, паперовим листом (Укрпошта)", callback_data="thanks_resp:mail")],
+        [InlineKeyboardButton("❌ Ні, відповідь не потрібна", callback_data="thanks_resp:no")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+    ])
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text=prompt,
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
+    return States.THANKS_RESPONSE_NEED
+
+
+async def thanks_response_need_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору потреби у відповіді"""
+    query = update.callback_query
+    await query.answer()
+
+    choice = query.data.split(":")[1]
+    context.user_data['thanks_need_response'] = choice
+
+    if choice == "mail":
+        prompt = (
+            "🏠 <b>Вкажіть Вашу домашню адресу</b>\n\n"
+            "Будь ласка, введіть Вашу повну поштову адресу (вулиця, будинок, квартира, місто, область, поштовий індекс) для відправки відповіді паперовим листом:"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+        ])
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text=prompt,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return States.THANKS_HOME_ADDRESS
+    else:
+        context.user_data['thanks_home_address'] = None
+        return await thanks_show_confirm(update, context)
+
+
+async def thanks_home_address_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отримання домашньої адреси"""
+    await update.message.delete()
+    address = update.message.text.strip()
+    context.user_data['thanks_home_address'] = address
+    return await thanks_show_confirm(update, context)
+
+
+async def thanks_show_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Формує звіт і показує екран підтвердження"""
     thanks_type = context.user_data.get('thanks_type')
     phone = context.user_data.get('phone', 'Не вказано')
+    email = context.user_data.get('email', 'Не вказано')
+    need_resp = context.user_data.get('thanks_need_response', 'no')
+    home_address = context.user_data.get('thanks_home_address')
+
+    need_resp_ua = (
+        "Так (Email) 📧" if need_resp == "email"
+        else "Так (Пошта) 📮" if need_resp == "mail"
+        else "Ні ❌"
+    )
 
     if thanks_type == 'specific':
         summary = (
@@ -355,8 +423,8 @@ async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.D
             f"🔢 <b>Борт. номер:</b> {context.user_data.get('board_number')}\n"
             f"✍️ <b>Текст:</b> {context.user_data.get('reason')}\n"
             f"📞 <b>Телефон:</b> {phone}\n"
-            f"📧 <b>Email:</b> {email}\n\n"
-            "Все вірно?"
+            f"📧 <b>Email:</b> {email}\n"
+            f"❓ <b>Потрібна відповідь:</b> {need_resp_ua}\n"
         )
     else:
         summary = (
@@ -365,9 +433,14 @@ async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.D
             f"👤 <b>Ім'я:</b> {context.user_data.get('user_name')}\n"
             f"✍️ <b>Текст:</b> {context.user_data.get('message')}\n"
             f"📞 <b>Телефон:</b> {phone}\n"
-            f"📧 <b>Email:</b> {email}\n\n"
-            "Все вірно?"
+            f"📧 <b>Email:</b> {email}\n"
+            f"❓ <b>Потрібна відповідь:</b> {need_resp_ua}\n"
         )
+
+    if need_resp == "mail" and home_address:
+        summary += f"🏠 <b>Адреса:</b> {home_address}\n"
+
+    summary += "\nВсе вірно?"
 
     # КНОПКИ ПІДТВЕРДЖЕННЯ
     keyboard = [
@@ -399,6 +472,8 @@ async def thanks_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         'thanks_type': context.user_data.get('thanks_type'),
         'user_email': context.user_data.get('email', 'Не вказано'),
         'user_phone': context.user_data.get('phone', 'Не вказано'),
+        'need_response': context.user_data.get('thanks_need_response', 'no'),
+        'home_address': context.user_data.get('thanks_home_address'),
         'user_id': update.effective_user.id,
         'username': update.effective_user.username,
         'category': 'Подяки'
@@ -458,6 +533,8 @@ async def thanks_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data.pop('user_name', None)
     context.user_data.pop('phone', None)
     context.user_data.pop('email', None)
+    context.user_data.pop('thanks_need_response', None)
+    context.user_data.pop('thanks_home_address', None)
 
     return ConversationHandler.END
 

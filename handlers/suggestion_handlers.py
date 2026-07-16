@@ -98,16 +98,15 @@ async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYP
 
     context.user_data['suggestion_phone'] = phone
 
-    # Кнопка "Пропустити" для Email
+    # Клавіатура для Email (обов'язково)
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Пропустити Email ⏭️", callback_data="suggestion_skip_email")],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
     ])
 
     await safe_edit_prev_message(
         context,
         update.effective_chat.id,
-        text=MESSAGES['suggestion_email'],
+        text="📧 <b>Крок 4: E-mail для зв'язку</b>\n\nБудь ласка, введіть Вашу адресу електронної пошти (обов'язково):",
         reply_markup=kb
     )
     return States.SUGGESTION_EMAIL
@@ -121,38 +120,113 @@ async def suggestion_check_data(update: Update, context: ContextTypes.DEFAULT_TY
 
     if is_callback:
         query = update.callback_query
-        await query.answer()
-        email = "Не вказано"
-    else:
-        await update.message.delete()
-        raw_email = update.message.text.strip()
+        await query.answer("Цей крок є обов'язковим!", show_alert=True)
+        return States.SUGGESTION_EMAIL
 
-        if not is_valid_email(raw_email):
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("Пропустити Email ⏭️", callback_data="suggestion_skip_email")],
-                [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
-            ])
-            await safe_edit_prev_message(
-                context,
-                update.effective_chat.id,
-                text="⚠️ <b>Некоректний формат E-mail!</b>\n\nБудь ласка, введіть дійсну адресу (наприклад: user@example.com) або пропустіть:",
-                reply_markup=kb,
-                parse_mode=ParseMode.HTML
-            )
-            return States.SUGGESTION_EMAIL
+    await update.message.delete()
+    raw_email = update.message.text.strip()
 
-        email = raw_email
+    if not is_valid_email(raw_email):
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+        ])
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text="⚠️ <b>Некоректний формат E-mail!</b>\n\nБудь ласка, введіть дійсну адресу (наприклад: user@example.com):",
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML
+        )
+        return States.SUGGESTION_EMAIL
 
+    email = raw_email
     context.user_data['suggestion_email'] = email
+    return await suggestion_ask_response_need(update, context)
+
+
+async def suggestion_ask_response_need(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Запит чи потрібна відповідь на пропозицію"""
+    prompt = (
+        "❓ <b>Чи потрібна вам офіційна відповідь на це звернення?</b>\n\n"
+        "Оберіть зручний для вас варіант нижче 👇"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📧 Так, електронною поштою", callback_data="suggestion_resp:email")],
+        [InlineKeyboardButton("📮 Так, паперовим листом (Укрпошта)", callback_data="suggestion_resp:mail")],
+        [InlineKeyboardButton("❌ Ні, відповідь не потрібна", callback_data="suggestion_resp:no")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+    ])
+    await safe_edit_prev_message(
+        context,
+        update.effective_chat.id,
+        text=prompt,
+        reply_markup=keyboard,
+        parse_mode='HTML'
+    )
+    return States.SUGGESTION_RESPONSE_NEED
+
+
+async def suggestion_response_need_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору потреби у відповіді"""
+    query = update.callback_query
+    await query.answer()
+
+    choice = query.data.split(":")[1]
+    context.user_data['suggestion_need_response'] = choice
+
+    if choice == "mail":
+        prompt = (
+            "🏠 <b>Вкажіть Вашу домашню адресу</b>\n\n"
+            "Будь ласка, введіть Вашу повну поштову адресу (вулиця, будинок, квартира, місто, область, поштовий індекс) для відправки відповіді паперовим листом:"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
+        ])
+        await safe_edit_prev_message(
+            context,
+            update.effective_chat.id,
+            text=prompt,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return States.SUGGESTION_HOME_ADDRESS
+    else:
+        context.user_data['suggestion_home_address'] = None
+        return await suggestion_show_confirm(update, context)
+
+
+async def suggestion_home_address_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отримання домашньої адреси"""
+    await update.message.delete()
+    address = update.message.text.strip()
+    context.user_data['suggestion_home_address'] = address
+    return await suggestion_show_confirm(update, context)
+
+
+async def suggestion_show_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує екран підтвердження зведених даних"""
+    email = context.user_data.get('suggestion_email')
+    need_resp = context.user_data.get('suggestion_need_response', 'no')
+    home_address = context.user_data.get('suggestion_home_address')
+
+    need_resp_ua = (
+        "Так (Email) 📧" if need_resp == "email"
+        else "Так (Пошта) 📮" if need_resp == "mail"
+        else "Ні ❌"
+    )
 
     summary = (
         f"🔍 <b>Перевірте Вашу пропозицію:</b>\n\n"
         f"📝 <b>Текст:</b> {context.user_data.get('suggestion_text')}\n"
         f"👤 <b>Ім'я:</b> {context.user_data.get('suggestion_name')}\n"
         f"📞 <b>Телефон:</b> {context.user_data.get('suggestion_phone')}\n"
-        f"📧 <b>Email:</b> {email}\n\n"
-        "Усе правильно?"
+        f"📧 <b>Email:</b> {email}\n"
+        f"❓ <b>Потрібна відповідь:</b> {need_resp_ua}\n"
     )
+    if need_resp == "mail" and home_address:
+        summary += f"🏠 <b>Адреса:</b> {home_address}\n"
+
+    summary += "\nУсе правильно?"
 
     keyboard = [
         [InlineKeyboardButton("✅ Все вірно, надіслати", callback_data="suggestion_confirm_send")],
@@ -167,7 +241,6 @@ async def suggestion_check_data(update: Update, context: ContextTypes.DEFAULT_TY
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.HTML
     )
-
     return States.SUGGESTION_CONFIRMATION
 
 
@@ -180,7 +253,9 @@ async def suggestion_save_final(update: Update, context: ContextTypes.DEFAULT_TY
         "text": context.user_data.get('suggestion_text'),
         "user_name": context.user_data.get('suggestion_name'),
         "user_phone": context.user_data.get('suggestion_phone'),
-        "user_email": context.user_data.get('suggestion_email')
+        "user_email": context.user_data.get('suggestion_email'),
+        "need_response": context.user_data.get('suggestion_need_response', 'no'),
+        "home_address": context.user_data.get('suggestion_home_address')
     }
 
     try:
@@ -211,4 +286,6 @@ async def suggestion_save_final(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.pop('suggestion_name', None)
     context.user_data.pop('suggestion_phone', None)
     context.user_data.pop('suggestion_email', None)
+    context.user_data.pop('suggestion_need_response', None)
+    context.user_data.pop('suggestion_home_address', None)
     return ConversationHandler.END
