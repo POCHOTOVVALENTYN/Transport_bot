@@ -565,6 +565,12 @@ async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     by_category = feedback_stats.get("by_category", {})
 
     def _cat_count(key: str) -> int:
+        if key == "thanks":
+            return by_category.get("thanks", 0) + by_category.get("Подяки", 0) + by_category.get("Подяка", 0)
+        if key == "complaint":
+            return by_category.get("complaint", 0) + by_category.get("Скарги", 0) + by_category.get("Скарга", 0)
+        if key == "suggestion":
+            return by_category.get("suggestion", 0) + by_category.get("Пропозиції", 0) + by_category.get("Пропозиція", 0)
         return by_category.get(key, 0)
 
     known_total = _cat_count("complaint") + _cat_count("thanks") + _cat_count("suggestion")
