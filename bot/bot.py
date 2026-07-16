@@ -75,7 +75,9 @@ from handlers.admin_handlers import (
     admin_add_holiday_date_start, admin_add_holiday_date_save,
     admin_del_holiday_date_menu, admin_del_holiday_date_confirm,
     admin_show_holiday_bookings, admin_export_users,
-    moderate_approve_callback, moderate_reject_callback
+    moderate_approve_callback, moderate_reject_callback,
+    admin_mail_archive_menu, admin_mail_show_category,
+    admin_mail_show_detail, admin_mail_resend
 )
 
 from utils.logger import logger
@@ -212,6 +214,12 @@ class TransportBot:
         # Модерація звернень (Затвердити / Відхилити)
         self.app.add_handler(CallbackQueryHandler(moderate_approve_callback, pattern="^feed_mod:approve:"))
         self.app.add_handler(CallbackQueryHandler(moderate_reject_callback, pattern="^feed_mod:reject:"))
+
+        # Поштовий архів звернень для загальних адмінів
+        self.app.add_handler(CallbackQueryHandler(admin_mail_archive_menu, pattern="^admin_mail_archive$"))
+        self.app.add_handler(CallbackQueryHandler(admin_mail_show_category, pattern="^admin_mail_cat:"))
+        self.app.add_handler(CallbackQueryHandler(admin_mail_show_detail, pattern="^admin_mail_detail:"))
+        self.app.add_handler(CallbackQueryHandler(admin_mail_resend, pattern="^admin_mail_resend:"))
 
         # Кнопка входу в Адмінку Музею (Максим)
         self.app.add_handler(CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"))

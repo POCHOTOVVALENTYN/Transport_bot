@@ -269,6 +269,7 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
 
     keyboard = [
         [InlineKeyboardButton("📢 Зробити розсилку (Новини)", callback_data="admin_broadcast_start")],
+        [InlineKeyboardButton("📧 Поштовий архів", callback_data="admin_mail_archive")],
         [InlineKeyboardButton("🔄 Синхронізувати БД -> Sheets", callback_data="admin_sync_db")],
         [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton("🏠 В режим користувача", callback_data="main_menu")]
@@ -280,6 +281,219 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+async def admin_mail_archive_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Меню вибору категорії поштового архіву"""
+    query = update.callback_query
+    await query.answer()
+    if query.from_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    text = "📧 <b>Поштовий архів звернень</b>\n\nОберіть категорію для перегляду та відправки:"
+    keyboard = [
+        [InlineKeyboardButton("⚠️ Скарги (Complaints)", callback_data="admin_mail_cat:complaint:0")],
+        [InlineKeyboardButton("❤️ Подяки (Thanks)", callback_data="admin_mail_cat:thanks:0")],
+        [InlineKeyboardButton("💡 Пропозиції (Suggestions)", callback_data="admin_mail_cat:suggestion:0")],
+        [InlineKeyboardButton("⬅️ Назад до панелі", callback_data="general_admin_menu")]
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+
+async def admin_mail_show_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує список звернень у обраній категорії з пагінацією"""
+    query = update.callback_query
+    await query.answer()
+    if query.from_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    # Callback data format: admin_mail_cat:<category>:<offset>
+    parts = query.data.split(":")
+    category = parts[1]
+    offset = int(parts[2]) if len(parts) > 2 else 0
+    limit = 8
+
+    category_ua = {
+        "complaint": "Скарги ⚠️",
+        "thanks": "Подяки ❤️",
+        "suggestion": "Пропозиції 💡"
+    }.get(category, category.upper())
+
+    async with AsyncSessionLocal() as session:
+        # Отримуємо загальну кількість
+        from sqlalchemy import func
+        total = await session.scalar(
+            select(func.count(Feedback.id)).where(Feedback.category == category)
+        ) or 0
+
+        # Отримуємо самі записи
+        result = await session.execute(
+            select(Feedback)
+            .where(Feedback.category == category)
+            .order_by(Feedback.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        feedbacks = result.scalars().all()
+
+        if not feedbacks:
+            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_mail_archive")]]
+            await query.edit_message_text(
+                f"📧 <b>Архів: {category_ua}</b>\n\nНемає звернень у цій категорії.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.HTML
+            )
+            return
+
+        text = f"📧 <b>Архів: {category_ua}</b> (Показано {offset + 1}-{min(offset + limit, total)} з {total}):\n\nОберіть запис для перегляду:"
+        keyboard = []
+
+        status_icons = {
+            "sent": "✅",
+            "rejected": "❌",
+            "pending": "⏳"
+        }
+
+        for f in feedbacks:
+            icon = status_icons.get(f.email_status, "⏳")
+            created_str = f.created_at.strftime("%d.%m") if f.created_at else "N/A"
+            btn_text = f"{icon} {created_str} | {f.ticket_id} ({f.user_name or 'Не вказано'})"
+            keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"admin_mail_detail:{f.ticket_id}:{offset}")])
+
+        # Кнопки навігації
+        nav_row = []
+        if offset > 0:
+            nav_row.append(InlineKeyboardButton("⬅️ Назад", callback_data=f"admin_mail_cat:{category}:{max(0, offset - limit)}"))
+        if offset + limit < total:
+            nav_row.append(InlineKeyboardButton("Далі ➡️", callback_data=f"admin_mail_cat:{category}:{offset + limit}"))
+        if nav_row:
+            keyboard.append(nav_row)
+
+        keyboard.append([InlineKeyboardButton("⬅️ До вибору категорій", callback_data="admin_mail_archive")])
+
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+
+async def admin_mail_show_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Детальний перегляд звернення"""
+    query = update.callback_query
+    await query.answer()
+    if query.from_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    # Callback data format: admin_mail_detail:<ticket_id>:<return_offset>
+    parts = query.data.split(":")
+    ticket_id = parts[1]
+    return_offset = int(parts[2]) if len(parts) > 2 else 0
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Feedback).where(Feedback.ticket_id == ticket_id))
+        feedback = result.scalar_one_or_none()
+        if not feedback:
+            await query.edit_message_text("❌ Звернення не знайдено.")
+            return
+
+        category_ua = {
+            "complaint": "СКАРГА ⚠️",
+            "thanks": "ПОДЯКА ❤️",
+            "suggestion": "ПРОПОЗИЦІЯ 💡"
+        }.get(feedback.category, feedback.category.upper())
+
+        status_text = {
+            "sent": "✅ Надіслано на omet@omr.gov.ua",
+            "rejected": "❌ Відхилено модератором",
+            "pending": "⏳ Очікує модерації"
+        }.get(feedback.email_status, "⏳ Очікує модерації")
+
+        text = (
+            f"📧 <b>Картка звернення {feedback.ticket_id}</b>\n\n"
+            f"📌 <b>Категорія:</b> {category_ua}\n"
+            f"📅 <b>Дата:</b> {feedback.created_at.strftime('%d.%m.%Y %H:%M') if feedback.created_at else ''}\n"
+            f"👤 <b>Заявник:</b> {feedback.user_name or 'Не вказано'}\n"
+            f"📞 <b>Телефон:</b> {feedback.user_phone or 'Не вказано'}\n"
+            f"📧 <b>Email:</b> {feedback.user_email or 'Не вказано'}\n"
+        )
+
+        if feedback.category in ("complaint", "thanks") and (feedback.route or feedback.board_number or feedback.transport_type):
+            t_prefix = "Трамвай" if feedback.transport_type == "tram" else "Тролейбус" if feedback.transport_type == "trolleybus" else ""
+            route_str = f"{t_prefix} № {feedback.route}" if t_prefix and feedback.route else (feedback.route or "")
+            text += (
+                f"🚊 <b>Транспорт:</b> {route_str or 'Не вказано'}\n"
+                f"🔢 <b>Бортовий номер:</b> {feedback.board_number or 'Не вказано'}\n"
+            )
+
+        text += (
+            f"----------------------------------------\n"
+            f"📝 <b>Текст звернення:</b>\n{feedback.text}\n"
+            f"----------------------------------------\n"
+            f"✉️ <b>Статус відправки:</b>\n{status_text}"
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("📧 Надіслати повторно на Email", callback_data=f"admin_mail_resend:{feedback.ticket_id}:{return_offset}")],
+            [InlineKeyboardButton("⬅️ Назад до списку", callback_data=f"admin_mail_cat:{feedback.category}:{return_offset}")]
+        ]
+
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+
+async def admin_mail_resend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Повторне або примусове надсилання звернення на Email секретаря"""
+    query = update.callback_query
+    await query.answer("⏳ Пересилання... Зачекайте.")
+    if query.from_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    # Callback data format: admin_mail_resend:<ticket_id>:<return_offset>
+    parts = query.data.split(":")
+    ticket_id = parts[1]
+    return_offset = int(parts[2]) if len(parts) > 2 else 0
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Feedback).where(Feedback.ticket_id == ticket_id))
+        feedback = result.scalar_one_or_none()
+        if not feedback:
+            await query.answer("❌ Звернення не знайдено.")
+            return
+
+        from services.pdf_service import generate_feedback_pdf
+        from services.email_service import send_feedback_email
+        import os
+
+        pdf_path = None
+        try:
+            await query.edit_message_text(f"⏳ Спроба відправки звернення {ticket_id} на пошту секретарю... Генеруємо PDF...")
+
+            pdf_path = generate_feedback_pdf(feedback)
+
+            loop = asyncio.get_running_loop()
+            success = await loop.run_in_executor(
+                None,
+                send_feedback_email,
+                pdf_path,
+                feedback.ticket_id,
+                feedback.category
+            )
+
+            if success:
+                feedback.email_status = "sent"
+                await session.commit()
+                await query.answer("✅ Успішно надіслано на omet@omr.gov.ua!", show_alert=True)
+            else:
+                await query.answer("❌ Збій відправки SMTP. Перевірте логи.", show_alert=True)
+        except Exception as err:
+            logger.error(f"❌ Помилка при повторному надсиланні звернення {ticket_id}: {err}")
+            await query.answer(f"❌ Помилка: {err}", show_alert=True)
+        finally:
+            if pdf_path and os.path.exists(pdf_path):
+                try:
+                    os.remove(pdf_path)
+                except Exception as del_err:
+                    logger.error(f"Не вдалося видалити тимчасовий PDF {pdf_path}: {del_err}")
+
+    # Повертаємося до картки деталей
+    query.data = f"admin_mail_detail:{ticket_id}:{return_offset}"
+    await admin_mail_show_detail(update, context)
 
 
 # --- ФУНКЦІЇ ЗАГАЛЬНИХ АДМІНІВ (Розсилка і Sync) ---
