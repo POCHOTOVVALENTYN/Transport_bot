@@ -313,23 +313,39 @@ async def admin_mail_show_category(update: Update, context: ContextTypes.DEFAULT
     offset = int(parts[2]) if len(parts) > 2 else 0
     limit = 8
 
+    # Нормалізуємо категорію до англійського ключа
+    if category in ("thanks", "Подяки"):
+        category = "thanks"
+    elif category in ("complaint", "Скарги"):
+        category = "complaint"
+    elif category in ("suggestion", "Пропозиції"):
+        category = "suggestion"
+
     category_ua = {
         "complaint": "Скарги ⚠️",
         "thanks": "Подяки ❤️",
         "suggestion": "Пропозиції 💡"
     }.get(category, category.upper())
 
+    categories_to_query = [category]
+    if category == "thanks":
+        categories_to_query = ["thanks", "Подяки"]
+    elif category == "complaint":
+        categories_to_query = ["complaint", "Скарги"]
+    elif category == "suggestion":
+        categories_to_query = ["suggestion", "Пропозиції"]
+
     async with AsyncSessionLocal() as session:
         # Отримуємо загальну кількість
         from sqlalchemy import func
         total = await session.scalar(
-            select(func.count(Feedback.id)).where(Feedback.category == category)
+            select(func.count(Feedback.id)).where(Feedback.category.in_(categories_to_query))
         ) or 0
 
         # Отримуємо самі записи
         result = await session.execute(
             select(Feedback)
-            .where(Feedback.category == category)
+            .where(Feedback.category.in_(categories_to_query))
             .order_by(Feedback.id.desc())
             .offset(offset)
             .limit(limit)
