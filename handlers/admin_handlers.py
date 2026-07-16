@@ -110,10 +110,12 @@ async def moderate_approve_callback(update: Update, context: ContextTypes.DEFAUL
             return
 
         if feedback.email_status == "sent":
-            await query.edit_message_text(f"⚠️ Звернення {ticket_id} вже було надіслано на пошту.")
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Повернутися до головного меню", callback_data="general_admin_menu")]])
+            await query.edit_message_text(f"⚠️ Звернення {ticket_id} вже було надіслано на пошту.", reply_markup=markup)
             return
         elif feedback.email_status == "rejected":
-            await query.edit_message_text(f"⚠️ Звернення {ticket_id} вже було відхилено.")
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Повернутися до головного меню", callback_data="general_admin_menu")]])
+            await query.edit_message_text(f"⚠️ Звернення {ticket_id} вже було відхилено.", reply_markup=markup)
             return
 
         # Зберігаємо статус "sent"
@@ -146,7 +148,7 @@ async def moderate_approve_callback(update: Update, context: ContextTypes.DEFAUL
                 admin_name = update.effective_user.first_name or update.effective_user.username or "Адмін"
                 time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
 
-                # Формуємо новий текст без кнопок
+                # Формуємо новий текст з кнопкою повернення
                 category_ua = {
                     "complaint": "СКАРГА ⚠️",
                     "thanks": "ПОДЯКА ❤️",
@@ -166,7 +168,8 @@ async def moderate_approve_callback(update: Update, context: ContextTypes.DEFAUL
                     f"🕒 Час: {time_str}"
                 )
 
-                await query.edit_message_text(text=new_text, parse_mode="HTML")
+                markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Повернутися до головного меню", callback_data="general_admin_menu")]])
+                await query.edit_message_text(text=new_text, reply_markup=markup, parse_mode="HTML")
 
                 # Сповіщаємо користувача
                 try:
@@ -184,14 +187,16 @@ async def moderate_approve_callback(update: Update, context: ContextTypes.DEFAUL
                     f"❌ Помилка відправки листа для {ticket_id}. Перевірте налаштування SMTP у .env файлі.",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("🔄 Спробувати знову", callback_data=f"feed_mod:approve:{ticket_id}")],
-                        [InlineKeyboardButton("❌ Відхилити", callback_data=f"feed_mod:reject:{ticket_id}")]
+                        [InlineKeyboardButton("❌ Відхилити", callback_data=f"feed_mod:reject:{ticket_id}")],
+                        [InlineKeyboardButton("🏠 Повернутися до головного меню", callback_data="general_admin_menu")]
                     ])
                 )
         except Exception as err:
             logger.error(f"❌ Помилка при затвердженні звернення {ticket_id}: {err}")
             feedback.email_status = "pending"
             await session.commit()
-            await query.edit_message_text(f"❌ Помилка обробки звернення: {err}")
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Повернутися до головного меню", callback_data="general_admin_menu")]])
+            await query.edit_message_text(f"❌ Помилка обробки звернення: {err}", reply_markup=markup)
         finally:
             if pdf_path and os.path.exists(pdf_path):
                 try:
@@ -211,11 +216,13 @@ async def moderate_reject_callback(update: Update, context: ContextTypes.DEFAULT
         result = await session.execute(select(Feedback).where(Feedback.ticket_id == ticket_id))
         feedback = result.scalar_one_or_none()
         if not feedback:
-            await query.edit_message_text("❌ Звернення не знайдено.")
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Повернутися до головного меню", callback_data="general_admin_menu")]])
+            await query.edit_message_text("❌ Звернення не знайдено.", reply_markup=markup)
             return
 
         if feedback.email_status in ("sent", "rejected"):
-            await query.edit_message_text(f"⚠️ Звернення {ticket_id} вже оброблено (статус: {feedback.email_status}).")
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Повернутися до головного меню", callback_data="general_admin_menu")]])
+            await query.edit_message_text(f"⚠️ Звернення {ticket_id} вже оброблено (статус: {feedback.email_status}).", reply_markup=markup)
             return
 
         feedback.email_status = "rejected"
@@ -243,7 +250,8 @@ async def moderate_reject_callback(update: Update, context: ContextTypes.DEFAULT
             f"🕒 Час: {time_str}"
         )
 
-        await query.edit_message_text(text=new_text, parse_mode="HTML")
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Повернутися до головного меню", callback_data="general_admin_menu")]])
+        await query.edit_message_text(text=new_text, reply_markup=markup, parse_mode="HTML")
 
         # Сповіщаємо користувача
         try:
