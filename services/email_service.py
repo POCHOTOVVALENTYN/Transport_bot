@@ -32,7 +32,10 @@ def send_feedback_email(pdf_path: str, ticket_id: str, category: str) -> bool:
         category_ua = {
             "complaint": "Скарга",
             "thanks": "Подяка",
-            "suggestion": "Пропозиція"
+            "suggestion": "Пропозиція",
+            "Скарги": "Скарга",
+            "Подяки": "Подяка",
+            "Пропозиції": "Пропозиція"
         }.get(category, category)
 
         msg['Subject'] = f"Звернення громадян: {category_ua} [{ticket_id}]"
@@ -44,7 +47,7 @@ def send_feedback_email(pdf_path: str, ticket_id: str, category: str) -> bool:
             f"Номер звернення: {ticket_id}\n\n"
             f"Повні дані знаходяться у вкладеному файлі PDF.\n\n"
             f"З повагою,\n"
-            f"Telegram-бот КП ОГЕТ"
+            f"Telegram-бот КП ОМЕТ"
         )
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
