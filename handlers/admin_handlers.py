@@ -172,7 +172,7 @@ async def moderate_approve_callback(update: Update, context: ContextTypes.DEFAUL
                 try:
                     await context.bot.send_message(
                         chat_id=feedback.user_id,
-                        text=f"✉️ <b>Ваше звернення {feedback.ticket_id} було розглянуто модератором та успішно надіслано до реєстрації секретарем КП ОГЕТ!</b>",
+                        text=f"✉️ <b>Ваше звернення {feedback.ticket_id} було розглянуто модератором та успішно надіслано до офіційної реєстрації.</b>",
                         parse_mode="HTML"
                     )
                 except Exception as user_err:
