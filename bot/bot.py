@@ -328,7 +328,10 @@ class TransportBot:
                     CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$")
                 ]
             },
-            fallbacks=[CallbackQueryHandler(main_menu, pattern="^main_menu$")],
+            fallbacks=[
+                CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+            ],
             per_message=False
         )
 
