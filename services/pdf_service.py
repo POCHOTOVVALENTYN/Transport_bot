@@ -64,8 +64,17 @@ def generate_feedback_pdf(feedback) -> str:
     pdf.cell(0, 8, f"Категорія: {category_ua}", ln=True)
     pdf.cell(0, 8, f"Реєстраційний номер: {feedback.ticket_id}", ln=True)
 
-    created_at_str = feedback.created_at.strftime("%d.%m.%Y %H:%M") if feedback.created_at else "Невідомо"
-    pdf.cell(0, 8, f"Дата реєстрації: {created_at_str} (Київський час)", ln=True)
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+
+    created_at_str = "Невідомо"
+    if feedback.created_at:
+        dt_val = feedback.created_at
+        if dt_val.tzinfo is None:
+            dt_val = dt_val.replace(tzinfo=timezone.utc)
+        created_at_str = dt_val.astimezone(ZoneInfo("Europe/Kyiv")).strftime("%d.%m.%Y %H:%M")
+
+    pdf.cell(0, 8, f"Дата реєстрації: {created_at_str}", ln=True)
 
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)
