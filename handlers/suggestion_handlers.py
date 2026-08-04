@@ -271,7 +271,10 @@ async def suggestion_save_final(update: Update, context: ContextTypes.DEFAULT_TY
             context,
             update.effective_chat.id,
             text=result['message'],
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Зрозуміло 👍", callback_data="delete_message")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+            ]),
             parse_mode=ParseMode.HTML
         )
     except Exception as e:

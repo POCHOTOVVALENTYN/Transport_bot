@@ -510,9 +510,10 @@ async def thanks_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
             context,
             update.effective_chat.id,
             text=success_text,
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]]
-            ),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Зрозуміло 👍", callback_data="delete_message")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+            ]),
             parse_mode=ParseMode.HTML
         )
         logger.info(f"Thanks saved: {reg_number}")

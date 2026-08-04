@@ -636,7 +636,10 @@ async def complaint_save_final(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data.pop('complaint_edit_mode', None)
         context.user_data.pop('complaint_edit_field', None)
 
-        success_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]])
+        success_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Зрозуміло 👍", callback_data="delete_message")],
+            [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+        ])
         await safe_edit_prev_message(
             context,
             update.effective_chat.id,

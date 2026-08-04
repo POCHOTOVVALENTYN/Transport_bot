@@ -9,6 +9,18 @@ from utils.logger import logger  # Додати імпорт нагорі
 
 
 
+async def delete_message_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Видаляє поточне повідомлення сповіщення при натисканні 'Зрозуміло' для збереження чистоти чату.
+    """
+    query = update.callback_query
+    await query.answer()
+    try:
+        await query.message.delete()
+    except Exception as e:
+        logger.warning(f"Не вдалося видалити повідомлення: {e}")
+
+
 async def dismiss_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Видаляє повідомлення розсилки і показує Головне меню.
