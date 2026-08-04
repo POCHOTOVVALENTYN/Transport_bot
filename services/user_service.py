@@ -42,18 +42,16 @@ class UserService:
             await session.commit()
 
     async def get_subscribed_users_ids(self):
-        """Повертає ID ТІЛЬКИ підписаних користувачів"""
+        """Повертає ID усіх користувачів для розсилки"""
         async with AsyncSessionLocal() as session:
-            # Фільтруємо по is_subscribed == True
-            result = await session.execute(select(BotUser.telegram_id).where(BotUser.is_subscribed == True))
+            result = await session.execute(select(BotUser.telegram_id))
             return result.scalars().all()
 
     async def get_stats(self):
         """Статистика для адміна"""
         async with AsyncSessionLocal() as session:
             total = await session.scalar(select(func.count(BotUser.id)))
-            subscribed = await session.scalar(select(func.count(BotUser.id)).where(BotUser.is_subscribed == True))
-            return {"total_users": total, "subscribed_users": subscribed}
+            return {"total_users": total}
 
     async def get_all_users(self):
         """Повертає список усіх зареєстрованих користувачів"""

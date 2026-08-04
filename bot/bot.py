@@ -85,7 +85,6 @@ from utils.logger import logger
 from config.settings import FEEDBACK_SYNC_INTERVAL_MIN
 from services.tickets_service import TicketsService
 
-from handlers.subscription_handlers import show_subscription_menu, handle_subscription_choice
 from handlers.common import dismiss_broadcast_message, delete_message_callback
 
 from handlers.common import handle_unexpected_message
@@ -195,10 +194,6 @@ class TransportBot:
 
         # І додаємо хендлер для показу меню (якщо ми не в діалозі)
         self.app.add_handler(CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$"))
-        # --- СПОВІЩЕННЯ ---
-        self.app.add_handler(CallbackQueryHandler(show_subscription_menu, pattern="^subscription_menu$"))
-        self.app.add_handler(CallbackQueryHandler(handle_subscription_choice, pattern="^sub:"))
-
         # --- ОБРОБКА КНОПКИ "ПРИХОВАТИ" (ПІД РОЗСИЛКОЮ ТА СПОВІЩЕННЯМИ) ---
         self.app.add_handler(CallbackQueryHandler(dismiss_broadcast_message, pattern="^broadcast_dismiss$"))
         self.app.add_handler(CallbackQueryHandler(delete_message_callback, pattern="^delete_message$"))

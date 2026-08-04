@@ -582,8 +582,7 @@ async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = (
         "📊 <b>Статистика бота</b>\n\n"
-        f"👥 Всього користувачів: <b>{user_stats['total_users']}</b>\n"
-        f"🔔 Підписані на розсилку: <b>{user_stats['subscribed_users']}</b>\n\n"
+        f"👥 Всього користувачів: <b>{user_stats['total_users']}</b>\n\n"
         f"📩 Всього звернень: <b>{feedback_stats['total']}</b>\n"
         f"🆕 Нових (не синхр.): <b>{feedback_stats['new']}</b>\n"
         f"✅ Синхронізованих: <b>{feedback_stats['synced']}</b>\n\n"
@@ -702,7 +701,7 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
                 pass
 
         await msg.reply_text(
-            "🤷‍♂️ Немає підписаних користувачів для розсилки.",
+            "🤷‍♂️ Немає користувачів для розсилки.",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]])
         )
