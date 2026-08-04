@@ -284,7 +284,6 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
     text = (
         f"⚙️ <b>Панель Керування</b>\n\n"
         f"👥 Всього користувачів: <b>{stats['total_users']}</b>\n"
-        f"🔔 Підписано на новини: <b>{stats['subscribed_users']}</b> 🟢\n"  
         f"👋 Вітаю, {update.effective_user.first_name}!"
     )
 
