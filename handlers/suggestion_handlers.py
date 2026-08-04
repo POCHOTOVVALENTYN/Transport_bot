@@ -107,7 +107,8 @@ async def suggestion_get_phone(update: Update, context: ContextTypes.DEFAULT_TYP
         context,
         update.effective_chat.id,
         text="📧 <b>Крок 4: E-mail для зв'язку</b>\n\nБудь ласка, введіть Вашу адресу електронної пошти (обов'язково):",
-        reply_markup=kb
+        reply_markup=kb,
+        parse_mode=ParseMode.HTML
     )
     return States.SUGGESTION_EMAIL
 
