@@ -36,6 +36,7 @@ GENERAL_ADMIN_IDS = [
     384349401,  # Тетяна
     1037495749  # Ірина Лісова
 ]
+LEGACY_USERS_OFFSET = int(os.getenv("LEGACY_USERS_OFFSET", "400"))
 
 # ===============================================
 # 3. GOOGLE SHEETS НАЛАШТУВАННЯ

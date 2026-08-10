@@ -7,7 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler,
                           filters)
-from config.settings import MUSEUM_ADMIN_ID, MUSEUM_ADMIN_IDS, GOOGLE_SHEETS_ID, GENERAL_ADMIN_IDS, BROADCAST_BATCH_SIZE, BROADCAST_PAUSE_SEC
+from config.settings import MUSEUM_ADMIN_ID, MUSEUM_ADMIN_IDS, GOOGLE_SHEETS_ID, GENERAL_ADMIN_IDS, BROADCAST_BATCH_SIZE, BROADCAST_PAUSE_SEC, LEGACY_USERS_OFFSET
 from integrations.google_sheets.client import GoogleSheetsClient
 from utils.logger import logger
 from bot.states import States
@@ -280,10 +280,12 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
 
     # Отримуємо статистику
     stats = await user_service.get_stats()
+    current_users = stats['total_users']
+    grand_total = current_users + LEGACY_USERS_OFFSET
 
     text = (
         f"⚙️ <b>Панель Керування</b>\n\n"
-        f"👥 Всього користувачів: <b>{stats['total_users']}</b>\n"
+        f"👥 Всього користувачів: <b>{grand_total}</b> (поточна серверна БД: {current_users} + {LEGACY_USERS_OFFSET} з попереднього сервера)\n"
         f"👋 Вітаю, {update.effective_user.first_name}!"
     )
 
@@ -579,9 +581,12 @@ async def admin_show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     known_total = _cat_count("complaint") + _cat_count("thanks") + _cat_count("suggestion")
     other_count = max(0, feedback_stats["total"] - known_total)
 
+    current_users = user_stats['total_users']
+    grand_total = current_users + LEGACY_USERS_OFFSET
+
     text = (
         "📊 <b>Статистика бота</b>\n\n"
-        f"👥 Всього користувачів: <b>{user_stats['total_users']}</b>\n\n"
+        f"👥 Всього користувачів: <b>{grand_total}</b> (поточна серверна БД: {current_users} + {LEGACY_USERS_OFFSET} з попереднього сервера)\n\n"
         f"📩 Всього звернень: <b>{feedback_stats['total']}</b>\n"
         f"🆕 Нових (не синхр.): <b>{feedback_stats['new']}</b>\n"
         f"✅ Синхронізованих: <b>{feedback_stats['synced']}</b>\n\n"
