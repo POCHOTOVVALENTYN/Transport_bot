@@ -33,7 +33,6 @@ MUSEUM_ADMIN_IDS = [
 ]
 GENERAL_ADMIN_IDS = [
     830196453,  # Валентин
-    384349401,  # Тетяна
     1037495749  # Ірина Лісова
 ]
 LEGACY_USERS_OFFSET = int(os.getenv("LEGACY_USERS_OFFSET", "400"))
