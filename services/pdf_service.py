@@ -62,7 +62,6 @@ def generate_feedback_pdf(feedback) -> str:
     }.get(feedback.category, feedback.category.upper())
 
     pdf.cell(0, 8, f"Категорія: {category_ua}", ln=True)
-    pdf.cell(0, 8, f"Реєстраційний номер: {feedback.ticket_id}", ln=True)
 
     from datetime import timezone
     from zoneinfo import ZoneInfo

@@ -38,13 +38,12 @@ def send_feedback_email(pdf_path: str, ticket_id: str, category: str) -> bool:
             "Пропозиції": "Пропозиція"
         }.get(category, category)
 
-        msg['Subject'] = f"Звернення громадян: {category_ua} [{ticket_id}]"
+        msg['Subject'] = f"Звернення громадян: {category_ua}"
 
         body = (
             f"Доброго дня!\n\n"
             f"Через Telegram-бот було отримано нове звернення громадян.\n"
-            f"Категорія: {category_ua}\n"
-            f"Номер звернення: {ticket_id}\n\n"
+            f"Категорія: {category_ua}\n\n"
             f"Повні дані знаходяться у вкладеному файлі PDF.\n\n"
             f"З повагою,\n"
             f"Telegram-бот КП ОМЕТ"
