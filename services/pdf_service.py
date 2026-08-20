@@ -86,15 +86,6 @@ def generate_feedback_pdf(feedback) -> str:
     pdf.cell(0, 6, f"Телефон: {feedback.user_phone or 'Не вказано'}", ln=True)
     pdf.cell(0, 6, f"Email: {feedback.user_email or 'Не вказано'}", ln=True)
 
-    need_resp_ua = (
-        "Так (електронною поштою)" if feedback.need_response == "email"
-        else "Так (паперовим листом Укрпошти)" if feedback.need_response == "mail"
-        else "Ні, відповідь не потрібна"
-    )
-    pdf.cell(0, 6, f"Потреба у відповіді: {need_resp_ua}", ln=True)
-    if feedback.need_response == "mail" and feedback.home_address:
-        pdf.cell(0, 6, f"Домашня адреса: {feedback.home_address}", ln=True)
-
     pdf.ln(3)
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)

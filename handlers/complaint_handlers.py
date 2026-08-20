@@ -39,11 +39,6 @@ def _build_complaint_summary(context: ContextTypes.DEFAULT_TYPE) -> str:
     home_address = context.user_data.get('complaint_home_address')
 
     type_str = "📝 Загальна скарга" if ctype == 'general' else "🚋 Скарга на конкретний транспорт"
-    need_resp_ua = (
-        "Так (Email) 📧" if need_resp == "email"
-        else "Так (Пошта) 📮" if need_resp == "mail"
-        else "Ні ❌"
-    )
 
     summary = (
         "🔍 <b>Перевірте правильність введених даних:</b>\n\n"
@@ -63,10 +58,7 @@ def _build_complaint_summary(context: ContextTypes.DEFAULT_TYPE) -> str:
         f"👤 <b>П.І.Б.:</b> {name}\n"
         f"📞 <b>Телефон:</b> {phone}\n"
         f"📧 <b>E-mail:</b> {email}\n"
-        f"❓ <b>Потрібна відповідь:</b> {need_resp_ua}\n"
     )
-    if need_resp == "mail" and home_address:
-        summary += f"🏠 <b>Адреса:</b> {home_address}\n"
 
     summary += "\nУсе правильно?"
     return summary
@@ -92,8 +84,7 @@ def _build_complaint_edit_keyboard(context: ContextTypes.DEFAULT_TYPE) -> Inline
         InlineKeyboardButton("📞 Телефон", callback_data="complaint_edit:phone")
     ])
     keyboard.append([
-        InlineKeyboardButton("📧 E-mail", callback_data="complaint_edit:email"),
-        InlineKeyboardButton("❓ Відповідь / Адреса", callback_data="complaint_edit:response_need")
+        InlineKeyboardButton("📧 E-mail", callback_data="complaint_edit:email")
     ])
     keyboard.append([InlineKeyboardButton("⬅️ Назад до підтвердження", callback_data="complaint_edit_back")])
 
@@ -419,9 +410,8 @@ async def complaint_email_step(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if context.user_data.get('complaint_edit_mode'):
         context.user_data.pop('complaint_edit_mode', None)
-        return await complaint_show_confirm(update, context)
 
-    return await complaint_ask_response_need(update, context)
+    return await complaint_show_confirm(update, context)
 
 
 async def complaint_ask_response_need(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:

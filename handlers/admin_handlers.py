@@ -46,12 +46,6 @@ async def send_moderation_card_to_admins(bot, ticket_id: str):
             "suggestion": "ПРОПОЗИЦІЯ 💡"
         }.get(feedback.category, feedback.category.upper())
 
-        need_resp_ua = (
-            "Так (Email)" if feedback.need_response == "email"
-            else "Так (Пошта)" if feedback.need_response == "mail"
-            else "Ні"
-        )
-
         text = (
             f"📥 <b>Нове звернення громадян: {category_ua}</b>\n"
             f"🆔 <b>ID:</b> <code>{feedback.ticket_id}</code>\n"
@@ -60,10 +54,7 @@ async def send_moderation_card_to_admins(bot, ticket_id: str):
             f"👤 <b>Заявник:</b> {feedback.user_name or 'Не вказано'}\n"
             f"📞 <b>Телефон:</b> {feedback.user_phone or 'Не вказано'}\n"
             f"📧 <b>Email:</b> {feedback.user_email or 'Не вказано'}\n"
-            f"❓ <b>Відповідь:</b> {need_resp_ua}\n"
         )
-        if feedback.need_response == "mail" and feedback.home_address:
-            text += f"🏠 <b>Адреса:</b> {feedback.home_address}\n"
 
         if feedback.category in ("complaint", "thanks") and (feedback.route or feedback.board_number or feedback.transport_type):
             t_prefix = "Трамвай" if feedback.transport_type == "tram" else "Тролейбус" if feedback.transport_type == "trolleybus" else ""

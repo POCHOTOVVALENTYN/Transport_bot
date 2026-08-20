@@ -340,65 +340,21 @@ async def thanks_input_email_and_confirm(update: Update, context: ContextTypes.D
 
     email = raw_email
     context.user_data['email'] = email
-    return await thanks_ask_response_need(update, context)
+    return await thanks_show_confirm(update, context)
 
 
 async def thanks_ask_response_need(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    """Запит чи потрібна відповідь на подяку"""
-    prompt = (
-        "❓ <b>Чи потрібна вам офіційна відповідь на це звернення?</b>\n\n"
-        "Оберіть зручний для вас варіант нижче 👇"
-    )
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📧 Так, електронною поштою", callback_data="thanks_resp:email")],
-        [InlineKeyboardButton("📮 Так, паперовим листом (Укрпошта)", callback_data="thanks_resp:mail")],
-        [InlineKeyboardButton("❌ Ні, відповідь не потрібна", callback_data="thanks_resp:no")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
-    ])
-    await safe_edit_prev_message(
-        context,
-        update.effective_chat.id,
-        text=prompt,
-        reply_markup=keyboard,
-        parse_mode='HTML'
-    )
-    return States.THANKS_RESPONSE_NEED
+    """Запит чи потрібна відповідь на подяку (застарілий крок, залишено для сумісності)"""
+    return await thanks_show_confirm(update, context)
 
 
 async def thanks_response_need_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка вибору потреби у відповіді"""
-    query = update.callback_query
-    await query.answer()
-
-    choice = query.data.split(":")[1]
-    context.user_data['thanks_need_response'] = choice
-
-    if choice == "mail":
-        prompt = (
-            "🏠 <b>Вкажіть Вашу домашню адресу</b>\n\n"
-            "Будь ласка, введіть Вашу повну поштову адресу (вулиця, будинок, квартира, місто, область, поштовий індекс) для відправки відповіді паперовим листом:"
-        )
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚫 Скасувати", callback_data="feedback_menu")]
-        ])
-        await safe_edit_prev_message(
-            context,
-            update.effective_chat.id,
-            text=prompt,
-            reply_markup=keyboard,
-            parse_mode='HTML'
-        )
-        return States.THANKS_HOME_ADDRESS
-    else:
-        context.user_data['thanks_home_address'] = None
-        return await thanks_show_confirm(update, context)
+    """Обробка вибору потреби у відповіді (застарілий крок)"""
+    return await thanks_show_confirm(update, context)
 
 
 async def thanks_home_address_step(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отримання домашньої адреси"""
-    await update.message.delete()
-    address = update.message.text.strip()
-    context.user_data['thanks_home_address'] = address
+    """Отримання домашньої адреси (застарілий крок)"""
     return await thanks_show_confirm(update, context)
 
 
@@ -407,14 +363,6 @@ async def thanks_show_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
     thanks_type = context.user_data.get('thanks_type')
     phone = context.user_data.get('phone', 'Не вказано')
     email = context.user_data.get('email', 'Не вказано')
-    need_resp = context.user_data.get('thanks_need_response', 'no')
-    home_address = context.user_data.get('thanks_home_address')
-
-    need_resp_ua = (
-        "Так (Email) 📧" if need_resp == "email"
-        else "Так (Пошта) 📮" if need_resp == "mail"
-        else "Ні ❌"
-    )
 
     if thanks_type == 'specific':
         summary = (
@@ -424,7 +372,6 @@ async def thanks_show_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"✍️ <b>Текст:</b> {context.user_data.get('reason')}\n"
             f"📞 <b>Телефон:</b> {phone}\n"
             f"📧 <b>Email:</b> {email}\n"
-            f"❓ <b>Потрібна відповідь:</b> {need_resp_ua}\n"
         )
     else:
         summary = (
@@ -434,11 +381,7 @@ async def thanks_show_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"✍️ <b>Текст:</b> {context.user_data.get('message')}\n"
             f"📞 <b>Телефон:</b> {phone}\n"
             f"📧 <b>Email:</b> {email}\n"
-            f"❓ <b>Потрібна відповідь:</b> {need_resp_ua}\n"
         )
-
-    if need_resp == "mail" and home_address:
-        summary += f"🏠 <b>Адреса:</b> {home_address}\n"
 
     summary += "\nВсе вірно?"
 
