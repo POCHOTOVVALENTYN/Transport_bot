@@ -77,9 +77,9 @@ async def run_museum_holiday_tests():
     recent = await museum_service.get_last_holiday_bookings(limit=5)
     matching = [row for row in recent if row[1] == test_date]
     assert len(matching) == 2, f"Expected 2 rows for test date, got {len(matching)}"
-    row_data = matching[-1]
-    assert "1) Петренко Петро Петрович (35р.); 2) Петренко Ганна Петрівна (8р.)" in row_data[3], f"Unexpected format: {row_data[3]}"
-    print(f"   ✅ Participant details properly formatted: {row_data[3]}")
+    matching_first = [row for row in matching if "Петренко" in row[3]][0]
+    assert matching_first[3] == "1) Петренко Петро Петрович (35р.); 2) Петренко Ганна Петрівна (8р.)", f"Unexpected format: {matching_first[3]}"
+    print(f"   ✅ Participant details properly formatted: {matching_first[3]}")
 
     print("\n🎉 ALL 7 UNIT TESTS PASSED SUCCESSFULLY!")
 
