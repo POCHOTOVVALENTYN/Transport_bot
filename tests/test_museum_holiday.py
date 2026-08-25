@@ -9,7 +9,9 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from database.db import init_db, AsyncSessionLocal, MuseumHolidayBooking
-from services.museum_service import museum_service
+from services.museum_service import MuseumService
+
+museum_service = MuseumService()
 
 
 async def run_museum_holiday_tests():
