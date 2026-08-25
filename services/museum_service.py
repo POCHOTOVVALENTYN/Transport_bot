@@ -231,6 +231,7 @@ class MuseumService:
         Повертає останні бронювання святкових екскурсій з локальної бази даних SQLite.
         """
         try:
+            import json
             async with AsyncSessionLocal() as session:
                 result = await session.execute(
                     select(MuseumHolidayBooking)
@@ -240,16 +241,26 @@ class MuseumService:
                 )
                 bookings = result.scalars().all()
 
-                formatted_data = [["Дата реєстрації", "Дата святкової екскурсії", "Кількість", "П.І.Б.", "Телефон"]]
+                formatted_data = [["Дата реєстрації", "Дата святкової екскурсії", "Кількість", "П.І.Б. та вік", "Телефон"]]
                 
                 for b in bookings:
                     local_created_at = self._to_kyiv_time(b.created_at)
                     reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else "N/A"
+                    
+                    parts_str = b.user_name
+                    if b.participants_details:
+                        try:
+                            details = json.loads(b.participants_details)
+                            if isinstance(details, list) and len(details) > 0:
+                                parts_str = "; ".join([f"{idx+1}) {p.get('name','')} ({p.get('age','')}р.)" for idx, p in enumerate(details)])
+                        except Exception:
+                            pass
+
                     formatted_data.append([
                         reg_date,
                         b.excursion_date,
                         str(b.people_count),
-                        b.user_name,
+                        parts_str,
                         b.user_phone
                     ])
                     
@@ -257,9 +268,9 @@ class MuseumService:
                 return formatted_data
         except Exception as e:
             logger.error(f"❌ Error getting holiday bookings from DB: {e}")
-            return [["Дата реєстрації", "Дата святкової екскурсії", "Кількість", "П.І.Б.", "Телефон"]]
+            return [["Дата реєстрації", "Дата святкової екскурсії", "Кількість", "П.І.Б. та вік", "Телефон"]]
 
-    async def create_holiday_booking(self, date: str, count: int, name: str, phone: str) -> bool:
+    async def create_holiday_booking(self, date: str, count: int, name: str, phone: str, participants_details: str = None) -> bool:
         """
         Миттєво зберігає святкове бронювання в локальну БД SQLite.
         """
@@ -269,7 +280,8 @@ class MuseumService:
                     excursion_date=date,
                     people_count=count,
                     user_name=name,
-                    user_phone=phone
+                    user_phone=phone,
+                    participants_details=participants_details
                 )
                 session.add(booking)
                 await session.commit()
@@ -287,6 +299,7 @@ class MuseumService:
     async def _sync_holiday_to_sheets_task(self, booking_id: int):
         """Фонова задача для синхронізації 1 запису святкового бронювання в Google Sheets"""
         try:
+            import json
             async with AsyncSessionLocal() as session:
                 booking = await session.get(MuseumHolidayBooking, booking_id)
                 if not booking or booking.status == "synced":
@@ -294,11 +307,21 @@ class MuseumService:
 
                 local_created_at = self._to_kyiv_time(booking.created_at)
                 reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else ""
+
+                parts_str = booking.user_name
+                if booking.participants_details:
+                    try:
+                        details = json.loads(booking.participants_details)
+                        if isinstance(details, list) and len(details) > 0:
+                            parts_str = "; ".join([f"{idx+1}) {p.get('name','')} ({p.get('age','')}р.)" for idx, p in enumerate(details)])
+                    except Exception:
+                        pass
+
                 row = [
                     reg_date,
                     booking.excursion_date,
                     str(booking.people_count),
-                    booking.user_name,
+                    parts_str,
                     booking.user_phone
                 ]
 
@@ -320,15 +343,34 @@ class MuseumService:
 
     async def get_holiday_bookings_count(self, excursion_date: str) -> int:
         """
-        Повертає кількість наявних святкових заявок на певну дату.
+        Повертає загальну кількість наявних відвідувачів (SUM(people_count)) на певну дату.
         """
         try:
             async with AsyncSessionLocal() as session:
                 from sqlalchemy import func
                 result = await session.execute(
-                    select(func.count(MuseumHolidayBooking.id)).where(MuseumHolidayBooking.excursion_date == excursion_date)
+                    select(func.coalesce(func.sum(MuseumHolidayBooking.people_count), 0))
+                    .where(MuseumHolidayBooking.excursion_date == excursion_date)
                 )
-                return result.scalar() or 0
+                return int(result.scalar() or 0)
         except Exception as e:
             logger.error(f"❌ Error counting holiday bookings: {e}")
             return 0
+
+    async def has_existing_holiday_booking(self, excursion_date: str, phone: str) -> bool:
+        """
+        Перевіряє, чи вже є заявка з таким номером телефону на обрану дату святкової екскурсії.
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(MuseumHolidayBooking)
+                    .where(
+                        MuseumHolidayBooking.excursion_date == excursion_date,
+                        MuseumHolidayBooking.user_phone == phone
+                    )
+                )
+                return result.scalar_one_or_none() is not None
+        except Exception as e:
+            logger.error(f"❌ Error checking existing holiday booking: {e}")
+            return False

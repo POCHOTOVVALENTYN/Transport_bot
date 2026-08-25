@@ -48,7 +48,8 @@ from handlers.museum_handlers import (
     show_museum_menu, handle_museum_static, museum_register_start,
     museum_get_date, museum_get_people_count, museum_get_name,
     museum_get_phone_input, show_museum_info, museum_show_confirm,
-    museum_edit_choice, museum_edit_field, museum_confirm_save
+    museum_edit_choice, museum_edit_field, museum_confirm_save,
+    museum_get_participant_name, museum_get_participant_age
 )
 
 from handlers.thanks_handlers import (
@@ -341,14 +342,23 @@ class TransportBot:
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
                 States.MUSEUM_PEOPLE_COUNT: [
+                    CallbackQueryHandler(museum_get_people_count, pattern="^museum_count:"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_people_count),
-                    # КРИТИЧНО: Додаємо обробку кнопок!
+                    CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.MUSEUM_PARTICIPANT_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_participant_name),
+                    CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
+                    CallbackQueryHandler(main_menu, pattern="^main_menu$")
+                ],
+                States.MUSEUM_PARTICIPANT_AGE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_participant_age),
                     CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],
                 States.MUSEUM_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, museum_get_name),
-                    # КРИТИЧНО: Додаємо обробку кнопок!
                     CallbackQueryHandler(show_museum_menu, pattern="^museum_menu$"),
                     CallbackQueryHandler(main_menu, pattern="^main_menu$")
                 ],

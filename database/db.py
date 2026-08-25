@@ -41,6 +41,11 @@ async def init_db():
                     print("✅ Migration: added home_address column to feedbacks")
                 except Exception:
                     pass
+                try:
+                    await conn.execute(text("ALTER TABLE museum_holiday_bookings ADD COLUMN participants_details TEXT"))
+                    print("✅ Migration: added participants_details column to museum_holiday_bookings")
+                except Exception:
+                    pass
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_status ON feedbacks(status)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_created_at ON feedbacks(created_at)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_id ON users(telegram_id)"))
@@ -81,6 +86,7 @@ class MuseumHolidayBooking(Base):
     people_count = Column(Integer, nullable=False)
     user_name = Column(String, nullable=False)
     user_phone = Column(String, nullable=False)
+    participants_details = Column(String, nullable=True)
     status = Column(String, default="new")
 
 
