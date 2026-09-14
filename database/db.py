@@ -50,6 +50,8 @@ async def init_db():
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_created_at ON feedbacks(created_at)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_id ON users(telegram_id)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_subscribed ON users(is_subscribed)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_is_active ON news(is_active)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_created_at ON news(created_at)"))
             print("✅ Database tables initialized successfully")
             return  # Успіх, виходимо
         except (OSError, OperationalError) as e:
@@ -139,11 +141,29 @@ class Feedback(Base):
     reason = Column(String, nullable=True)  # За що вдячні
 
 
+# --- 4. Таблиця Новин та Оголошень (Оперативні новини та розсилки) ---
+class NewsItem(Base):
+    __tablename__ = "news"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=func.now())
+    admin_id = Column(BigInteger, nullable=False)
+    admin_name = Column(String, nullable=True)
+    text = Column(String, nullable=True)
+    media_type = Column(String, nullable=True)  # 'photo', 'video', 'animation', 'document', None
+    media_file_id = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)  # True = актуальна (відображається в клієнтському меню)
+    sent_count = Column(Integer, default=0)
+    blocked_count = Column(Integer, default=0)
+
+
 # --- Індекси ---
 Index("ix_feedbacks_status", Feedback.status)
 Index("ix_feedbacks_created_at", Feedback.created_at)
 Index("ix_users_telegram_id", BotUser.telegram_id)
 Index("ix_users_is_subscribed", BotUser.is_subscribed)
+Index("ix_news_is_active", NewsItem.is_active)
+Index("ix_news_created_at", NewsItem.created_at)
 
 
 # ================= ГОЛОВНИЙ КЛАС DATABASE =================

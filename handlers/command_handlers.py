@@ -14,6 +14,7 @@ async def get_main_menu_keyboard(user_id: int):
     keyboard = [
         [InlineKeyboardButton("📍 Де мій транспорт? (Real-time)", callback_data="realtime_transport")],
         [InlineKeyboardButton("♿ Пошук низькопідлогового транспорту", callback_data="accessible_start")],
+        [InlineKeyboardButton("📢 Оперативні новини", callback_data="news_client_list:0")],
         [InlineKeyboardButton("🎫 Квитки та тарифи", callback_data="tickets_menu")],
         [InlineKeyboardButton("✍️ Звернення та пропозиції", callback_data="feedback_menu")],
         [InlineKeyboardButton("🔍 Загублені речі", callback_data="lost_items")],

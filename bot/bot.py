@@ -79,8 +79,10 @@ from handlers.admin_handlers import (
     admin_show_holiday_bookings, admin_export_users,
     moderate_approve_callback, moderate_reject_callback,
     admin_mail_archive_menu, admin_mail_show_category,
-    admin_mail_show_detail, admin_mail_resend
+    admin_mail_show_detail, admin_mail_resend,
+    admin_news_archive, admin_news_detail, admin_news_toggle
 )
+from handlers.news_handlers import news_client_list, news_client_view
 
 from utils.logger import logger
 from config.settings import FEEDBACK_SYNC_INTERVAL_MIN
@@ -218,6 +220,11 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(admin_mail_show_category, pattern="^admin_mail_cat:"))
         self.app.add_handler(CallbackQueryHandler(admin_mail_show_detail, pattern="^admin_mail_detail:"))
         self.app.add_handler(CallbackQueryHandler(admin_mail_resend, pattern="^admin_mail_resend:"))
+
+        # Архів оперативних новин та розсилок для загальних адмінів
+        self.app.add_handler(CallbackQueryHandler(admin_news_archive, pattern="^admin_news_archive(:.*)?$"))
+        self.app.add_handler(CallbackQueryHandler(admin_news_detail, pattern="^admin_news_view(:.*)?$"))
+        self.app.add_handler(CallbackQueryHandler(admin_news_toggle, pattern="^admin_news_toggle(:.*)?$"))
 
         # Кнопка входу в Адмінку Музею (Максим)
         self.app.add_handler(CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"))
@@ -456,6 +463,8 @@ class TransportBot:
 
         # --- ОБРОБНИКИ МЕНЮ 1-ГО РІВНЯ ---
         self.app.add_handler(CallbackQueryHandler(realtime_transport, pattern="^realtime_transport$"))
+        self.app.add_handler(CallbackQueryHandler(news_client_list, pattern="^news_client_list(:.*)?$"))
+        self.app.add_handler(CallbackQueryHandler(news_client_view, pattern="^news_client_view(:.*)?$"))
         self.app.add_handler(CallbackQueryHandler(show_tickets_menu, pattern="^tickets_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_feedback_menu, pattern="^feedback_menu$"))
         self.app.add_handler(CallbackQueryHandler(show_info_menu, pattern="^info_menu$"))

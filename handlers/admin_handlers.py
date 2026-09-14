@@ -16,11 +16,13 @@ from handlers.command_handlers import get_admin_main_menu_keyboard
 from services.user_service import UserService
 from services.tickets_service import TicketsService
 from services.museum_service import MuseumService
+from services.news_service import NewsService, format_kyiv_time
 
 
 user_service = UserService()
 tickets_service = TicketsService()
 museum_service = MuseumService()
+news_service = NewsService()
 
 
 
@@ -282,6 +284,7 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
 
     keyboard = [
         [InlineKeyboardButton("📢 Зробити розсилку (Новини)", callback_data="admin_broadcast_start")],
+        [InlineKeyboardButton("🗄️ Архів новин", callback_data="admin_news_archive:0")],
         [InlineKeyboardButton("📧 Поштовий архів", callback_data="admin_mail_archive")],
         [InlineKeyboardButton("🔄 Синхронізувати БД -> Sheets", callback_data="admin_sync_db")],
         [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
@@ -294,6 +297,167 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+async def admin_news_archive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Відображає перелік усіх новин в архіві для Загальних Адміністраторів"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return
+
+    offset = 0
+    if query and query.data and ":" in query.data:
+        try:
+            offset = int(query.data.split(":")[1])
+        except (ValueError, IndexError):
+            offset = 0
+
+    limit = 7
+    result = await news_service.get_news_archive(limit=limit, offset=offset)
+    items = result["items"]
+    total_count = result["total_count"]
+    has_prev = result["has_prev"]
+    has_next = result["has_next"]
+
+    if not items:
+        empty_text = (
+            "🗄️ <b>Архів оперативних новин та розсилок</b>\n\n"
+            "В базі даних наразі немає збережених повідомлень розсилки."
+        )
+        empty_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 В адмін-панель", callback_data="general_admin_menu")]
+        ])
+        if query and query.message:
+            await query.edit_message_text(empty_text, reply_markup=empty_markup, parse_mode=ParseMode.HTML)
+        return
+
+    header_text = (
+        "🗄️ <b>Архів оперативних новин та розсилок</b>\n\n"
+        f"Всього повідомлень: <b>{total_count}</b>\n"
+        "🟢 = Актуальна (видима пасажирам) | 🔴 = В архіві (прихована)\n\n"
+        "Оберіть новину для перегляду та керування актуальністю:"
+    )
+
+    keyboard: list[list[InlineKeyboardButton]] = []
+    for item in items:
+        created_time = format_kyiv_time(item.created_at)
+        status_icon = "🟢" if item.is_active else "🔴"
+        snippet = (item.text or "").strip().replace("\n", " ")
+        if len(snippet) > 24:
+            snippet = snippet[:22] + ".."
+        elif not snippet:
+            snippet = "📸 Медіаматеріал"
+
+        btn_label = f"{status_icon} {created_time}: {snippet}"
+        keyboard.append([
+            InlineKeyboardButton(btn_label, callback_data=f"admin_news_view:{item.id}:{offset}")
+        ])
+
+    nav_row: list[InlineKeyboardButton] = []
+    if has_prev:
+        prev_offset = max(0, offset - limit)
+        nav_row.append(InlineKeyboardButton("⬅️ Попередня", callback_data=f"admin_news_archive:{prev_offset}"))
+    if has_next:
+        next_offset = offset + limit
+        nav_row.append(InlineKeyboardButton("Наступна ➡️", callback_data=f"admin_news_archive:{next_offset}"))
+
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([InlineKeyboardButton("🔙 В адмін-панель", callback_data="general_admin_menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if query and query.message:
+        await query.edit_message_text(header_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+async def admin_news_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Відображає картку новини з можливістю перемикання актуальності"""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return
+
+    parts = query.data.split(":")
+    news_id = int(parts[1]) if len(parts) > 1 else 0
+    offset = int(parts[2]) if len(parts) > 2 else 0
+
+    news = await news_service.get_news_by_id(news_id)
+    if not news:
+        await query.edit_message_text(
+            "⚠️ Новину не знайдено.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ До списку архіву", callback_data=f"admin_news_archive:{offset}")]
+            ])
+        )
+        return
+
+    created_time = format_kyiv_time(news.created_at)
+    status_label = (
+        "🟢 <b>Актуальна</b> (відображається в меню пасажирів)"
+        if news.is_active
+        else "🔴 <b>Неактуальна / В архіві</b> (прихована від пасажирів)"
+    )
+    content_text = news.text or "<i>(Текст відсутній / тільки медіа)</i>"
+    admin_name_safe = html.escape(news.admin_name or "Адміністратор")
+
+    detail_text = (
+        f"🗄️ <b>Картка розсилки #{news.id}</b>\n\n"
+        f"📅 <b>Дата та час:</b> {created_time}\n"
+        f"👤 <b>Автор:</b> {admin_name_safe} (ID: <code>{news.admin_id}</code>)\n"
+        f"📊 <b>Результат розсилки:</b> Успішно: <b>{news.sent_count}</b> | Блокувань: <b>{news.blocked_count}</b>\n"
+        f"📌 <b>Статус:</b> {status_label}\n"
+        f"----------------------------------------\n"
+        f"💬 <b>Текст оголошення:</b>\n{content_text}"
+    )
+
+    toggle_btn_text = "🔴 Зробити неактуальною (В архів)" if news.is_active else "🟢 Зробити актуальною"
+    keyboard = [
+        [InlineKeyboardButton(toggle_btn_text, callback_data=f"admin_news_toggle:{news.id}:{offset}")],
+        [InlineKeyboardButton("⬅️ До архіву", callback_data=f"admin_news_archive:{offset}")],
+        [InlineKeyboardButton("🔙 В адмін-панель", callback_data="general_admin_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(detail_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+async def admin_news_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Перемикає статус актуальності новини адміністратором"""
+    query = update.callback_query
+    if not query:
+        return
+
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return
+
+    parts = query.data.split(":")
+    news_id = int(parts[1]) if len(parts) > 1 else 0
+    offset = int(parts[2]) if len(parts) > 2 else 0
+
+    new_status = await news_service.toggle_news_active(news_id)
+    if new_status is None:
+        await query.answer("⚠️ Новину не знайдено!", show_alert=True)
+        return
+
+    alert_text = (
+        "✅ Новина тепер АКТУАЛЬНА і доступна пасажирам"
+        if new_status
+        else "📦 Новину перенесено в АРХІВ (приховано від пасажирів)"
+    )
+    await query.answer(alert_text, show_alert=False)
+
+    # Оновлюємо відображення картки з новим статусом та новою кнопкою
+    await admin_news_detail(update, context)
 
 
 async def admin_mail_archive_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -706,6 +870,29 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['broadcast_msg_id'] = msg.message_id
     context.user_data['broadcast_chat_id'] = msg.chat_id
 
+    # Визначаємо текст та медіа для збереження в новинах
+    news_text = msg.text or msg.caption or ""
+    news_media_type = None
+    news_media_file_id = None
+    if msg.photo:
+        news_media_type = "photo"
+        news_media_file_id = msg.photo[-1].file_id
+    elif msg.video:
+        news_media_type = "video"
+        news_media_file_id = msg.video.file_id
+    elif msg.animation:
+        news_media_type = "animation"
+        news_media_file_id = msg.animation.file_id
+    elif msg.document:
+        news_media_type = "document"
+        news_media_file_id = msg.document.file_id
+
+    context.user_data['broadcast_news_data'] = {
+        'text': news_text,
+        'media_type': news_media_type,
+        'media_file_id': news_media_file_id
+    }
+
     # --- Формуємо список видалення ---
     msgs_to_delete = []
 
@@ -787,6 +974,24 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         from_chat_id = context.user_data.get('broadcast_chat_id')
         users = await user_service.get_subscribed_users_ids()
 
+        # Автоматичне створення запису в оперативних новинах
+        news_payload = context.user_data.get('broadcast_news_data', {})
+        admin_user = update.effective_user
+        created_news = None
+        try:
+            admin_name = admin_user.full_name or admin_user.first_name or "Адміністратор"
+            created_news = await news_service.save_broadcast_news({
+                "admin_id": admin_user.id,
+                "admin_name": admin_name,
+                "text": news_payload.get("text", ""),
+                "media_type": news_payload.get("media_type"),
+                "media_file_id": news_payload.get("media_file_id"),
+                "sent_count": 0,
+                "blocked_count": 0
+            })
+        except Exception as save_err:
+            logger.error(f"Failed to auto-save news broadcast: {save_err}")
+
         count = 0
         blocked = 0
         start_time = datetime.now()
@@ -812,6 +1017,17 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
                 logger.warning(f"Failed to send broadcast to {user_id}: {e}")
                 blocked += 1
 
+        # Оновлюємо статистику створеної новини
+        if created_news:
+            try:
+                await news_service.update_broadcast_stats(
+                    news_id=created_news.id,
+                    sent_count=count,
+                    blocked_count=blocked
+                )
+            except Exception as update_err:
+                logger.error(f"Failed to update news broadcast stats: {update_err}")
+
         # Видаляємо повідомлення "Розсилка розпочалась..."
         #await status_msg.delete()
 
@@ -820,7 +1036,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         await context.bot.send_message(
             chat_id=chat_id,
             text=(
-                f"✅ <b>Розсилка завершена!</b>\n\n"
+                f"✅ <b>Розсилка завершена та додана в «Оперативні новини»!</b>\n\n"
                 f"📨 Успішно надіслано: <b>{count}</b>\n"
                 f"🚫 Не отримали (блокували): <b>{blocked}</b>\n"
                 f"⏱️ Час виконання: <b>{duration:.1f} сек.</b>"
@@ -846,6 +1062,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         # Очищаємо дані сесії
         context.user_data.pop('broadcast_msg_id', None)
         context.user_data.pop('broadcast_chat_id', None)
+        context.user_data.pop('broadcast_news_data', None)
         context.user_data.pop('msgs_to_delete', None)
 
     return ConversationHandler.END
