@@ -52,6 +52,40 @@ async def init_db():
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_subscribed ON users(is_subscribed)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_is_active ON news(is_active)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_news_created_at ON news(created_at)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lost_items_status ON lost_items(status)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lost_items_category ON lost_items(category)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lost_items_created_at ON lost_items(created_at)"))
+
+                # Початкове наповнення знайдених документів, якщо таблиця порожня
+                try:
+                    lost_count_res = await conn.execute(text("SELECT COUNT(*) FROM lost_items"))
+                    lost_count = lost_count_res.scalar() or 0
+                    if lost_count == 0:
+                        initial_docs = [
+                            "Пенсійне посвідчення — Шрамчук Лариса Володимирівна",
+                            "Пенсійне посвідчення — Вовчук Людмила Артурівна",
+                            "Посвідчення — Сирбул Анастасія Сергіївна",
+                            "Пенсійне посвідчення — Мелкунян Наталія Петрівна",
+                            "Паспорт — Бойцов Вадим Михайлович",
+                            "Пакет документів — Поліщук Олександр",
+                            "Пенсійне посвідчення — Жук Роза Василівна",
+                            "Пенсійне посвідчення — Сімонов Юрій Ілліч",
+                            "Пенсійне посвідчення — Тодорова Лариса Василівна",
+                            "Пенсійне посвідчення — Петрова Наталія Михайлівна",
+                            "Пенсійне посвідчення — Кара Наталія Миколаївна",
+                            "Посвідчення — Стащенко Кіра Олександрівна / Олександр Євгенович"
+                        ]
+                        for doc in initial_docs:
+                            await conn.execute(
+                                text(
+                                    "INSERT INTO lost_items (admin_id, admin_name, category, title, details, status) "
+                                    "VALUES (0, 'Система', 'document', :title, 'Інформаційний центр (вул. Водопровідна, 1)', 'active')"
+                                ),
+                                {"title": doc}
+                            )
+                        print(f"✅ Seeding: додано {len(initial_docs)} початкових документів у lost_items")
+                except Exception as seed_err:
+                    print(f"⚠️ Seeding lost_items warning: {seed_err}")
             print("✅ Database tables initialized successfully")
             return  # Успіх, виходимо
         except (OSError, OperationalError) as e:
@@ -157,6 +191,21 @@ class NewsItem(Base):
     blocked_count = Column(Integer, default=0)
 
 
+# --- 5. Таблиця Загублених речей та документів ---
+class LostItem(Base):
+    __tablename__ = "lost_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=func.now())
+    returned_at = Column(DateTime, nullable=True)
+    admin_id = Column(BigInteger, nullable=False)
+    admin_name = Column(String, nullable=True)
+    category = Column(String, nullable=False)  # "document" або "thing"
+    title = Column(String, nullable=False)     # ПІБ на документі або назва речі
+    details = Column(String, nullable=True)    # Маршрут, примітки тощо
+    status = Column(String, default="active")  # "active" (на зберіганні), "returned" (повернуто)
+
+
 # --- Індекси ---
 Index("ix_feedbacks_status", Feedback.status)
 Index("ix_feedbacks_created_at", Feedback.created_at)
@@ -164,6 +213,9 @@ Index("ix_users_telegram_id", BotUser.telegram_id)
 Index("ix_users_is_subscribed", BotUser.is_subscribed)
 Index("ix_news_is_active", NewsItem.is_active)
 Index("ix_news_created_at", NewsItem.created_at)
+Index("ix_lost_items_status", LostItem.status)
+Index("ix_lost_items_category", LostItem.category)
+Index("ix_lost_items_created_at", LostItem.created_at)
 
 
 # ================= ГОЛОВНИЙ КЛАС DATABASE =================

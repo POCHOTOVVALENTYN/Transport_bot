@@ -17,12 +17,14 @@ from services.user_service import UserService
 from services.tickets_service import TicketsService
 from services.museum_service import MuseumService
 from services.news_service import NewsService, format_kyiv_time
+from services.lost_items_service import LostItemsService, format_kyiv_date as format_lost_date
 
 
 user_service = UserService()
 tickets_service = TicketsService()
 museum_service = MuseumService()
 news_service = NewsService()
+lost_items_service = LostItemsService()
 
 
 
@@ -285,6 +287,7 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
     keyboard = [
         [InlineKeyboardButton("📢 Зробити розсилку (Новини)", callback_data="admin_broadcast_start")],
         [InlineKeyboardButton("🗄️ Архів новин", callback_data="admin_news_archive:0")],
+        [InlineKeyboardButton("🔍 Загублені речі", callback_data="admin_lost_menu")],
         [InlineKeyboardButton("📧 Поштовий архів", callback_data="admin_mail_archive")],
         [InlineKeyboardButton("🔄 Синхронізувати БД -> Sheets", callback_data="admin_sync_db")],
         [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
@@ -458,6 +461,461 @@ async def admin_news_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Оновлюємо відображення картки з новим статусом та новою кнопкою
     await admin_news_detail(update, context)
+
+
+async def admin_lost_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Головне меню керування загубленими речами для адміністраторів"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    text = (
+        "🔍 <b>Керування розділом «Загублені речі»</b>\n\n"
+        "Оберіть дію:\n"
+        "• Додати нову знахідку до бази\n"
+        "• Переглянути наявні речі або документи на зберіганні\n"
+        "• Відзначити повернення знахідки власнику або переглянути архів"
+    )
+    keyboard = [
+        [InlineKeyboardButton("➕ Додати нову знахідку", callback_data="admin_lost_add_start")],
+        [InlineKeyboardButton("🪪 Документи на зберіганні", callback_data="admin_lost_list:document:0")],
+        [InlineKeyboardButton("🎒 Особисті речі на зберіганні", callback_data="admin_lost_list:thing:0")],
+        [InlineKeyboardButton("🗄️ Архів виданих знахідок", callback_data="admin_lost_archive:0")],
+        [InlineKeyboardButton("🔙 В адмін-панель", callback_data="general_admin_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if query and query.message:
+        await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+async def admin_lost_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує список знахідок за категорією з пагінацією"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    parts = query.data.split(":")
+    category = parts[1] if len(parts) > 1 else "document"
+    offset = int(parts[2]) if len(parts) > 2 else 0
+    limit = 7
+
+    cat_label = "🪪 Документи" if category == "document" else "🎒 Особисті речі"
+    result = await lost_items_service.get_admin_items(status="active", category=category, limit=limit, offset=offset)
+    items = result["items"]
+    total_count = result["total_count"]
+    has_prev = result["has_prev"]
+    has_next = result["has_next"]
+
+    if not items:
+        empty_text = (
+            f"🔍 <b>{cat_label} (на зберіганні)</b>\n\n"
+            "На зберіганні наразі немає зареєстрованих знахідок у цій категорії."
+        )
+        empty_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Додати знахідку", callback_data="admin_lost_add_start")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="admin_lost_menu")]
+        ])
+        if query and query.message:
+            await query.edit_message_text(empty_text, reply_markup=empty_markup, parse_mode=ParseMode.HTML)
+        return
+
+    header_text = (
+        f"🔍 <b>{cat_label} на зберіганні</b>\n\n"
+        f"Всього знахідок: <b>{total_count}</b>\n"
+        "Оберіть запис для перегляду деталей, повернення власнику або видалення:"
+    )
+    keyboard = []
+    for item in items:
+        created_date = format_lost_date(item.created_at)
+        title_snippet = (item.title or "").strip()
+        if len(title_snippet) > 28:
+            title_snippet = title_snippet[:26] + ".."
+        btn_label = f"🟢 {created_date}: {title_snippet}"
+        keyboard.append([
+            InlineKeyboardButton(btn_label, callback_data=f"admin_lost_view:{item.id}:{category}:{offset}")
+        ])
+
+    nav_row = []
+    if has_prev:
+        prev_offset = max(0, offset - limit)
+        nav_row.append(InlineKeyboardButton("⬅️ Попередня", callback_data=f"admin_lost_list:{category}:{prev_offset}"))
+    if has_next:
+        next_offset = offset + limit
+        nav_row.append(InlineKeyboardButton("Наступна ➡️", callback_data=f"admin_lost_list:{category}:{next_offset}"))
+
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([InlineKeyboardButton("➕ Додати нову", callback_data="admin_lost_add_start")])
+    keyboard.append([InlineKeyboardButton("⬅️ До меню знахідок", callback_data="admin_lost_menu")])
+
+    await query.edit_message_text(header_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+
+async def admin_lost_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Картка знахідки в адмін-панелі"""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    parts = query.data.split(":")
+    item_id = int(parts[1]) if len(parts) > 1 else 0
+    category = parts[2] if len(parts) > 2 else "document"
+    offset = int(parts[3]) if len(parts) > 3 else 0
+
+    item = await lost_items_service.get_item_by_id(item_id)
+    if not item:
+        await query.edit_message_text(
+            "⚠️ Запис не знайдено або вже видалено.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ До списку", callback_data=f"admin_lost_list:{category}:{offset}")]
+            ])
+        )
+        return
+
+    created_date = format_lost_date(item.created_at)
+    cat_label = "🪪 Документ" if item.category == "document" else "🎒 Особиста річ"
+    status_label = "🟢 На зберіганні в інфоцентрі" if item.status == "active" else "✅ Повернуто власнику"
+    admin_name_safe = html.escape(item.admin_name or "Адміністратор")
+    title_safe = html.escape(item.title)
+    details_safe = html.escape(item.details or "Деталі не вказані")
+
+    text = (
+        f"🔍 <b>Картка знахідки #{item.id}</b>\n\n"
+        f"📁 <b>Категорія:</b> {cat_label}\n"
+        f"🏷️ <b>Назва / ПІБ:</b> {title_safe}\n"
+        f"ℹ️ <b>Деталі:</b> {details_safe}\n"
+        f"🗓️ <b>Дата внесення:</b> {created_date}\n"
+        f"👤 <b>Додав(ла):</b> {admin_name_safe}\n"
+        f"📌 <b>Статус:</b> {status_label}\n"
+    )
+
+    keyboard = []
+    if item.status == "active":
+        keyboard.append([
+            InlineKeyboardButton("✅ Позначити: Повернуто власнику", callback_data=f"admin_lost_return:{item.id}:{category}:{offset}")
+        ])
+    keyboard.append([
+        InlineKeyboardButton("🗑️ Видалити запис", callback_data=f"admin_lost_delete:{item.id}:{category}:{offset}")
+    ])
+    back_target = f"admin_lost_list:{category}:{offset}" if item.status == "active" else f"admin_lost_archive:{offset}"
+    keyboard.append([InlineKeyboardButton("⬅️ Назад до списку", callback_data=back_target)])
+    keyboard.append([InlineKeyboardButton("🔙 До меню знахідок", callback_data="admin_lost_menu")])
+
+    await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+
+async def admin_lost_return(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Позначає знахідку як повернену власнику"""
+    query = update.callback_query
+    if not query:
+        return
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    parts = query.data.split(":")
+    item_id = int(parts[1]) if len(parts) > 1 else 0
+    category = parts[2] if len(parts) > 2 else "document"
+    offset = int(parts[3]) if len(parts) > 3 else 0
+
+    res = await lost_items_service.mark_as_returned(item_id)
+    if res:
+        await query.answer("✅ Знахідку позначено як повернену власнику!", show_alert=False)
+    else:
+        await query.answer("⚠️ Запис не знайдено.", show_alert=True)
+
+    query.data = f"admin_lost_list:{category}:{offset}"
+    await admin_lost_list(update, context)
+
+
+async def admin_lost_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Видаляє запис про знахідку"""
+    query = update.callback_query
+    if not query:
+        return
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    parts = query.data.split(":")
+    item_id = int(parts[1]) if len(parts) > 1 else 0
+    category = parts[2] if len(parts) > 2 else "document"
+    offset = int(parts[3]) if len(parts) > 3 else 0
+
+    await lost_items_service.delete_lost_item(item_id)
+    await query.answer("🗑️ Запис видалено!", show_alert=False)
+
+    query.data = f"admin_lost_list:{category}:{offset}"
+    await admin_lost_list(update, context)
+
+
+async def admin_lost_archive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує архів виданих знахідок"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    offset = 0
+    if query and query.data and ":" in query.data:
+        try:
+            offset = int(query.data.split(":")[1])
+        except (ValueError, IndexError):
+            offset = 0
+    limit = 7
+
+    result = await lost_items_service.get_admin_items(status="returned", limit=limit, offset=offset)
+    items = result["items"]
+    total_count = result["total_count"]
+    has_prev = result["has_prev"]
+    has_next = result["has_next"]
+
+    if not items:
+        empty_text = (
+            "🗄️ <b>Архів повернених знахідок</b>\n\n"
+            "В архіві наразі немає виданих знахідок."
+        )
+        empty_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ До меню знахідок", callback_data="admin_lost_menu")]
+        ])
+        if query and query.message:
+            await query.edit_message_text(empty_text, reply_markup=empty_markup, parse_mode=ParseMode.HTML)
+        return
+
+    header_text = (
+        "🗄️ <b>Архів повернутих знахідок</b>\n\n"
+        f"Всього видано громадянам: <b>{total_count}</b>\n"
+        "Оберіть запис для перегляду деталей:"
+    )
+    keyboard = []
+    for item in items:
+        ret_date = format_lost_date(item.returned_at or item.created_at)
+        title_snippet = (item.title or "").strip()
+        if len(title_snippet) > 26:
+            title_snippet = title_snippet[:24] + ".."
+        btn_label = f"✅ {ret_date}: {title_snippet}"
+        keyboard.append([
+            InlineKeyboardButton(btn_label, callback_data=f"admin_lost_view:{item.id}:{item.category}:{offset}")
+        ])
+
+    nav_row = []
+    if has_prev:
+        prev_offset = max(0, offset - limit)
+        nav_row.append(InlineKeyboardButton("⬅️ Попередня", callback_data=f"admin_lost_archive:{prev_offset}"))
+    if has_next:
+        next_offset = offset + limit
+        nav_row.append(InlineKeyboardButton("Наступна ➡️", callback_data=f"admin_lost_archive:{next_offset}"))
+
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([InlineKeyboardButton("⬅️ До меню знахідок", callback_data="admin_lost_menu")])
+    await query.edit_message_text(header_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+
+# --- CONVERSATION HANDLER: ДОДАВАННЯ ЗНАХІДКИ АДМІНОМ ---
+
+async def admin_lost_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок діалогу додавання знахідки"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    text = (
+        "➕ <b>Додавання нової знахідки</b>\n\n"
+        "Крок 1/3: Оберіть категорію знахідки:"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🪪 Документ", callback_data="admin_lost_set_cat:document")],
+        [InlineKeyboardButton("🎒 Особиста річ", callback_data="admin_lost_set_cat:thing")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_lost_cancel")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if query and query.message:
+        sent_msg = await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        context.user_data['lost_add_prompt_id'] = sent_msg.message_id
+    else:
+        sent_msg = await update.message.reply_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        context.user_data['lost_add_prompt_id'] = sent_msg.message_id
+
+    return States.ADMIN_LOST_CATEGORY
+
+
+async def admin_lost_cat_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору категорії"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    category = query.data.split(":")[1] if ":" in query.data else "thing"
+    context.user_data['lost_add_cat'] = category
+
+    cat_label = "🪪 Документ" if category == "document" else "🎒 Особиста річ"
+    prompt_example = "«Пенсійне посвідчення — Петренко Іван Васильович»" if category == "document" else "«Чорний рюкзак Adidas»"
+
+    text = (
+        f"➕ <b>Додавання: {cat_label}</b>\n\n"
+        f"Крок 2/3: Надішліть текстом назву знахідки або ПІБ власника на документі.\n\n"
+        f"<i>Приклад: {prompt_example}</i>"
+    )
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_lost_cancel")]
+    ])
+
+    sent_msg = await query.edit_message_text(text=text, reply_markup=cancel_markup, parse_mode=ParseMode.HTML)
+    context.user_data['lost_add_prompt_id'] = sent_msg.message_id
+    return States.ADMIN_LOST_TITLE
+
+
+async def admin_lost_title_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введення назви знахідки"""
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    title = update.message.text.strip()
+    context.user_data['lost_add_title'] = title
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    text = (
+        f"➕ <b>Додавання знахідки</b>\n\n"
+        f"Назва: <b>{html.escape(title)}</b>\n\n"
+        "Крок 3/3: Вкажіть деталі (наприклад: <i>«Трамвай №7, знайдено на зупинці Тираспольська пл.»</i>) "
+        "або натисніть <b>Пропустити</b>:"
+    )
+    keyboard = [
+        [InlineKeyboardButton("⏩ Пропустити деталі", callback_data="admin_lost_skip_details")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_lost_cancel")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    prompt_id = context.user_data.get('lost_add_prompt_id')
+    if prompt_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=prompt_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
+            return States.ADMIN_LOST_DETAILS
+        except Exception:
+            pass
+
+    sent_msg = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+    context.user_data['lost_add_prompt_id'] = sent_msg.message_id
+    return States.ADMIN_LOST_DETAILS
+
+
+async def _admin_lost_save_finish(update: Update, context: ContextTypes.DEFAULT_TYPE, details: str = ""):
+    """Збереження знахідки у базі даних"""
+    admin_user = update.effective_user
+    category = context.user_data.get('lost_add_cat', 'thing')
+    title = context.user_data.get('lost_add_title', '')
+
+    if not title:
+        return ConversationHandler.END
+
+    item = await lost_items_service.create_lost_item({
+        "admin_id": admin_user.id,
+        "admin_name": admin_user.full_name or admin_user.first_name or "Адміністратор",
+        "category": category,
+        "title": title,
+        "details": details or "Інформаційний центр (вул. Водопровідна, 1)"
+    })
+
+    cat_label = "🪪 Документ" if category == "document" else "🎒 Особиста річ"
+    success_text = (
+        f"✅ <b>Знахідку успішно додано!</b>\n\n"
+        f"📁 <b>Категорія:</b> {cat_label}\n"
+        f"🏷️ <b>Назва:</b> {html.escape(title)}\n"
+        f"ℹ️ <b>Деталі:</b> {html.escape(item.details or '')}\n\n"
+        "Знахідка тепер відображається пасажирам у розділі «Загублені речі»."
+    )
+    keyboard = [
+        [InlineKeyboardButton("➕ Додати ще одну", callback_data="admin_lost_add_start")],
+        [InlineKeyboardButton("🔍 До меню знахідок", callback_data="admin_lost_menu")],
+        [InlineKeyboardButton("🔙 В адмін-панель", callback_data="general_admin_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    prompt_id = context.user_data.pop('lost_add_prompt_id', None)
+    context.user_data.pop('lost_add_cat', None)
+    context.user_data.pop('lost_add_title', None)
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text=success_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    else:
+        if prompt_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=prompt_id)
+            except Exception:
+                pass
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=success_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    return ConversationHandler.END
+
+
+async def admin_lost_details_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введених деталей знахідки"""
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    details = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    return await _admin_lost_save_finish(update, context, details=details)
+
+
+async def admin_lost_skip_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пропуск кроку деталей знахідки"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    return await _admin_lost_save_finish(update, context, details="Інформаційний центр (вул. Водопровідна, 1)")
+
+
+async def admin_lost_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування діалогу додавання знахідки"""
+    query = update.callback_query
+    if query:
+        await query.answer("Дію скасовано")
+    context.user_data.pop('lost_add_prompt_id', None)
+    context.user_data.pop('lost_add_cat', None)
+    context.user_data.pop('lost_add_title', None)
+
+    if query:
+        await admin_lost_menu(update, context)
+    return ConversationHandler.END
 
 
 async def admin_mail_archive_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):

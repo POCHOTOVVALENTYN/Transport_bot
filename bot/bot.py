@@ -80,9 +80,15 @@ from handlers.admin_handlers import (
     moderate_approve_callback, moderate_reject_callback,
     admin_mail_archive_menu, admin_mail_show_category,
     admin_mail_show_detail, admin_mail_resend,
-    admin_news_archive, admin_news_detail, admin_news_toggle
+    admin_news_archive, admin_news_detail, admin_news_toggle,
+    admin_lost_menu, admin_lost_list, admin_lost_view,
+    admin_lost_return, admin_lost_delete, admin_lost_archive,
+    admin_lost_add_start, admin_lost_cat_selected,
+    admin_lost_title_input, admin_lost_details_input,
+    admin_lost_skip_details, admin_lost_cancel
 )
 from handlers.news_handlers import news_client_list, news_client_view
+from handlers.lost_items_handlers import show_lost_items_menu, show_lost_items_category
 
 from utils.logger import logger
 from config.settings import FEEDBACK_SYNC_INTERVAL_MIN
@@ -225,6 +231,36 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(admin_news_archive, pattern="^admin_news_archive(:.*)?$"))
         self.app.add_handler(CallbackQueryHandler(admin_news_detail, pattern="^admin_news_view(:.*)?$"))
         self.app.add_handler(CallbackQueryHandler(admin_news_toggle, pattern="^admin_news_toggle(:.*)?$"))
+
+        # Керування загубленими речами для загальних адмінів
+        admin_lost_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(admin_lost_add_start, pattern="^admin_lost_add_start$")],
+            states={
+                States.ADMIN_LOST_CATEGORY: [
+                    CallbackQueryHandler(admin_lost_cat_selected, pattern="^admin_lost_set_cat:")
+                ],
+                States.ADMIN_LOST_TITLE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_lost_title_input)
+                ],
+                States.ADMIN_LOST_DETAILS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_lost_details_input),
+                    CallbackQueryHandler(admin_lost_skip_details, pattern="^admin_lost_skip_details$")
+                ]
+            },
+            fallbacks=[
+                CallbackQueryHandler(admin_lost_cancel, pattern="^admin_lost_cancel$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+            ],
+            block=False
+        )
+        self.app.add_handler(admin_lost_conv)
+
+        self.app.add_handler(CallbackQueryHandler(admin_lost_menu, pattern="^admin_lost_menu$"))
+        self.app.add_handler(CallbackQueryHandler(admin_lost_list, pattern="^admin_lost_list:"))
+        self.app.add_handler(CallbackQueryHandler(admin_lost_view, pattern="^admin_lost_view:"))
+        self.app.add_handler(CallbackQueryHandler(admin_lost_return, pattern="^admin_lost_return:"))
+        self.app.add_handler(CallbackQueryHandler(admin_lost_delete, pattern="^admin_lost_delete:"))
+        self.app.add_handler(CallbackQueryHandler(admin_lost_archive, pattern="^admin_lost_archive(:.*)?$"))
 
         # Кнопка входу в Адмінку Музею (Максим)
         self.app.add_handler(CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"))
