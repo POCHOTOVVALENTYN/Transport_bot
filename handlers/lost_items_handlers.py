@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
-from services.lost_items_service import LostItemsService, format_kyiv_date
+from services.lost_items_service import LostItemsService
 from utils.logger import logger
 
 lost_items_service = LostItemsService()
@@ -90,11 +90,7 @@ async def show_lost_items_category(update: Update, context: ContextTypes.DEFAULT
     ]
 
     for index, item in enumerate(items, start=offset + 1):
-        found_date = format_kyiv_date(item.created_at)
-        lines.append(f"<b>{index}. {item.title}</b>")
-        if item.details:
-            lines.append(f"   ℹ️ <i>{item.details}</i>")
-        lines.append(f"   🗓 Додано: {found_date}\n")
+        lines.append(f"<b>{index}. {item.title}</b>\n")
 
     message_text = "\n".join(lines)
 
