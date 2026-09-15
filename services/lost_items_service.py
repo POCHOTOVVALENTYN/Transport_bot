@@ -186,6 +186,33 @@ class LostItemsService:
                 "limit": limit
             }
 
+    async def update_lost_item(
+        self,
+        item_id: int,
+        title: Optional[str] = None,
+        details: Optional[str] = None
+    ) -> Optional[bool]:
+        """
+        Оновлює назву та/або деталі вже створеного запису (виправлення помилки без видалення).
+        Повертає True, якщо оновлено, або None, якщо запис не знайдено.
+        """
+        async with self.session_factory() as session:
+            query = select(LostItem).where(LostItem.id == item_id)
+            result = await session.execute(query)
+            item = result.scalar_one_or_none()
+
+            if item is None:
+                return None
+
+            if title is not None:
+                item.title = title
+            if details is not None:
+                item.details = details
+
+            await session.commit()
+            logger.info(f"LostItem id={item_id} updated (title_changed={title is not None}, details_changed={details is not None})")
+            return True
+
     async def delete_lost_item(self, item_id: int) -> bool:
         """Видаляє запис із бази даних"""
         async with self.session_factory() as session:

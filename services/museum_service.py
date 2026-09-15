@@ -99,6 +99,7 @@ class MuseumService:
         Повертає «сирі» дані у вигляді списку списків для сумісності з попереднім кодом, включно з заголовком.
         """
         try:
+            import json
             async with AsyncSessionLocal() as session:
                 result = await session.execute(
                     select(MuseumBooking)
@@ -108,16 +109,26 @@ class MuseumService:
                 )
                 bookings = result.scalars().all()
 
-                formatted_data = [["Дата реєстрації", "Дата екскурсії", "Кількість", "ПІБ", "Телефон"]]
+                formatted_data = [["Дата реєстрації", "Дата екскурсії", "Кількість", "ПІБ учасників", "Телефон"]]
                 
                 for b in bookings:
                     local_created_at = self._to_kyiv_time(b.created_at)
                     reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else "N/A"
+
+                    parts_str = b.user_name
+                    if b.participants_details:
+                        try:
+                            details = json.loads(b.participants_details)
+                            if isinstance(details, list) and len(details) > 0:
+                                parts_str = "; ".join([f"{idx+1}) {p.get('name','')}" for idx, p in enumerate(details)])
+                        except Exception:
+                            pass
+
                     formatted_data.append([
                         reg_date,
                         b.excursion_date,
                         str(b.people_count),
-                        b.user_name,
+                        parts_str,
                         b.user_phone
                     ])
                     
@@ -125,9 +136,9 @@ class MuseumService:
                 return formatted_data
         except Exception as e:
             logger.error(f"❌ Error getting bookings from DB: {e}")
-            return [["Дата реєстрації", "Дата екскурсії", "Кількість", "ПІБ", "Телефон"]]
+            return [["Дата реєстрації", "Дата екскурсії", "Кількість", "ПІБ учасників", "Телефон"]]
 
-    async def create_booking(self, date: str, count: int, name: str, phone: str) -> bool:
+    async def create_booking(self, date: str, count: int, name: str, phone: str, participants_details: str = None) -> bool:
         """
         Миттєво зберігає бронювання в локальну БД SQLite.
         """
@@ -137,7 +148,8 @@ class MuseumService:
                     excursion_date=date,
                     people_count=count,
                     user_name=name,
-                    user_phone=phone
+                    user_phone=phone,
+                    participants_details=participants_details
                 )
                 session.add(booking)
                 await session.commit()
@@ -158,6 +170,7 @@ class MuseumService:
             from datetime import datetime
             import asyncio
             
+            import json
             async with AsyncSessionLocal() as session:
                 booking = await session.get(MuseumBooking, booking_id)
                 if not booking or booking.status == "synced":
@@ -165,11 +178,21 @@ class MuseumService:
 
                 local_created_at = self._to_kyiv_time(booking.created_at)
                 reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else ""
+
+                parts_str = booking.user_name
+                if booking.participants_details:
+                    try:
+                        details = json.loads(booking.participants_details)
+                        if isinstance(details, list) and len(details) > 0:
+                            parts_str = "; ".join([f"{idx+1}) {p.get('name','')}" for idx, p in enumerate(details)])
+                    except Exception:
+                        pass
+
                 row = [
                     reg_date,
                     booking.excursion_date,
                     str(booking.people_count),
-                    booking.user_name,
+                    parts_str,
                     booking.user_phone
                 ]
 
@@ -373,4 +396,39 @@ class MuseumService:
                 return result.scalar_one_or_none() is not None
         except Exception as e:
             logger.error(f"❌ Error checking existing holiday booking: {e}")
+            return False
+
+    async def get_bookings_count(self, excursion_date: str) -> int:
+        """
+        Повертає загальну кількість наявних відвідувачів (SUM(people_count)) на певну дату
+        для ЗВИЧАЙНОЇ (не святкової) екскурсії.
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                from sqlalchemy import func
+                result = await session.execute(
+                    select(func.coalesce(func.sum(MuseumBooking.people_count), 0))
+                    .where(MuseumBooking.excursion_date == excursion_date)
+                )
+                return int(result.scalar() or 0)
+        except Exception as e:
+            logger.error(f"❌ Error counting bookings: {e}")
+            return 0
+
+    async def has_existing_booking(self, excursion_date: str, phone: str) -> bool:
+        """
+        Перевіряє, чи вже є заявка з таким номером телефону на обрану дату ЗВИЧАЙНОЇ екскурсії.
+        """
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(MuseumBooking)
+                    .where(
+                        MuseumBooking.excursion_date == excursion_date,
+                        MuseumBooking.user_phone == phone
+                    )
+                )
+                return result.scalar_one_or_none() is not None
+        except Exception as e:
+            logger.error(f"❌ Error checking existing booking: {e}")
             return False

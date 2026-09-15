@@ -46,6 +46,11 @@ async def init_db():
                     print("✅ Migration: added participants_details column to museum_holiday_bookings")
                 except Exception:
                     pass
+                try:
+                    await conn.execute(text("ALTER TABLE museum_bookings ADD COLUMN participants_details TEXT"))
+                    print("✅ Migration: added participants_details column to museum_bookings")
+                except Exception:
+                    pass
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_status ON feedbacks(status)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_created_at ON feedbacks(created_at)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_id ON users(telegram_id)"))
@@ -55,6 +60,8 @@ async def init_db():
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lost_items_status ON lost_items(status)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lost_items_category ON lost_items(category)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lost_items_created_at ON lost_items(created_at)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vacancies_category ON vacancies(category)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vacancies_is_active ON vacancies(is_active)"))
 
                 # Початкове наповнення знайдених документів, якщо таблиця порожня
                 try:
@@ -86,6 +93,42 @@ async def init_db():
                         print(f"✅ Seeding: додано {len(initial_docs)} початкових документів у lost_items")
                 except Exception as seed_err:
                     print(f"⚠️ Seeding lost_items warning: {seed_err}")
+
+                # Початкове наповнення вакансій, якщо таблиця порожня (перенесено зі старих хардкоджених словників)
+                try:
+                    vac_count_res = await conn.execute(text("SELECT COUNT(*) FROM vacancies"))
+                    vac_count = vac_count_res.scalar() or 0
+                    if vac_count == 0:
+                        initial_vacancies = [
+                            # (category, title, contact_type, contact_value, sort_order)
+                            ("experienced", "Спеціаліст нарядник поїзних бригад", "phone", "+380751705557", 1),
+                            ("experienced", "Зварювальник", "url", "https://oget.od.ua/jobs/зварювальник", 2),
+                            ("experienced", "Слюсар з ремонту рухомого складу", "url", "https://oget.od.ua/jobs/слюсар-з-ремонту-рухомого-складу", 3),
+                            ("experienced", "Електрогазозварник", "url", "https://oget.od.ua/jobs/електрогазозварник", 4),
+                            ("experienced", "Електромонтер контактної/кабельної мережі", "url", "https://oget.od.ua/jobs/електромонтер-контактної-та-кабельн", 5),
+                            ("experienced", "Електромонтер тягової підстанції", "url", "https://oget.od.ua/jobs/слюсар-електрик-з-ремонту-електроуст", 6),
+                            ("experienced", "Слюсар-електрик з ремонту електроустаткування", "url", "https://oget.od.ua/jobs/слюсар-електрик-з-ремонту-електроуст-2", 7),
+                            ("trainee", "👩‍💼 Кондуктор", "url", "https://oget.od.ua/jobs/кондуктор", 1),
+                            ("trainee", "🧼 Мийник-прибиральник рухомого складу", "url", "https://oget.od.ua/jobs/мийник-прибиральник-рухомого-складу", 2),
+                            ("trainee", "🛠️ Монтер колії 3 розряд", "url", "https://oget.od.ua/jobs/монтер-колії-234-розряд", 3),
+                        ]
+                        for category, title, contact_type, contact_value, sort_order in initial_vacancies:
+                            await conn.execute(
+                                text(
+                                    "INSERT INTO vacancies (admin_id, admin_name, category, title, contact_type, contact_value, sort_order, is_active) "
+                                    "VALUES (0, 'Система', :category, :title, :contact_type, :contact_value, :sort_order, 1)"
+                                ),
+                                {
+                                    "category": category,
+                                    "title": title,
+                                    "contact_type": contact_type,
+                                    "contact_value": contact_value,
+                                    "sort_order": sort_order,
+                                }
+                            )
+                        print(f"✅ Seeding: додано {len(initial_vacancies)} початкових вакансій у vacancies")
+                except Exception as seed_err:
+                    print(f"⚠️ Seeding vacancies warning: {seed_err}")
             print("✅ Database tables initialized successfully")
             return  # Успіх, виходимо
         except (OSError, OperationalError) as e:
@@ -110,6 +153,7 @@ class MuseumBooking(Base):
     people_count = Column(Integer, nullable=False)
     user_name = Column(String, nullable=False)
     user_phone = Column(String, nullable=False)
+    participants_details = Column(String, nullable=True)
     status = Column(String, default="new")
 
 
@@ -206,6 +250,22 @@ class LostItem(Base):
     status = Column(String, default="active")  # "active" (на зберіганні), "returned" (повернуто)
 
 
+# --- 6. Таблиця Вакансій (керована з адмін-панелі) ---
+class Vacancy(Base):
+    __tablename__ = "vacancies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=func.now())
+    admin_id = Column(BigInteger, nullable=True)
+    admin_name = Column(String, nullable=True)
+    category = Column(String, nullable=False)      # "experienced" або "trainee"
+    title = Column(String, nullable=False)          # Назва вакансії
+    contact_type = Column(String, nullable=False, default="url")  # "url" або "phone"
+    contact_value = Column(String, nullable=False)  # URL або номер телефону
+    sort_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)       # True = відображається пасажирам, False = деактивована (soft-delete)
+
+
 # --- Індекси ---
 Index("ix_feedbacks_status", Feedback.status)
 Index("ix_feedbacks_created_at", Feedback.created_at)
@@ -216,6 +276,8 @@ Index("ix_news_created_at", NewsItem.created_at)
 Index("ix_lost_items_status", LostItem.status)
 Index("ix_lost_items_category", LostItem.category)
 Index("ix_lost_items_created_at", LostItem.created_at)
+Index("ix_vacancies_category", Vacancy.category)
+Index("ix_vacancies_is_active", Vacancy.is_active)
 
 
 # ================= ГОЛОВНИЙ КЛАС DATABASE =================

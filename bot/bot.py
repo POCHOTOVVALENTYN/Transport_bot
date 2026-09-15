@@ -85,7 +85,15 @@ from handlers.admin_handlers import (
     admin_lost_return, admin_lost_delete, admin_lost_archive,
     admin_lost_add_start, admin_lost_cat_selected,
     admin_lost_title_input, admin_lost_details_input,
-    admin_lost_skip_details, admin_lost_cancel
+    admin_lost_skip_details, admin_lost_cancel,
+    admin_lost_edit_start, admin_lost_edit_choice_selected,
+    admin_lost_edit_title_input, admin_lost_edit_details_input,
+    admin_lost_edit_cancel,
+    admin_vacancy_menu, admin_vacancy_list, admin_vacancy_view,
+    admin_vacancy_deactivate, admin_vacancy_add_start,
+    admin_vacancy_cat_selected, admin_vacancy_title_input,
+    admin_vacancy_contact_type_selected, admin_vacancy_contact_value_input,
+    admin_vacancy_cancel
 )
 from handlers.news_handlers import news_client_list, news_client_view
 from handlers.lost_items_handlers import show_lost_items_menu, show_lost_items_category
@@ -261,6 +269,58 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(admin_lost_return, pattern="^admin_lost_return:"))
         self.app.add_handler(CallbackQueryHandler(admin_lost_delete, pattern="^admin_lost_delete:"))
         self.app.add_handler(CallbackQueryHandler(admin_lost_archive, pattern="^admin_lost_archive(:.*)?$"))
+
+        # Редагування вже створеної знахідки
+        admin_lost_edit_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(admin_lost_edit_start, pattern="^admin_lost_edit_start:")],
+            states={
+                States.ADMIN_LOST_EDIT_CHOICE: [
+                    CallbackQueryHandler(admin_lost_edit_choice_selected, pattern="^admin_lost_edit_choice:")
+                ],
+                States.ADMIN_LOST_EDIT_TITLE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_lost_edit_title_input)
+                ],
+                States.ADMIN_LOST_EDIT_DETAILS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_lost_edit_details_input)
+                ]
+            },
+            fallbacks=[
+                CallbackQueryHandler(admin_lost_edit_cancel, pattern="^admin_lost_edit_cancel$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+            ],
+            block=False
+        )
+        self.app.add_handler(admin_lost_edit_conv)
+
+        # Керування вакансіями для загальних адмінів
+        admin_vacancy_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(admin_vacancy_add_start, pattern="^admin_vacancy_add_start$")],
+            states={
+                States.ADMIN_VACANCY_CATEGORY: [
+                    CallbackQueryHandler(admin_vacancy_cat_selected, pattern="^admin_vacancy_set_cat:")
+                ],
+                States.ADMIN_VACANCY_TITLE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_vacancy_title_input)
+                ],
+                States.ADMIN_VACANCY_CONTACT_TYPE: [
+                    CallbackQueryHandler(admin_vacancy_contact_type_selected, pattern="^admin_vacancy_set_contact_type:")
+                ],
+                States.ADMIN_VACANCY_CONTACT_VALUE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_vacancy_contact_value_input)
+                ]
+            },
+            fallbacks=[
+                CallbackQueryHandler(admin_vacancy_cancel, pattern="^admin_vacancy_cancel$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+            ],
+            block=False
+        )
+        self.app.add_handler(admin_vacancy_conv)
+
+        self.app.add_handler(CallbackQueryHandler(admin_vacancy_menu, pattern="^admin_vacancy_menu$"))
+        self.app.add_handler(CallbackQueryHandler(admin_vacancy_list, pattern="^admin_vacancy_list:"))
+        self.app.add_handler(CallbackQueryHandler(admin_vacancy_view, pattern="^admin_vacancy_view:"))
+        self.app.add_handler(CallbackQueryHandler(admin_vacancy_deactivate, pattern="^admin_vacancy_deactivate:"))
 
         # Кнопка входу в Адмінку Музею (Максим)
         self.app.add_handler(CallbackQueryHandler(admin_menu_show, pattern="^admin_menu_show$"))

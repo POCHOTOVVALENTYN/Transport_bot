@@ -7,6 +7,7 @@ from telegram.constants import ParseMode
 
 from config.messages import MESSAGES
 from config.settings import MUSEUM_LOGO_IMAGE, MUSEUM_ADMIN_ID, MUSEUM_ADMIN_IDS # GOOGLE_SHEETS_ID вже не потрібен тут
+from config.constants import MuseumLimits
 from handlers.common import get_back_keyboard, get_cancel_keyboard
 from bot.states import States
 from utils.logger import logger
@@ -399,14 +400,18 @@ def _build_museum_summary(context: ContextTypes.DEFAULT_TYPE) -> str:
         f"👥 <b>Кількість осіб:</b> {count}\n"
     )
 
+    participants = context.user_data.get('museum_participants', [])
     if excursion_type == 'holiday':
-        participants = context.user_data.get('museum_participants', [])
         if participants:
             summary += "👥 <b>Перелік відвідувачів:</b>\n"
             for idx, p in enumerate(participants, 1):
                 summary += f"  {idx}. {p['name']} ({p['age']} р.)\n"
         else:
             summary += f"👤 <b>ПІБ:</b> {name}\n"
+    elif excursion_type == 'regular' and participants:
+        summary += "👥 <b>Перелік учасників:</b>\n"
+        for idx, p in enumerate(participants, 1):
+            summary += f"  {idx}. {p['name']}\n"
     else:
         summary += f"👤 <b>ПІБ:</b> {name}\n"
 
@@ -493,25 +498,31 @@ async def museum_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif field == "people":
         keyboard = await get_cancel_keyboard("museum_menu")
         if excursion_type == 'holiday':
-            available = context.user_data.get('holiday_available_places', 40)
-            prompt = f"Оберіть або вкажіть нову кількість осіб (максимум 2 людини, доступно місць: {available}):"
+            available = context.user_data.get('holiday_available_places', MuseumLimits.HOLIDAY_MAX_TOTAL)
+            prompt = f"Оберіть або вкажіть нову кількість осіб (максимум {MuseumLimits.HOLIDAY_MAX_PER_BOOKING} людини, доступно місць: {available}):"
             kb_people = InlineKeyboardMarkup([
                 [InlineKeyboardButton("1 особа 👤", callback_data="museum_count:1"), InlineKeyboardButton("2 особи 👥", callback_data="museum_count:2")],
                 [InlineKeyboardButton("🚫 Скасувати", callback_data="museum_menu")]
             ])
             await query.edit_message_text(prompt, reply_markup=kb_people)
+        elif excursion_type == 'regular':
+            available = context.user_data.get('regular_available_places', MuseumLimits.REGULAR_MAX_TOTAL)
+            max_choice = min(MuseumLimits.REGULAR_MAX_PER_BOOKING, available) if available > 0 else MuseumLimits.REGULAR_MAX_PER_BOOKING
+            prompt = f"Вкажіть нову кількість осіб цифрою (максимум {max_choice}, доступно місць: {available}):"
+            await query.edit_message_text(prompt, reply_markup=keyboard)
         else:
             await query.edit_message_text("Вкажіть нову кількість осіб:", reply_markup=keyboard)
         return States.MUSEUM_PEOPLE_COUNT
 
     elif field == "name":
         keyboard = await get_cancel_keyboard("museum_menu")
-        if excursion_type == 'holiday':
+        if excursion_type in ('holiday', 'regular'):
             context.user_data['museum_participants'] = []
             context.user_data['museum_current_participant_idx'] = 0
             count = context.user_data.get('museum_people_count', 1)
             p_prefix = "1-го " if count > 1 else ""
-            await query.edit_message_text(f"👤 Вкажіть П.І.Б. {p_prefix}відвідувача:", reply_markup=keyboard)
+            noun = "відвідувача" if excursion_type == 'holiday' else "учасника"
+            await query.edit_message_text(f"👤 Вкажіть П.І.Б. {p_prefix}{noun}:", reply_markup=keyboard)
             return States.MUSEUM_PARTICIPANT_NAME
         else:
             await query.edit_message_text("Вкажіть нове П.І.Б.:", reply_markup=keyboard)
@@ -542,16 +553,16 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     excursion_type = context.user_data.get('museum_type', 'regular')
     if excursion_type == 'holiday':
         count_exist = await museum_service.get_holiday_bookings_count(selected_date)
-        if count_exist >= 40:
+        if count_exist >= MuseumLimits.HOLIDAY_MAX_TOTAL:
             keyboard_back = await get_back_keyboard("museum_menu")
             await query.edit_message_text(
-                text="😔 Вільні місця на цю дату закінчилися (досягнуто ліміт 40 осіб). КП 'ОМЕТ' приносить свої вибачення, зачекайте на доступну іншу святкову екскурсію. 🏛️",
+                text=f"😔 Вільні місця на цю дату закінчилися (досягнуто ліміт {MuseumLimits.HOLIDAY_MAX_TOTAL} осіб). КП 'ОМЕТ' приносить свої вибачення, зачекайте на доступну іншу святкову екскурсію. 🏛️",
                 reply_markup=keyboard_back
             )
             context.user_data.clear()
             return ConversationHandler.END
 
-        available = 40 - count_exist
+        available = MuseumLimits.HOLIDAY_MAX_TOTAL - count_exist
         context.user_data['holiday_available_places'] = available
 
         if available == 1:
@@ -573,7 +584,7 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             people_prompt = (
                 f"Вкажіть кількість осіб у вашій групі (напишіть цифрою 1 чи 2 або оберіть кнопкою нижче).\n"
-                f"⚠️ Зверніть увагу: для святкової екскурсії максимальна кількість осіб в одній заявці — <b>2 людей</b> (Вільних місць на дату: {available}):"
+                f"⚠️ Зверніть увагу: для святкової екскурсії максимальна кількість осіб в одній заявці — <b>{MuseumLimits.HOLIDAY_MAX_PER_BOOKING} людей</b> (Вільних місць на дату: {available}):"
             )
             kb_people = InlineKeyboardMarkup([
                 [InlineKeyboardButton("1 особа 👤", callback_data="museum_count:1"), InlineKeyboardButton("2 особи 👥", callback_data="museum_count:2")],
@@ -584,6 +595,50 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update.effective_chat.id,
                 people_prompt,
                 kb_people,
+                ParseMode.HTML
+            )
+            return States.MUSEUM_PEOPLE_COUNT
+    elif excursion_type == 'regular':
+        count_exist = await museum_service.get_bookings_count(selected_date)
+        if count_exist >= MuseumLimits.REGULAR_MAX_TOTAL:
+            keyboard_back = await get_back_keyboard("museum_menu")
+            await query.edit_message_text(
+                text=f"😔 Вільні місця на цю дату закінчилися (досягнуто ліміт {MuseumLimits.REGULAR_MAX_TOTAL} осіб). КП 'ОМЕТ' приносить свої вибачення, оберіть, будь ласка, іншу доступну дату. 🏛️",
+                reply_markup=keyboard_back
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+
+        available = MuseumLimits.REGULAR_MAX_TOTAL - count_exist
+        context.user_data['regular_available_places'] = available
+        max_choice = min(MuseumLimits.REGULAR_MAX_PER_BOOKING, available)
+
+        if max_choice == 1:
+            context.user_data['museum_people_count'] = 1
+            context.user_data['museum_participants'] = []
+            context.user_data['museum_current_participant_idx'] = 0
+            people_prompt = (
+                "ℹ️ На обрану дату залишилось <b>лише 1 вільне місце</b>. Автоматично обрано: 1 особа.\n\n"
+                "👤 Введіть П.І.Б. учасника (тільки літери, довжина від 5 символів):"
+            )
+            context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                people_prompt,
+                keyboard,
+                ParseMode.HTML
+            )
+            return States.MUSEUM_PARTICIPANT_NAME
+        else:
+            people_prompt = (
+                f"Вкажіть кількість осіб у вашій групі (напишіть цифрою від 1 до {max_choice}).\n"
+                f"⚠️ Зверніть увагу: для звичайної екскурсії максимальна кількість осіб в одній заявці — <b>{MuseumLimits.REGULAR_MAX_PER_BOOKING} осіб</b> (Вільних місць на дату: {available}):"
+            )
+            context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                people_prompt,
+                keyboard,
                 ParseMode.HTML
             )
             return States.MUSEUM_PEOPLE_COUNT
@@ -631,17 +686,17 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
     excursion_type = context.user_data.get('museum_type', 'regular')
 
     if excursion_type == 'holiday':
-        if count > 2:
+        if count > MuseumLimits.HOLIDAY_MAX_PER_BOOKING:
             context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
                 context,
                 update.effective_chat.id,
-                "❌ Для святкової екскурсії максимальна кількість осіб в одній заявці — <b>2 людей</b>. Будь ласка, введіть 1 або 2:",
+                f"❌ Для святкової екскурсії максимальна кількість осіб в одній заявці — <b>{MuseumLimits.HOLIDAY_MAX_PER_BOOKING} людей</b>. Будь ласка, введіть коректне число:",
                 keyboard,
                 ParseMode.HTML
             )
             return States.MUSEUM_PEOPLE_COUNT
         
-        available = context.user_data.get('holiday_available_places', 40)
+        available = context.user_data.get('holiday_available_places', MuseumLimits.HOLIDAY_MAX_TOTAL)
         if count > available:
             context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
                 context,
@@ -651,18 +706,27 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
                 ParseMode.HTML
             )
             return States.MUSEUM_PEOPLE_COUNT
-    else:
-        if count > 10:
-            await _edit_museum_dialog_message(
+    elif excursion_type == 'regular':
+        if count > MuseumLimits.REGULAR_MAX_PER_BOOKING:
+            context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
                 context,
                 update.effective_chat.id,
-                "Для груп понад 10 осіб потрібна індивідуальна домовленість.\n"
-                "Будь ласка, зателефонуйте організатору за номером <code>050-399-42-11</code>.",
-                await get_back_keyboard("museum_menu"),
+                f"❌ Для звичайної екскурсії максимальна кількість осіб в одній заявці — <b>{MuseumLimits.REGULAR_MAX_PER_BOOKING} осіб</b>. Будь ласка, введіть коректне число:",
+                keyboard,
                 ParseMode.HTML
             )
-            context.user_data.clear()
-            return ConversationHandler.END
+            return States.MUSEUM_PEOPLE_COUNT
+
+        available = context.user_data.get('regular_available_places', MuseumLimits.REGULAR_MAX_TOTAL)
+        if count > available:
+            context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                f"❌ На обрану дату залишилося тільки {available} вільних місць. Будь ласка, введіть число від 1 до {available}:",
+                keyboard,
+                ParseMode.HTML
+            )
+            return States.MUSEUM_PEOPLE_COUNT
 
     context.user_data['museum_people_count'] = count
     logger.info(f"People count: {count}")
@@ -671,14 +735,15 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
         _clear_museum_edit_flags(context)
         return await museum_show_confirm(update, context)
 
-    if excursion_type == 'holiday':
+    if excursion_type in ('holiday', 'regular'):
         context.user_data['museum_participants'] = []
         context.user_data['museum_current_participant_idx'] = 0
         p_prefix = "1-го " if count > 1 else ""
+        noun = "відвідувача" if excursion_type == 'holiday' else "учасника"
         context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
             context,
             update.effective_chat.id,
-            f"👤 Вкажіть П.І.Б. {p_prefix}відвідувача (тільки літери, довжина від 5 символів):",
+            f"👤 Вкажіть П.І.Б. {p_prefix}{noun} (тільки літери, довжина від 5 символів):",
             keyboard
         )
         return States.MUSEUM_PARTICIPANT_NAME
@@ -693,7 +758,11 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def museum_get_participant_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отримує ПІБ відвідувача святкової екскурсії та запитує його вік."""
+    """
+    Отримує ПІБ учасника екскурсії.
+    Для святкової екскурсії — далі запитує вік учасника.
+    Для звичайної екскурсії — вік не потрібен, одразу переходить до наступного учасника або телефону.
+    """
     await update.message.delete()
     name_text = update.message.text.strip()
     keyboard = await get_cancel_keyboard("museum_menu")
@@ -707,6 +776,36 @@ async def museum_get_participant_name(update: Update, context: ContextTypes.DEFA
         )
         return States.MUSEUM_PARTICIPANT_NAME
 
+    excursion_type = context.user_data.get('museum_type', 'regular')
+
+    if excursion_type == 'regular':
+        participants = context.user_data.get('museum_participants', [])
+        participants.append({"name": name_text, "age": None})
+        context.user_data['museum_participants'] = participants
+
+        idx = context.user_data.get('museum_current_participant_idx', 0) + 1
+        context.user_data['museum_current_participant_idx'] = idx
+        count = context.user_data.get('museum_people_count', 1)
+
+        if idx < count:
+            context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                f"👤 Вкажіть П.І.Б. {idx + 1}-го учасника (тільки літери, довжина від 5 символів):",
+                keyboard
+            )
+            return States.MUSEUM_PARTICIPANT_NAME
+        else:
+            context.user_data['museum_name'] = participants[0]['name']
+            context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                "📞 Вкажіть контактний телефон для підтвердження (наприклад: 0994564778):",
+                keyboard
+            )
+            return States.MUSEUM_PHONE
+
+    # excursion_type == 'holiday' — для святкової екскурсії питаємо ще й вік кожного учасника
     context.user_data['current_participant_name'] = name_text
     idx = context.user_data.get('museum_current_participant_idx', 0)
     count = context.user_data.get('museum_people_count', 1)
@@ -829,6 +928,18 @@ async def museum_get_phone_input(update: Update, context: ContextTypes.DEFAULT_T
                 ParseMode.HTML
             )
             return States.MUSEUM_PHONE
+    elif excursion_type == 'regular':
+        selected_date = context.user_data.get('museum_date')
+        has_booking = await museum_service.has_existing_booking(selected_date, phone_text)
+        if has_booking:
+            context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                f"⚠️ З номера <code>{phone_text}</code> вже є зареєстрована заявка на обрану дату (<b>{selected_date}</b>).\n\nНа один номер телефону дозволено не більше 1 реєстрації на одну й ту саму дату.",
+                keyboard_cancel,
+                ParseMode.HTML
+            )
+            return States.MUSEUM_PHONE
 
     context.user_data['museum_phone'] = phone_text
     _clear_museum_edit_flags(context)
@@ -848,7 +959,7 @@ async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if excursion_type == 'holiday':
         count_exist = await museum_service.get_holiday_bookings_count(date)
-        if count_exist + count > 40:
+        if count_exist + count > MuseumLimits.HOLIDAY_MAX_TOTAL:
             keyboard_final = await get_back_keyboard("museum_menu")
             await _edit_museum_dialog_message(
                 context,
@@ -876,6 +987,36 @@ async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         participants_json = json.dumps(participants, ensure_ascii=False) if participants else None
 
         success = await museum_service.create_holiday_booking(date, count, name, phone, participants_json)
+    elif excursion_type == 'regular':
+        count_exist = await museum_service.get_bookings_count(date)
+        if count_exist + count > MuseumLimits.REGULAR_MAX_TOTAL:
+            keyboard_final = await get_back_keyboard("museum_menu")
+            await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                "😔 Вільні місця закінчилися. На жаль, інші користувачі щойно зайняли останні місця на цю дату. КП 'ОМЕТ' приносить свої вибачення. 🏛️",
+                keyboard_final
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+
+        has_booking = await museum_service.has_existing_booking(date, phone)
+        if has_booking:
+            keyboard_final = await get_back_keyboard("museum_menu")
+            await _edit_museum_dialog_message(
+                context,
+                update.effective_chat.id,
+                f"⚠️ З номера {phone} вже є зареєстрована заявка на обрану дату ({date}).",
+                keyboard_final
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+
+        import json
+        participants = context.user_data.get('museum_participants', [])
+        participants_json = json.dumps(participants, ensure_ascii=False) if participants else None
+
+        success = await museum_service.create_booking(date, count, name, phone, participants_json)
     else:
         success = await museum_service.create_booking(date, count, name, phone)
 
@@ -895,7 +1036,13 @@ async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         participants = context.user_data.get('museum_participants', [])
         part_info = ""
         if participants:
-            part_info = "\n👥 <b>Відвідувачі:</b>\n" + "\n".join([f"  • {p['name']} ({p['age']} р.)" for p in participants])
+            part_lines = []
+            for p in participants:
+                if p.get('age') is not None:
+                    part_lines.append(f"  • {p['name']} ({p['age']} р.)")
+                else:
+                    part_lines.append(f"  • {p['name']}")
+            part_info = "\n👥 <b>Учасники:</b>\n" + "\n".join(part_lines)
 
         admin_message = (
             f"🔔 <b>{title}</b>\n"

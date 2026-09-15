@@ -18,6 +18,7 @@ from services.tickets_service import TicketsService
 from services.museum_service import MuseumService
 from services.news_service import NewsService, format_kyiv_time
 from services.lost_items_service import LostItemsService, format_kyiv_date as format_lost_date
+from services.vacancy_service import VacancyService
 
 
 user_service = UserService()
@@ -25,6 +26,7 @@ tickets_service = TicketsService()
 museum_service = MuseumService()
 news_service = NewsService()
 lost_items_service = LostItemsService()
+vacancy_service = VacancyService()
 
 
 
@@ -288,6 +290,7 @@ async def show_general_admin_menu(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton("📢 Зробити розсилку (Новини)", callback_data="admin_broadcast_start")],
         [InlineKeyboardButton("🗄️ Архів новин", callback_data="admin_news_archive:0")],
         [InlineKeyboardButton("🔍 Загублені речі", callback_data="admin_lost_menu")],
+        [InlineKeyboardButton("👔 Вакансії", callback_data="admin_vacancy_menu")],
         [InlineKeyboardButton("📧 Поштовий архів", callback_data="admin_mail_archive")],
         [InlineKeyboardButton("🔄 Синхронізувати БД -> Sheets", callback_data="admin_sync_db")],
         [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
@@ -605,6 +608,9 @@ async def admin_lost_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("✅ Позначити: Повернуто власнику", callback_data=f"admin_lost_return:{item.id}:{category}:{offset}")
         ])
     keyboard.append([
+        InlineKeyboardButton("✏️ Редагувати", callback_data=f"admin_lost_edit_start:{item.id}:{category}:{offset}")
+    ])
+    keyboard.append([
         InlineKeyboardButton("🗑️ Видалити запис", callback_data=f"admin_lost_delete:{item.id}:{category}:{offset}")
     ])
     back_target = f"admin_lost_list:{category}:{offset}" if item.status == "active" else f"admin_lost_archive:{offset}"
@@ -915,6 +921,592 @@ async def admin_lost_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query:
         await admin_lost_menu(update, context)
+    return ConversationHandler.END
+
+
+# --- CONVERSATION HANDLER: РЕДАГУВАННЯ ЗНАХІДКИ АДМІНОМ ---
+
+async def admin_lost_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок діалогу редагування вже створеного запису про знахідку (виправлення помилки без видалення)"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    parts = query.data.split(":")
+    item_id = int(parts[1]) if len(parts) > 1 else 0
+    category = parts[2] if len(parts) > 2 else "document"
+    offset = int(parts[3]) if len(parts) > 3 else 0
+
+    item = await lost_items_service.get_item_by_id(item_id)
+    if not item:
+        await query.edit_message_text(
+            "⚠️ Запис не знайдено або вже видалено.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ До списку", callback_data=f"admin_lost_list:{category}:{offset}")]
+            ])
+        )
+        return ConversationHandler.END
+
+    context.user_data['lost_edit_id'] = item_id
+    context.user_data['lost_edit_category'] = category
+    context.user_data['lost_edit_offset'] = offset
+
+    text = (
+        f"✏️ <b>Редагування знахідки #{item.id}</b>\n\n"
+        f"🏷️ Поточна назва: {html.escape(item.title)}\n"
+        f"ℹ️ Поточні деталі: {html.escape(item.details or 'не вказані')}\n\n"
+        "Що саме потрібно змінити?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🏷️ Назву / ПІБ", callback_data="admin_lost_edit_choice:title")],
+        [InlineKeyboardButton("ℹ️ Деталі", callback_data="admin_lost_edit_choice:details")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_lost_edit_cancel")]
+    ]
+    sent_msg = await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+    context.user_data['lost_edit_prompt_id'] = sent_msg.message_id
+    return States.ADMIN_LOST_EDIT_CHOICE
+
+
+async def admin_lost_edit_choice_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору поля для редагування (назва або деталі)"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    field = query.data.split(":")[1] if ":" in query.data else "title"
+    context.user_data['lost_edit_field'] = field
+
+    field_label = "назву / ПІБ" if field == "title" else "деталі"
+    text = f"✏️ Введіть нове значення для поля «{field_label}»:"
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_lost_edit_cancel")]
+    ])
+    sent_msg = await query.edit_message_text(text=text, reply_markup=cancel_markup)
+    context.user_data['lost_edit_prompt_id'] = sent_msg.message_id
+
+    return States.ADMIN_LOST_EDIT_TITLE if field == "title" else States.ADMIN_LOST_EDIT_DETAILS
+
+
+async def _admin_lost_edit_finish(update: Update, context: ContextTypes.DEFAULT_TYPE, new_value: str):
+    """Зберігає відредаговане значення і показує оновлену картку знахідки"""
+    item_id = context.user_data.get('lost_edit_id')
+    category = context.user_data.get('lost_edit_category', 'document')
+    offset = context.user_data.get('lost_edit_offset', 0)
+    field = context.user_data.get('lost_edit_field', 'title')
+
+    if not item_id:
+        return ConversationHandler.END
+
+    if field == "title":
+        await lost_items_service.update_lost_item(item_id, title=new_value)
+    else:
+        await lost_items_service.update_lost_item(item_id, details=new_value)
+
+    item = await lost_items_service.get_item_by_id(item_id)
+
+    prompt_id = context.user_data.pop('lost_edit_prompt_id', None)
+    context.user_data.pop('lost_edit_id', None)
+    context.user_data.pop('lost_edit_category', None)
+    context.user_data.pop('lost_edit_offset', None)
+    context.user_data.pop('lost_edit_field', None)
+
+    if not item:
+        text = "⚠️ Не вдалося знайти запис після оновлення."
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔍 До меню знахідок", callback_data="admin_lost_menu")]])
+    else:
+        created_date = format_lost_date(item.created_at)
+        cat_label = "🪪 Документ" if item.category == "document" else "🎒 Особиста річ"
+        status_label = "🟢 На зберіганні в інфоцентрі" if item.status == "active" else "✅ Повернуто власнику"
+        admin_name_safe = html.escape(item.admin_name or "Адміністратор")
+        title_safe = html.escape(item.title)
+        details_safe = html.escape(item.details or "Деталі не вказані")
+
+        text = (
+            f"✅ <b>Зміни збережено!</b>\n\n"
+            f"🔍 <b>Картка знахідки #{item.id}</b>\n\n"
+            f"📁 <b>Категорія:</b> {cat_label}\n"
+            f"🏷️ <b>Назва / ПІБ:</b> {title_safe}\n"
+            f"ℹ️ <b>Деталі:</b> {details_safe}\n"
+            f"🗓️ <b>Дата внесення:</b> {created_date}\n"
+            f"👤 <b>Додав(ла):</b> {admin_name_safe}\n"
+            f"📌 <b>Статус:</b> {status_label}\n"
+        )
+        kb = []
+        if item.status == "active":
+            kb.append([InlineKeyboardButton("✅ Позначити: Повернуто власнику", callback_data=f"admin_lost_return:{item.id}:{category}:{offset}")])
+            kb.append([InlineKeyboardButton("✏️ Редагувати ще раз", callback_data=f"admin_lost_edit_start:{item.id}:{category}:{offset}")])
+        kb.append([InlineKeyboardButton("🗑️ Видалити запис", callback_data=f"admin_lost_delete:{item.id}:{category}:{offset}")])
+        kb.append([InlineKeyboardButton("⬅️ Назад до списку", callback_data=f"admin_lost_list:{category}:{offset}")])
+        kb.append([InlineKeyboardButton("🔙 До меню знахідок", callback_data="admin_lost_menu")])
+        keyboard = InlineKeyboardMarkup(kb)
+
+    if prompt_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=prompt_id,
+                text=text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            return ConversationHandler.END
+        except Exception:
+            pass
+
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+    return ConversationHandler.END
+
+
+async def admin_lost_edit_title_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введення нової назви/ПІБ"""
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    new_title = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not new_title:
+        return States.ADMIN_LOST_EDIT_TITLE
+
+    return await _admin_lost_edit_finish(update, context, new_title)
+
+
+async def admin_lost_edit_details_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введення нових деталей"""
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    new_details = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    return await _admin_lost_edit_finish(update, context, new_details)
+
+
+async def admin_lost_edit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування редагування знахідки"""
+    query = update.callback_query
+    if query:
+        await query.answer("Редагування скасовано")
+    context.user_data.pop('lost_edit_prompt_id', None)
+    context.user_data.pop('lost_edit_id', None)
+    context.user_data.pop('lost_edit_category', None)
+    context.user_data.pop('lost_edit_offset', None)
+    context.user_data.pop('lost_edit_field', None)
+
+    if query:
+        await admin_lost_menu(update, context)
+    return ConversationHandler.END
+
+
+# --- ВАКАНСІЇ: АДМІН-ПАНЕЛЬ (керована з бота, замість хардкоджених словників) ---
+
+async def admin_vacancy_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Головне меню керування вакансіями"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    text = (
+        "👔 <b>Керування вакансіями</b>\n\n"
+        "Тут можна додати нову вакансію або деактивувати застарілу. "
+        "Деактивовані вакансії зникають зі списку для користувачів, але залишаються в історії."
+    )
+    keyboard = [
+        [InlineKeyboardButton("➕ Додати вакансію", callback_data="admin_vacancy_add_start")],
+        [InlineKeyboardButton("👷 Вакансії з досвідом", callback_data="admin_vacancy_list:experienced:0")],
+        [InlineKeyboardButton("🧑‍🎓 Вакансії без досвіду", callback_data="admin_vacancy_list:trainee:0")],
+        [InlineKeyboardButton("🔙 В адмін-панель", callback_data="general_admin_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if query and query.message:
+        await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+
+async def admin_vacancy_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує список активних вакансій за категорією з пагінацією"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    parts = query.data.split(":")
+    category = parts[1] if len(parts) > 1 else "experienced"
+    offset = int(parts[2]) if len(parts) > 2 else 0
+    limit = 7
+
+    cat_label = "👷 З досвідом" if category == "experienced" else "🧑‍🎓 Без досвіду"
+    result = await vacancy_service.get_admin_vacancies(category=category, active_only=True, limit=limit, offset=offset)
+    items = result["items"]
+    total_count = result["total_count"]
+    has_prev = result["has_prev"]
+    has_next = result["has_next"]
+
+    if not items:
+        empty_text = (
+            f"👔 <b>{cat_label} (активні)</b>\n\n"
+            "У цій категорії наразі немає активних вакансій."
+        )
+        empty_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Додати вакансію", callback_data="admin_vacancy_add_start")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="admin_vacancy_menu")]
+        ])
+        if query and query.message:
+            await query.edit_message_text(empty_text, reply_markup=empty_markup, parse_mode=ParseMode.HTML)
+        return
+
+    header_text = (
+        f"👔 <b>{cat_label} — активні вакансії</b>\n\n"
+        f"Всього: <b>{total_count}</b>\n"
+        "Оберіть вакансію для перегляду або деактивації:"
+    )
+    keyboard = []
+    for vac in items:
+        title_snippet = (vac.title or "").strip()
+        if len(title_snippet) > 30:
+            title_snippet = title_snippet[:28] + ".."
+        keyboard.append([
+            InlineKeyboardButton(f"🟢 {title_snippet}", callback_data=f"admin_vacancy_view:{vac.id}:{category}:{offset}")
+        ])
+
+    nav_row = []
+    if has_prev:
+        prev_offset = max(0, offset - limit)
+        nav_row.append(InlineKeyboardButton("⬅️ Попередня", callback_data=f"admin_vacancy_list:{category}:{prev_offset}"))
+    if has_next:
+        next_offset = offset + limit
+        nav_row.append(InlineKeyboardButton("Наступна ➡️", callback_data=f"admin_vacancy_list:{category}:{next_offset}"))
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([InlineKeyboardButton("➕ Додати нову", callback_data="admin_vacancy_add_start")])
+    keyboard.append([InlineKeyboardButton("⬅️ До меню вакансій", callback_data="admin_vacancy_menu")])
+
+    await query.edit_message_text(header_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+
+async def admin_vacancy_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Картка вакансії в адмін-панелі"""
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    parts = query.data.split(":")
+    vacancy_id = int(parts[1]) if len(parts) > 1 else 0
+    category = parts[2] if len(parts) > 2 else "experienced"
+    offset = int(parts[3]) if len(parts) > 3 else 0
+
+    vacancy = await vacancy_service.get_vacancy_by_id(vacancy_id)
+    if not vacancy:
+        await query.edit_message_text(
+            "⚠️ Вакансію не знайдено або вже деактивовано.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ До списку", callback_data=f"admin_vacancy_list:{category}:{offset}")]
+            ])
+        )
+        return
+
+    cat_label = "👷 З досвідом" if vacancy.category == "experienced" else "🧑‍🎓 Без досвіду"
+    contact_label = "🔗 Посилання" if vacancy.contact_type == "url" else "📞 Телефон"
+    status_label = "🟢 Активна" if vacancy.is_active else "🚫 Деактивована"
+    admin_name_safe = html.escape(vacancy.admin_name or "Адміністратор")
+    title_safe = html.escape(vacancy.title)
+    contact_safe = html.escape(vacancy.contact_value)
+
+    text = (
+        f"👔 <b>Картка вакансії #{vacancy.id}</b>\n\n"
+        f"📁 <b>Категорія:</b> {cat_label}\n"
+        f"🏷️ <b>Назва:</b> {title_safe}\n"
+        f"{contact_label}: <code>{contact_safe}</code>\n"
+        f"👤 <b>Додав(ла):</b> {admin_name_safe}\n"
+        f"📌 <b>Статус:</b> {status_label}\n"
+    )
+
+    keyboard = []
+    if vacancy.is_active:
+        keyboard.append([InlineKeyboardButton("🚫 Деактивувати", callback_data=f"admin_vacancy_deactivate:{vacancy.id}:{category}:{offset}")])
+    keyboard.append([InlineKeyboardButton("⬅️ Назад до списку", callback_data=f"admin_vacancy_list:{category}:{offset}")])
+    keyboard.append([InlineKeyboardButton("🔙 До меню вакансій", callback_data="admin_vacancy_menu")])
+
+    await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+
+async def admin_vacancy_deactivate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Деактивує вакансію (soft-delete: is_active=False, історія зберігається в БД)"""
+    query = update.callback_query
+    if not query:
+        return
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return
+
+    parts = query.data.split(":")
+    vacancy_id = int(parts[1]) if len(parts) > 1 else 0
+    category = parts[2] if len(parts) > 2 else "experienced"
+    offset = int(parts[3]) if len(parts) > 3 else 0
+
+    res = await vacancy_service.deactivate_vacancy(vacancy_id)
+    if res:
+        await query.answer("🚫 Вакансію деактивовано!", show_alert=False)
+    else:
+        await query.answer("⚠️ Вакансію не знайдено.", show_alert=True)
+
+    query.data = f"admin_vacancy_list:{category}:{offset}"
+    await admin_vacancy_list(update, context)
+
+
+# --- CONVERSATION HANDLER: ДОДАВАННЯ ВАКАНСІЇ АДМІНОМ ---
+
+async def admin_vacancy_add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок діалогу додавання вакансії"""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    text = (
+        "➕ <b>Додавання нової вакансії</b>\n\n"
+        "Крок 1/3: Оберіть категорію вакансії:"
+    )
+    keyboard = [
+        [InlineKeyboardButton("👷 З досвідом", callback_data="admin_vacancy_set_cat:experienced")],
+        [InlineKeyboardButton("🧑‍🎓 Без досвіду (навчання)", callback_data="admin_vacancy_set_cat:trainee")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_cancel")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if query and query.message:
+        sent_msg = await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    else:
+        sent_msg = await update.message.reply_text(text=text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    context.user_data['vacancy_add_prompt_id'] = sent_msg.message_id
+
+    return States.ADMIN_VACANCY_CATEGORY
+
+
+async def admin_vacancy_cat_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору категорії вакансії"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    category = query.data.split(":")[1] if ":" in query.data else "experienced"
+    context.user_data['vacancy_add_cat'] = category
+
+    cat_label = "👷 З досвідом" if category == "experienced" else "🧑‍🎓 Без досвіду"
+    text = (
+        f"➕ <b>Додавання: {cat_label}</b>\n\n"
+        "Крок 2/3: Надішліть текстом назву вакансії.\n\n"
+        "<i>Приклад: «Слюсар з ремонту рухомого складу»</i>"
+    )
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_cancel")]
+    ])
+    sent_msg = await query.edit_message_text(text=text, reply_markup=cancel_markup, parse_mode=ParseMode.HTML)
+    context.user_data['vacancy_add_prompt_id'] = sent_msg.message_id
+    return States.ADMIN_VACANCY_TITLE
+
+
+async def admin_vacancy_title_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введення назви вакансії"""
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    title = update.message.text.strip()
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not title:
+        return States.ADMIN_VACANCY_TITLE
+
+    context.user_data['vacancy_add_title'] = title
+
+    text = (
+        f"➕ <b>Додавання вакансії</b>\n\n"
+        f"Назва: <b>{html.escape(title)}</b>\n\n"
+        "Крок 3/3: Оберіть тип контакту:"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🔗 Посилання (URL)", callback_data="admin_vacancy_set_contact_type:url")],
+        [InlineKeyboardButton("📞 Телефон", callback_data="admin_vacancy_set_contact_type:phone")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_cancel")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    prompt_id = context.user_data.get('vacancy_add_prompt_id')
+    if prompt_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=prompt_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
+            return States.ADMIN_VACANCY_CONTACT_TYPE
+        except Exception:
+            pass
+
+    sent_msg = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML
+    )
+    context.user_data['vacancy_add_prompt_id'] = sent_msg.message_id
+    return States.ADMIN_VACANCY_CONTACT_TYPE
+
+
+async def admin_vacancy_contact_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору типу контакту (URL або телефон)"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    contact_type = query.data.split(":")[1] if ":" in query.data else "url"
+    context.user_data['vacancy_add_contact_type'] = contact_type
+
+    if contact_type == "url":
+        prompt_example = "https://oget.od.ua/jobs/приклад-вакансії"
+        prompt_label = "посилання на сторінку вакансії"
+    else:
+        prompt_example = "0991234567"
+        prompt_label = "номер телефону для звʼязку"
+
+    text = f"📎 Надішліть {prompt_label}.\n\n<i>Приклад: {prompt_example}</i>"
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_cancel")]
+    ])
+    sent_msg = await query.edit_message_text(text=text, reply_markup=cancel_markup, parse_mode=ParseMode.HTML)
+    context.user_data['vacancy_add_prompt_id'] = sent_msg.message_id
+    return States.ADMIN_VACANCY_CONTACT_VALUE
+
+
+async def admin_vacancy_contact_value_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введення значення контакту (URL або телефон) та фінальне збереження вакансії"""
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    value = update.message.text.strip()
+    contact_type = context.user_data.get('vacancy_add_contact_type', 'url')
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_cancel")]
+    ])
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if contact_type == "url":
+        if not (value.startswith("http://") or value.startswith("https://")):
+            error_text = "❌ Посилання має починатися з http:// або https://. Спробуйте ще раз:"
+            prompt_id = context.user_data.get('vacancy_add_prompt_id')
+            if prompt_id:
+                try:
+                    await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=prompt_id, text=error_text, reply_markup=cancel_markup)
+                    return States.ADMIN_VACANCY_CONTACT_VALUE
+                except Exception:
+                    pass
+            sent_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=error_text, reply_markup=cancel_markup)
+            context.user_data['vacancy_add_prompt_id'] = sent_msg.message_id
+            return States.ADMIN_VACANCY_CONTACT_VALUE
+    else:
+        cleaned_phone = value.replace(" ", "").replace("-", "")
+        if not re.match(r"^(\+?38)?0\d{9}$", cleaned_phone):
+            error_text = "❌ Не схоже на український номер телефону. Введіть у форматі 0991234567:"
+            prompt_id = context.user_data.get('vacancy_add_prompt_id')
+            if prompt_id:
+                try:
+                    await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=prompt_id, text=error_text, reply_markup=cancel_markup)
+                    return States.ADMIN_VACANCY_CONTACT_VALUE
+                except Exception:
+                    pass
+            sent_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=error_text, reply_markup=cancel_markup)
+            context.user_data['vacancy_add_prompt_id'] = sent_msg.message_id
+            return States.ADMIN_VACANCY_CONTACT_VALUE
+        value = cleaned_phone
+
+    admin_user = update.effective_user
+    category = context.user_data.get('vacancy_add_cat', 'experienced')
+    title = context.user_data.get('vacancy_add_title', '')
+
+    vacancy = await vacancy_service.create_vacancy({
+        "admin_id": admin_user.id,
+        "admin_name": admin_user.full_name or admin_user.first_name or "Адміністратор",
+        "category": category,
+        "title": title,
+        "contact_type": contact_type,
+        "contact_value": value
+    })
+
+    cat_label = "👷 З досвідом" if category == "experienced" else "🧑‍🎓 Без досвіду"
+    success_text = (
+        f"✅ <b>Вакансію успішно додано!</b>\n\n"
+        f"📁 <b>Категорія:</b> {cat_label}\n"
+        f"🏷️ <b>Назва:</b> {html.escape(title)}\n"
+        f"📎 <b>Контакт:</b> {html.escape(vacancy.contact_value)}\n\n"
+        "Вакансія тепер відображається користувачам у розділі «Вакансії»."
+    )
+    keyboard = [
+        [InlineKeyboardButton("➕ Додати ще одну", callback_data="admin_vacancy_add_start")],
+        [InlineKeyboardButton("👔 До меню вакансій", callback_data="admin_vacancy_menu")],
+        [InlineKeyboardButton("🔙 В адмін-панель", callback_data="general_admin_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    prompt_id = context.user_data.pop('vacancy_add_prompt_id', None)
+    context.user_data.pop('vacancy_add_cat', None)
+    context.user_data.pop('vacancy_add_title', None)
+    context.user_data.pop('vacancy_add_contact_type', None)
+
+    if prompt_id:
+        try:
+            await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=prompt_id, text=success_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+            return ConversationHandler.END
+        except Exception:
+            pass
+
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=success_text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    return ConversationHandler.END
+
+
+async def admin_vacancy_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування діалогу додавання вакансії"""
+    query = update.callback_query
+    if query:
+        await query.answer("Дію скасовано")
+    context.user_data.pop('vacancy_add_prompt_id', None)
+    context.user_data.pop('vacancy_add_cat', None)
+    context.user_data.pop('vacancy_add_title', None)
+    context.user_data.pop('vacancy_add_contact_type', None)
+
+    if query:
+        await admin_vacancy_menu(update, context)
     return ConversationHandler.END
 
 

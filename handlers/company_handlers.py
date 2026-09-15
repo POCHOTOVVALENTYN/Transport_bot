@@ -6,26 +6,12 @@ from handlers.common import get_back_keyboard
 from utils.logger import logger
 from telegram.constants import ParseMode
 from config.settings import RENTAL_SERVICE_IMAGE
+from services.vacancy_service import VacancyService
 
+# Вакансії тепер керуються з адмін-панелі й зберігаються в таблиці `vacancies` (database/db.py).
+# Початкові дані перенесено туди при першому запуску (див. init_db у database/db.py).
+vacancy_service = VacancyService()
 
-# База даних вакансій (з досвідом)
-EXPERIENCED_VACANCIES = {
-    "Спеціаліст нарядник поїзних бригад": "+380751705557",
-    "Зварювальник": "https://oget.od.ua/jobs/зварювальник",
-    "Слюсар з ремонту рухомого складу": "https://oget.od.ua/jobs/слюсар-з-ремонту-рухомого-складу",
-    "Електрогазозварник": "https://oget.od.ua/jobs/електрогазозварник",
-    "Електромонтер контактної/кабельної мережі": "https://oget.od.ua/jobs/електромонтер-контактної-та-кабельн",
-    "Електромонтер тягової підстанції": "https://oget.od.ua/jobs/слюсар-електрик-з-ремонту-електроуст",
-    "Слюсар-електрик з ремонту електроустаткування": "https://oget.od.ua/jobs/слюсар-електрик-з-ремонту-електроуст-2"
-}
-
-
-# База даних вакансій (без досвіду / навчання)
-TRAINEE_VACANCIES = {
-    "👩‍💼 Кондуктор": "https://oget.od.ua/jobs/кондуктор",
-    "🧼 Мийник-прибиральник рухомого складу": "https://oget.od.ua/jobs/мийник-прибиральник-рухомого-складу",
-    "🛠️ Монтер колії 3 розряд": "https://oget.od.ua/jobs/монтер-колії-234-розряд"
-}
 
 async def show_company_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показує меню 'Про підприємство'."""
@@ -252,23 +238,30 @@ async def show_vacancies_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def show_vacancy_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показує список вакансій з посиланнями на сайт."""
+    """Показує список активних вакансій з бази даних (керовані адміністратором)."""
     query = update.callback_query
     await query.answer()
 
     v_type = query.data.split(":")[1]
     keyboard = []
     text = "👇 Оберіть вакансію, щоб перейти до повного опису на сайті:"
-
-    if v_type == "experienced":
-        for name, url in EXPERIENCED_VACANCIES.items():
-            keyboard.append([InlineKeyboardButton(f"👷 {name}", url=url)])
-
-    elif v_type == "trainee":
+    if v_type == "trainee":
         text = "Навчання з подальшим працевлаштуванням:\n👇 Оберіть вакансію:"
-        for name, url in TRAINEE_VACANCIES.items():
 
-            keyboard.append([InlineKeyboardButton(name, url=url)])
+    vacancies = await vacancy_service.get_active_vacancies(v_type)
+
+    if not vacancies:
+        text = "😔 Наразі немає активних вакансій у цій категорії. Спробуйте пізніше."
+    else:
+        for vacancy in vacancies:
+            if vacancy.contact_type == "phone":
+                # Телефон рендеримо через tel:-схему, інакше Telegram відхилить URL кнопки
+                contact_value = vacancy.contact_value.strip()
+                button_url = contact_value if contact_value.startswith("tel:") else f"tel:{contact_value}"
+            else:
+                button_url = vacancy.contact_value
+            label = f"👷 {vacancy.title}" if v_type == "experienced" else vacancy.title
+            keyboard.append([InlineKeyboardButton(label, url=button_url)])
 
     # Кнопки навігації
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="vacancies_menu")])
