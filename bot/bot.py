@@ -30,7 +30,7 @@ from handlers.accessible_transport_handlers import (
 )
 
 from handlers.static_handlers import (
-    realtime_transport, lost_items
+    realtime_transport
 )
 from handlers.feedback_handlers import show_feedback_menu
 from handlers.tickets_handlers import (
@@ -644,8 +644,9 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(vacancy_show_phone, pattern="^vacancy_show_phone:"))
 
 
-        # Обробник "Загублені речі"
-        self.app.add_handler(CallbackQueryHandler(lost_items, pattern="^lost_items$"))
+        # Обробник "Загублені речі" (БД-керований, з пагінацією — див. handlers/lost_items_handlers.py)
+        self.app.add_handler(CallbackQueryHandler(show_lost_items_menu, pattern="^lost_items$"))
+        self.app.add_handler(CallbackQueryHandler(show_lost_items_category, pattern="^lost_items_cat:"))
 
         # === 👇 ГЛОБАЛЬНИЙ ПЕРЕХОПЛЮВАЧ (Anti-Spam / Cleaner) 👇 ===
         # Він спрацює ТІЛЬКИ якщо жоден інший хендлер вище не зреагував.
