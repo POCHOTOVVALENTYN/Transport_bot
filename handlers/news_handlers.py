@@ -153,9 +153,11 @@ async def news_client_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     created_time = format_kyiv_time(news.created_at)
     content_text = news.text or "<i>(Оголошення без додаткового тексту)</i>"
+    expiry_line = f"⏳ Актуально до: <b>{format_kyiv_time(news.expires_at)}</b>\n" if news.expires_at else ""
     detail_message = (
         f"📢 <b>Оперативна новина</b>\n"
-        f"📅 Опубліковано: <b>{created_time}</b>\n\n"
+        f"📅 Опубліковано: <b>{created_time}</b>\n"
+        f"{expiry_line}\n"
         f"{content_text}"
     )
 

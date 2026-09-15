@@ -49,7 +49,8 @@ class NewsService:
                 media_file_id=params.get("media_file_id"),
                 is_active=True,
                 sent_count=params.get("sent_count", 0),
-                blocked_count=params.get("blocked_count", 0)
+                blocked_count=params.get("blocked_count", 0),
+                expires_at=params.get("expires_at")
             )
             session.add(news)
             await session.commit()
@@ -164,6 +165,35 @@ class NewsService:
 
             new_status = not news.is_active
             news.is_active = new_status
+            if new_status:
+                # Ручна реактивація знятої/простроченої новини: строк дії більше не обмежує її,
+                # інакше найближча автоперевірка одразу знову прибере новину зі списку.
+                news.expires_at = None
             await session.commit()
             logger.info(f"News id={news_id} is_active toggled to {new_status}")
             return new_status
+
+    async def deactivate_expired_news(self) -> int:
+        """
+        Автоматично деактивує новини, строк дії яких сплив (expires_at <= now, is_active=True).
+        Повертає кількість деактивованих записів.
+        """
+        async with self.session_factory() as session:
+            now = datetime.datetime.utcnow()
+            query = select(NewsItem).where(
+                NewsItem.is_active.is_(True),
+                NewsItem.expires_at.is_not(None),
+                NewsItem.expires_at <= now
+            )
+            result = await session.execute(query)
+            expired_items = list(result.scalars().all())
+
+            if not expired_items:
+                return 0
+
+            for item in expired_items:
+                item.is_active = False
+
+            await session.commit()
+            logger.info(f"Auto-expired {len(expired_items)} news item(s)")
+            return len(expired_items)

@@ -51,6 +51,29 @@ async def init_db():
                     print("✅ Migration: added participants_details column to museum_bookings")
                 except Exception:
                     pass
+                try:
+                    await conn.execute(text("ALTER TABLE news ADD COLUMN expires_at DATETIME"))
+                    print("✅ Migration: added expires_at column to news")
+                except Exception:
+                    pass
+                try:
+                    # Разова правка: вакансія "Електромонтер тягової підстанції" при сідінгу
+                    # отримала чужий (скопійований) URL. Ідемпотентно: спрацює лише поки
+                    # значення все ще хибне.
+                    fix_res = await conn.execute(
+                        text(
+                            "UPDATE vacancies SET contact_value = :new_url "
+                            "WHERE title = 'Електромонтер тягової підстанції' AND contact_value = :old_url"
+                        ),
+                        {
+                            "new_url": "https://oget.od.ua/jobs/електромонтер-тягової-підстанції",
+                            "old_url": "https://oget.od.ua/jobs/слюсар-електрик-з-ремонту-електроуст",
+                        }
+                    )
+                    if fix_res.rowcount:
+                        print("✅ Data fix: corrected contact_value for 'Електромонтер тягової підстанції'")
+                except Exception:
+                    pass
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_status ON feedbacks(status)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_feedbacks_created_at ON feedbacks(created_at)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_id ON users(telegram_id)"))
@@ -106,7 +129,7 @@ async def init_db():
                             ("experienced", "Слюсар з ремонту рухомого складу", "url", "https://oget.od.ua/jobs/слюсар-з-ремонту-рухомого-складу", 3),
                             ("experienced", "Електрогазозварник", "url", "https://oget.od.ua/jobs/електрогазозварник", 4),
                             ("experienced", "Електромонтер контактної/кабельної мережі", "url", "https://oget.od.ua/jobs/електромонтер-контактної-та-кабельн", 5),
-                            ("experienced", "Електромонтер тягової підстанції", "url", "https://oget.od.ua/jobs/слюсар-електрик-з-ремонту-електроуст", 6),
+                            ("experienced", "Електромонтер тягової підстанції", "url", "https://oget.od.ua/jobs/електромонтер-тягової-підстанції", 6),
                             ("experienced", "Слюсар-електрик з ремонту електроустаткування", "url", "https://oget.od.ua/jobs/слюсар-електрик-з-ремонту-електроуст-2", 7),
                             ("trainee", "👩‍💼 Кондуктор", "url", "https://oget.od.ua/jobs/кондуктор", 1),
                             ("trainee", "🧼 Мийник-прибиральник рухомого складу", "url", "https://oget.od.ua/jobs/мийник-прибиральник-рухомого-складу", 2),
@@ -233,6 +256,7 @@ class NewsItem(Base):
     is_active = Column(Boolean, default=True)  # True = актуальна (відображається в клієнтському меню)
     sent_count = Column(Integer, default=0)
     blocked_count = Column(Integer, default=0)
+    expires_at = Column(DateTime, nullable=True)  # None = без обмеження строку дії
 
 
 # --- 5. Таблиця Загублених речей та документів ---

@@ -6,7 +6,7 @@ from handlers.common import get_back_keyboard
 from utils.logger import logger
 from telegram.constants import ParseMode
 from config.settings import RENTAL_SERVICE_IMAGE
-from services.vacancy_service import VacancyService
+from services.vacancy_service import VacancyService, encode_vacancy_url
 
 # Вакансії тепер керуються з адмін-панелі й зберігаються в таблиці `vacancies` (database/db.py).
 # Початкові дані перенесено туди при першому запуску (див. init_db у database/db.py).
@@ -259,7 +259,8 @@ async def show_vacancy_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 contact_value = vacancy.contact_value.strip()
                 button_url = contact_value if contact_value.startswith("tel:") else f"tel:{contact_value}"
             else:
-                button_url = vacancy.contact_value
+                # Кирилиця у шляху URL ламає валідацію кнопки в Telegram Bot API — кодуємо.
+                button_url = encode_vacancy_url(vacancy.contact_value)
             label = f"👷 {vacancy.title}" if v_type == "experienced" else vacancy.title
             keyboard.append([InlineKeyboardButton(label, url=button_url)])
 

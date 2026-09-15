@@ -72,6 +72,7 @@ from handlers.admin_handlers import (
     admin_del_date_menu, admin_del_date_confirm, admin_menu_show,
     admin_show_bookings, admin_sync_db,
     admin_broadcast_start, admin_broadcast_preview,       # Нова функція прев'ю
+    admin_broadcast_duration_selected,
     admin_broadcast_send_confirm,
     show_general_admin_menu, admin_museum_menu_show, admin_show_stats, # Нова функція зі списком
     admin_add_holiday_date_start, admin_add_holiday_date_save,
@@ -93,7 +94,10 @@ from handlers.admin_handlers import (
     admin_vacancy_deactivate, admin_vacancy_add_start,
     admin_vacancy_cat_selected, admin_vacancy_title_input,
     admin_vacancy_contact_type_selected, admin_vacancy_contact_value_input,
-    admin_vacancy_cancel
+    admin_vacancy_cancel,
+    admin_vacancy_edit_start, admin_vacancy_edit_choice_selected,
+    admin_vacancy_edit_set_contact_type, admin_vacancy_edit_title_input,
+    admin_vacancy_edit_contact_value_input, admin_vacancy_edit_cancel
 )
 from handlers.news_handlers import news_client_list, news_client_view
 from handlers.lost_items_handlers import show_lost_items_menu, show_lost_items_category
@@ -101,6 +105,7 @@ from handlers.lost_items_handlers import show_lost_items_menu, show_lost_items_c
 from utils.logger import logger
 from config.settings import FEEDBACK_SYNC_INTERVAL_MIN
 from services.tickets_service import TicketsService
+from services.news_service import NewsService
 
 from handlers.common import dismiss_broadcast_message, delete_message_callback
 
@@ -113,6 +118,7 @@ class TransportBot:
     def __init__(self, token: str):
         self.token = token
         self.tickets_service = TicketsService()
+        self.news_service = NewsService()
 
         # 1. ЗАЛИШАЄМО ТІЛЬКИ ОДИН РЯДОК Application.builder
         #    з реєстрацією `post_init`.
@@ -135,6 +141,13 @@ class TransportBot:
             first=interval_seconds,
             name="auto_sync_feedbacks"
         )
+        news_check_seconds = 30 * 60
+        self.app.job_queue.run_repeating(
+            self._auto_expire_news,
+            interval=news_check_seconds,
+            first=news_check_seconds,
+            name="auto_expire_news"
+        )
 
     async def _auto_sync_feedbacks(self, context):
         try:
@@ -143,6 +156,14 @@ class TransportBot:
                 logger.info(f"✅ Auto-sync: synced {count} feedback(s) to Sheets")
         except Exception as e:
             logger.error(f"❌ Auto-sync failed: {e}")
+
+    async def _auto_expire_news(self, context):
+        try:
+            count = await self.news_service.deactivate_expired_news()
+            if count:
+                logger.info(f"✅ Auto-expire: deactivated {count} news item(s) past their expiry")
+        except Exception as e:
+            logger.error(f"❌ Auto-expire news failed: {e}")
 
 
     def _setup_handlers(self):
@@ -189,6 +210,10 @@ class TransportBot:
                 # === 👇 (2) ДОДАЄМО СТАНИ РОЗСИЛКИ ТУТ 👇 ===
                 States.ADMIN_BROADCAST_TEXT: [
                     MessageHandler(filters.ALL & ~filters.COMMAND, admin_broadcast_preview)
+                ],
+                States.ADMIN_BROADCAST_DURATION: [
+                    CallbackQueryHandler(admin_broadcast_duration_selected, pattern="^admin_broadcast_set_duration:"),
+                    CallbackQueryHandler(admin_broadcast_send_confirm, pattern="^broadcast_cancel$"),
                 ],
                 States.ADMIN_BROADCAST_CONFIRM: [
                     CallbackQueryHandler(admin_broadcast_send_confirm, pattern="^broadcast_confirm$"),
@@ -316,6 +341,31 @@ class TransportBot:
             block=False
         )
         self.app.add_handler(admin_vacancy_conv)
+
+        # Редагування вже створеної вакансії
+        admin_vacancy_edit_conv = ConversationHandler(
+            entry_points=[CallbackQueryHandler(admin_vacancy_edit_start, pattern="^admin_vacancy_edit_start:")],
+            states={
+                States.ADMIN_VACANCY_EDIT_CHOICE: [
+                    CallbackQueryHandler(admin_vacancy_edit_choice_selected, pattern="^admin_vacancy_edit_choice:")
+                ],
+                States.ADMIN_VACANCY_EDIT_TITLE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_vacancy_edit_title_input)
+                ],
+                States.ADMIN_VACANCY_EDIT_CONTACT_TYPE: [
+                    CallbackQueryHandler(admin_vacancy_edit_set_contact_type, pattern="^admin_vacancy_edit_set_contact_type:")
+                ],
+                States.ADMIN_VACANCY_EDIT_CONTACT_VALUE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_vacancy_edit_contact_value_input)
+                ]
+            },
+            fallbacks=[
+                CallbackQueryHandler(admin_vacancy_edit_cancel, pattern="^admin_vacancy_edit_cancel$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
+            ],
+            block=False
+        )
+        self.app.add_handler(admin_vacancy_edit_conv)
 
         self.app.add_handler(CallbackQueryHandler(admin_vacancy_menu, pattern="^admin_vacancy_menu$"))
         self.app.add_handler(CallbackQueryHandler(admin_vacancy_list, pattern="^admin_vacancy_list:"))

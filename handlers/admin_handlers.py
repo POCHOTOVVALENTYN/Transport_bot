@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 import html
-from datetime import datetime
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import (ContextTypes, ConversationHandler, CommandHandler, CallbackQueryHandler, MessageHandler,
@@ -412,6 +412,10 @@ async def admin_news_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if news.is_active
         else "🔴 <b>Неактуальна / В архіві</b> (прихована від пасажирів)"
     )
+    if news.expires_at:
+        expiry_label = f"⏳ <b>Строк дії до:</b> {format_kyiv_time(news.expires_at)}"
+    else:
+        expiry_label = "♾️ <b>Строк дії:</b> Без обмеження"
     content_text = news.text or "<i>(Текст відсутній / тільки медіа)</i>"
     admin_name_safe = html.escape(news.admin_name or "Адміністратор")
 
@@ -421,6 +425,7 @@ async def admin_news_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 <b>Автор:</b> {admin_name_safe} (ID: <code>{news.admin_id}</code>)\n"
         f"📊 <b>Результат розсилки:</b> Успішно: <b>{news.sent_count}</b> | Блокувань: <b>{news.blocked_count}</b>\n"
         f"📌 <b>Статус:</b> {status_label}\n"
+        f"{expiry_label}\n"
         f"----------------------------------------\n"
         f"💬 <b>Текст оголошення:</b>\n{content_text}"
     )
@@ -1241,6 +1246,7 @@ async def admin_vacancy_view(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     keyboard = []
     if vacancy.is_active:
+        keyboard.append([InlineKeyboardButton("✏️ Редагувати", callback_data=f"admin_vacancy_edit_start:{vacancy.id}:{category}:{offset}")])
         keyboard.append([InlineKeyboardButton("🚫 Деактивувати", callback_data=f"admin_vacancy_deactivate:{vacancy.id}:{category}:{offset}")])
     keyboard.append([InlineKeyboardButton("⬅️ Назад до списку", callback_data=f"admin_vacancy_list:{category}:{offset}")])
     keyboard.append([InlineKeyboardButton("🔙 До меню вакансій", callback_data="admin_vacancy_menu")])
@@ -1506,6 +1512,257 @@ async def admin_vacancy_cancel(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.pop('vacancy_add_contact_type', None)
 
     if query:
+        await admin_vacancy_menu(update, context)
+    return ConversationHandler.END
+
+
+# --- CONVERSATION HANDLER: РЕДАГУВАННЯ ВАКАНСІЇ АДМІНОМ ---
+
+async def admin_vacancy_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Початок діалогу редагування вже створеної вакансії (назва або контакт)"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    parts = query.data.split(":")
+    vacancy_id = int(parts[1]) if len(parts) > 1 else 0
+    category = parts[2] if len(parts) > 2 else "experienced"
+    offset = int(parts[3]) if len(parts) > 3 else 0
+
+    vacancy = await vacancy_service.get_vacancy_by_id(vacancy_id)
+    if not vacancy:
+        await query.edit_message_text(
+            "⚠️ Вакансію не знайдено або вже деактивовано.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ До списку", callback_data=f"admin_vacancy_list:{category}:{offset}")]
+            ])
+        )
+        return ConversationHandler.END
+
+    context.user_data['vacancy_edit_id'] = vacancy_id
+    context.user_data['vacancy_edit_category'] = category
+    context.user_data['vacancy_edit_offset'] = offset
+
+    contact_label = "🔗 Посилання" if vacancy.contact_type == "url" else "📞 Телефон"
+    text = (
+        f"✏️ <b>Редагування вакансії #{vacancy.id}</b>\n\n"
+        f"🏷️ Поточна назва: {html.escape(vacancy.title)}\n"
+        f"{contact_label}: <code>{html.escape(vacancy.contact_value)}</code>\n\n"
+        "Що саме потрібно змінити?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🏷️ Назву", callback_data="admin_vacancy_edit_choice:title")],
+        [InlineKeyboardButton("📎 Контакт (посилання/телефон)", callback_data="admin_vacancy_edit_choice:contact")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_edit_cancel")]
+    ]
+    sent_msg = await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+    context.user_data['vacancy_edit_prompt_id'] = sent_msg.message_id
+    return States.ADMIN_VACANCY_EDIT_CHOICE
+
+
+async def admin_vacancy_edit_choice_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору поля для редагування (назва або контакт)"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    field = query.data.split(":")[1] if ":" in query.data else "title"
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_edit_cancel")]
+    ])
+
+    if field == "title":
+        text = "✏️ Надішліть нову назву вакансії:"
+        sent_msg = await query.edit_message_text(text=text, reply_markup=cancel_markup)
+        context.user_data['vacancy_edit_prompt_id'] = sent_msg.message_id
+        return States.ADMIN_VACANCY_EDIT_TITLE
+
+    text = "📎 Оберіть новий тип контакту:"
+    keyboard = [
+        [InlineKeyboardButton("🔗 Посилання (URL)", callback_data="admin_vacancy_edit_set_contact_type:url")],
+        [InlineKeyboardButton("📞 Телефон", callback_data="admin_vacancy_edit_set_contact_type:phone")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_edit_cancel")]
+    ]
+    sent_msg = await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+    context.user_data['vacancy_edit_prompt_id'] = sent_msg.message_id
+    return States.ADMIN_VACANCY_EDIT_CONTACT_TYPE
+
+
+async def admin_vacancy_edit_set_contact_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору нового типу контакту при редагуванні"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    contact_type = query.data.split(":")[1] if ":" in query.data else "url"
+    context.user_data['vacancy_edit_contact_type'] = contact_type
+
+    if contact_type == "url":
+        prompt_example = "https://oget.od.ua/jobs/приклад-вакансії"
+        prompt_label = "нове посилання на сторінку вакансії"
+    else:
+        prompt_example = "0991234567"
+        prompt_label = "новий номер телефону для звʼязку"
+
+    text = f"📎 Надішліть {prompt_label}.\n\n<i>Приклад: {prompt_example}</i>"
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_edit_cancel")]
+    ])
+    sent_msg = await query.edit_message_text(text=text, reply_markup=cancel_markup, parse_mode=ParseMode.HTML)
+    context.user_data['vacancy_edit_prompt_id'] = sent_msg.message_id
+    return States.ADMIN_VACANCY_EDIT_CONTACT_VALUE
+
+
+async def _admin_vacancy_edit_finish(update: Update, context: ContextTypes.DEFAULT_TYPE, **fields):
+    """Зберігає відредаговане значення і показує оновлену картку вакансії"""
+    vacancy_id = context.user_data.get('vacancy_edit_id')
+    category = context.user_data.get('vacancy_edit_category', 'experienced')
+    offset = context.user_data.get('vacancy_edit_offset', 0)
+
+    if not vacancy_id:
+        return ConversationHandler.END
+
+    await vacancy_service.update_vacancy(vacancy_id, **fields)
+    vacancy = await vacancy_service.get_vacancy_by_id(vacancy_id)
+
+    prompt_id = context.user_data.pop('vacancy_edit_prompt_id', None)
+    context.user_data.pop('vacancy_edit_id', None)
+    context.user_data.pop('vacancy_edit_category', None)
+    context.user_data.pop('vacancy_edit_offset', None)
+    context.user_data.pop('vacancy_edit_contact_type', None)
+
+    if not vacancy:
+        text = "⚠️ Не вдалося знайти вакансію після оновлення."
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("👔 До меню вакансій", callback_data="admin_vacancy_menu")]])
+    else:
+        cat_label = "👷 З досвідом" if vacancy.category == "experienced" else "🧑‍🎓 Без досвіду"
+        contact_label = "🔗 Посилання" if vacancy.contact_type == "url" else "📞 Телефон"
+        status_label = "🟢 Активна" if vacancy.is_active else "🚫 Деактивована"
+        admin_name_safe = html.escape(vacancy.admin_name or "Адміністратор")
+        title_safe = html.escape(vacancy.title)
+        contact_safe = html.escape(vacancy.contact_value)
+
+        text = (
+            f"✅ <b>Зміни збережено!</b>\n\n"
+            f"👔 <b>Картка вакансії #{vacancy.id}</b>\n\n"
+            f"📁 <b>Категорія:</b> {cat_label}\n"
+            f"🏷️ <b>Назва:</b> {title_safe}\n"
+            f"{contact_label}: <code>{contact_safe}</code>\n"
+            f"👤 <b>Додав(ла):</b> {admin_name_safe}\n"
+            f"📌 <b>Статус:</b> {status_label}\n"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✏️ Редагувати ще раз", callback_data=f"admin_vacancy_edit_start:{vacancy.id}:{category}:{offset}")],
+            [InlineKeyboardButton("🚫 Деактивувати", callback_data=f"admin_vacancy_deactivate:{vacancy.id}:{category}:{offset}")],
+            [InlineKeyboardButton("⬅️ Назад до списку", callback_data=f"admin_vacancy_list:{category}:{offset}")],
+            [InlineKeyboardButton("🔙 До меню вакансій", callback_data="admin_vacancy_menu")]
+        ])
+
+    if prompt_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=prompt_id,
+                text=text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            return ConversationHandler.END
+        except Exception:
+            pass
+
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+    return ConversationHandler.END
+
+
+async def admin_vacancy_edit_title_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введення нової назви вакансії"""
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    new_title = update.message.text.strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not new_title:
+        return States.ADMIN_VACANCY_EDIT_TITLE
+
+    return await _admin_vacancy_edit_finish(update, context, title=new_title)
+
+
+async def admin_vacancy_edit_contact_value_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введення нового значення контакту (URL або телефон) при редагуванні"""
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    value = update.message.text.strip()
+    contact_type = context.user_data.get('vacancy_edit_contact_type', 'url')
+    cancel_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="admin_vacancy_edit_cancel")]
+    ])
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if contact_type == "url":
+        if not (value.startswith("http://") or value.startswith("https://")):
+            error_text = "❌ Посилання має починатися з http:// або https://. Спробуйте ще раз:"
+            prompt_id = context.user_data.get('vacancy_edit_prompt_id')
+            if prompt_id:
+                try:
+                    await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=prompt_id, text=error_text, reply_markup=cancel_markup)
+                    return States.ADMIN_VACANCY_EDIT_CONTACT_VALUE
+                except Exception:
+                    pass
+            sent_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=error_text, reply_markup=cancel_markup)
+            context.user_data['vacancy_edit_prompt_id'] = sent_msg.message_id
+            return States.ADMIN_VACANCY_EDIT_CONTACT_VALUE
+    else:
+        cleaned_phone = value.replace(" ", "").replace("-", "")
+        if not re.match(r"^(\+?38)?0\d{9}$", cleaned_phone):
+            error_text = "❌ Не схоже на український номер телефону. Введіть у форматі 0991234567:"
+            prompt_id = context.user_data.get('vacancy_edit_prompt_id')
+            if prompt_id:
+                try:
+                    await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=prompt_id, text=error_text, reply_markup=cancel_markup)
+                    return States.ADMIN_VACANCY_EDIT_CONTACT_VALUE
+                except Exception:
+                    pass
+            sent_msg = await context.bot.send_message(chat_id=update.effective_chat.id, text=error_text, reply_markup=cancel_markup)
+            context.user_data['vacancy_edit_prompt_id'] = sent_msg.message_id
+            return States.ADMIN_VACANCY_EDIT_CONTACT_VALUE
+        value = cleaned_phone
+
+    return await _admin_vacancy_edit_finish(update, context, contact_type=contact_type, contact_value=value)
+
+
+async def admin_vacancy_edit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скасування редагування вакансії"""
+    query = update.callback_query
+    if query:
+        await query.answer("Редагування скасовано")
+    vacancy_id = context.user_data.get('vacancy_edit_id')
+    category = context.user_data.get('vacancy_edit_category', 'experienced')
+    offset = context.user_data.get('vacancy_edit_offset', 0)
+    context.user_data.pop('vacancy_edit_prompt_id', None)
+    context.user_data.pop('vacancy_edit_id', None)
+    context.user_data.pop('vacancy_edit_category', None)
+    context.user_data.pop('vacancy_edit_offset', None)
+    context.user_data.pop('vacancy_edit_contact_type', None)
+
+    if query and vacancy_id:
+        query.data = f"admin_vacancy_view:{vacancy_id}:{category}:{offset}"
+        await admin_vacancy_view(update, context)
+    elif query:
         await admin_vacancy_menu(update, context)
     return ConversationHandler.END
 
@@ -1967,24 +2224,66 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
     # Додаємо ID самого прев'ю (копії) до списку видалення
     context.user_data['msgs_to_delete'].append(preview_msg.message_id)
 
-    # 4. Клавіатура підтвердження
-    confirm_keyboard = [
-        [InlineKeyboardButton(f"✅ Надіслати ({len(users)} кор.)", callback_data="broadcast_confirm")],
+    # 4. Клавіатура вибору строку дії новини (перед підтвердженням)
+    duration_keyboard = [
+        [InlineKeyboardButton("1 доба", callback_data="admin_broadcast_set_duration:1")],
+        [InlineKeyboardButton("2 доби", callback_data="admin_broadcast_set_duration:2")],
+        [InlineKeyboardButton("3 доби", callback_data="admin_broadcast_set_duration:3")],
+        [InlineKeyboardButton("7 днів", callback_data="admin_broadcast_set_duration:7")],
+        [InlineKeyboardButton("♾️ Без обмеження", callback_data="admin_broadcast_set_duration:0")],
         [InlineKeyboardButton("❌ Скасувати / Редагувати", callback_data="broadcast_cancel")]
     ]
 
     menu_msg = await msg.reply_text(
         f"📢 <b>Підготовка до розсилки</b>\n\n"
         f"👥 Кількість отримувачів: <b>{len(users)}</b>\n"
-        f"⚠️ Перевірте вигляд повідомлення вище. \n"
-        f"Натисніть <b>Надіслати</b> для запуску або <b>Скасувати</b> для редагування.",
-        reply_markup=InlineKeyboardMarkup(confirm_keyboard),
+        f"⚠️ Перевірте вигляд повідомлення вище.\n\n"
+        f"⏳ На скільки цю новину показувати як актуальну в розділі «Новини»?",
+        reply_markup=InlineKeyboardMarkup(duration_keyboard),
         parse_mode=ParseMode.HTML
     )
     # Додаємо ID меню до списку видалення
     context.user_data['msgs_to_delete'].append(menu_msg.message_id)
+    context.user_data['broadcast_duration_msg_id'] = menu_msg.message_id
+    context.user_data['broadcast_users_count'] = len(users)
 
-    # Переходимо до стану очікування підтвердження
+    # Переходимо до стану вибору строку дії
+    return States.ADMIN_BROADCAST_DURATION
+
+
+async def admin_broadcast_duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробляє вибір строку дії новини та показує фінальне меню підтвердження розсилки"""
+    query = update.callback_query
+    await query.answer()
+    if update.effective_user.id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    days = int(query.data.split(":")[1]) if ":" in query.data else 0
+    if days > 0:
+        expires_at = datetime.utcnow() + timedelta(days=days)
+        duration_label = f"{days} " + ("доба" if days == 1 else "дні" if days < 5 else "днів")
+    else:
+        expires_at = None
+        duration_label = "без обмеження"
+
+    context.user_data['broadcast_expires_at'] = expires_at
+
+    users_count = context.user_data.get('broadcast_users_count', 0)
+    confirm_keyboard = [
+        [InlineKeyboardButton(f"✅ Надіслати ({users_count} кор.)", callback_data="broadcast_confirm")],
+        [InlineKeyboardButton("❌ Скасувати / Редагувати", callback_data="broadcast_cancel")]
+    ]
+
+    await query.edit_message_text(
+        f"📢 <b>Підготовка до розсилки</b>\n\n"
+        f"👥 Кількість отримувачів: <b>{users_count}</b>\n"
+        f"⏳ Строк дії новини: <b>{duration_label}</b>\n"
+        f"⚠️ Перевірте вигляд повідомлення вище.\n"
+        f"Натисніть <b>Надіслати</b> для запуску або <b>Скасувати</b> для редагування.",
+        reply_markup=InlineKeyboardMarkup(confirm_keyboard),
+        parse_mode=ParseMode.HTML
+    )
+
     return States.ADMIN_BROADCAST_CONFIRM
 
 
@@ -2026,6 +2325,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
 
         # Автоматичне створення запису в оперативних новинах
         news_payload = context.user_data.get('broadcast_news_data', {})
+        expires_at = context.user_data.get('broadcast_expires_at')
         admin_user = update.effective_user
         created_news = None
         try:
@@ -2037,7 +2337,8 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
                 "media_type": news_payload.get("media_type"),
                 "media_file_id": news_payload.get("media_file_id"),
                 "sent_count": 0,
-                "blocked_count": 0
+                "blocked_count": 0,
+                "expires_at": expires_at
             })
         except Exception as save_err:
             logger.error(f"Failed to auto-save news broadcast: {save_err}")
@@ -2114,6 +2415,9 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         context.user_data.pop('broadcast_chat_id', None)
         context.user_data.pop('broadcast_news_data', None)
         context.user_data.pop('msgs_to_delete', None)
+        context.user_data.pop('broadcast_duration_msg_id', None)
+        context.user_data.pop('broadcast_users_count', None)
+        context.user_data.pop('broadcast_expires_at', None)
 
     return ConversationHandler.END
 

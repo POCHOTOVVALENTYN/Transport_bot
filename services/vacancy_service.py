@@ -1,7 +1,25 @@
 from typing import Optional, Any
+from urllib.parse import urlsplit, urlunsplit, quote
 from sqlalchemy import select, func
 from database.db import AsyncSessionLocal, Vacancy
 from utils.logger import logger
+
+
+def encode_vacancy_url(url: str) -> str:
+    """
+    Percent-кодує шлях/запит URL-у, щоб кирилиця та інші не-ASCII символи
+    не ламали валідацію URL кнопки в Telegram Bot API (Bad Request: BUTTON_URL_INVALID).
+    Схема/хост не чіпаються; вже закодовані '%XX' послідовності не подвоюються.
+    """
+    if not url:
+        return url
+    try:
+        parts = urlsplit(url)
+        safe_path = quote(parts.path, safe="/-_.~%")
+        safe_query = quote(parts.query, safe="=&-_.~%")
+        return urlunsplit((parts.scheme, parts.netloc, safe_path, safe_query, parts.fragment))
+    except Exception:
+        return url
 
 
 class VacancyService:
@@ -157,4 +175,34 @@ class VacancyService:
             vacancy.is_active = True
             await session.commit()
             logger.info(f"Vacancy id={vacancy_id} reactivated")
+            return True
+
+    async def update_vacancy(
+        self,
+        vacancy_id: int,
+        title: Optional[str] = None,
+        contact_type: Optional[str] = None,
+        contact_value: Optional[str] = None
+    ) -> Optional[bool]:
+        """
+        Редагує назву та/або контакт вакансії. Поля, що не передані (None), не змінюються.
+        Повертає True, якщо оновлено, або None, якщо вакансію не знайдено.
+        """
+        async with self.session_factory() as session:
+            query = select(Vacancy).where(Vacancy.id == vacancy_id)
+            result = await session.execute(query)
+            vacancy = result.scalar_one_or_none()
+
+            if vacancy is None:
+                return None
+
+            if title is not None:
+                vacancy.title = title
+            if contact_type is not None:
+                vacancy.contact_type = contact_type
+            if contact_value is not None:
+                vacancy.contact_value = contact_value
+
+            await session.commit()
+            logger.info(f"Vacancy id={vacancy_id} updated")
             return True
