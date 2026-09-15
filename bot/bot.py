@@ -41,7 +41,7 @@ from handlers.info_handlers import (
 )
 from handlers.company_handlers import (
     show_company_menu, handle_company_static, show_vacancies_menu,
-    show_vacancy_list, show_education_menu, show_services_menu,
+    show_vacancy_list, vacancy_show_phone, show_education_menu, show_services_menu,
     show_history_menu
 )
 from handlers.museum_handlers import (
@@ -641,6 +641,7 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(show_services_menu, pattern="^company:services$"))
         self.app.add_handler(CallbackQueryHandler(handle_company_static, pattern="^company:socials$"))
         self.app.add_handler(CallbackQueryHandler(show_vacancy_list, pattern="^vacancy_type:"))
+        self.app.add_handler(CallbackQueryHandler(vacancy_show_phone, pattern="^vacancy_show_phone:"))
 
 
         # Обробник "Загублені речі"

@@ -254,15 +254,18 @@ async def show_vacancy_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "😔 Наразі немає активних вакансій у цій категорії. Спробуйте пізніше."
     else:
         for vacancy in vacancies:
+            label = f"👷 {vacancy.title}" if v_type == "experienced" else vacancy.title
             if vacancy.contact_type == "phone":
-                # Телефон рендеримо через tel:-схему, інакше Telegram відхилить URL кнопки
-                contact_value = vacancy.contact_value.strip()
-                button_url = contact_value if contact_value.startswith("tel:") else f"tel:{contact_value}"
+                # Telegram Bot API не гарантує підтримку схеми tel: у кнопках — на проді
+                # це давало BadRequest "wrong port number specified in the url" і ламало
+                # весь список. Тому телефон показуємо через сповіщення (callback), без URL.
+                keyboard.append([
+                    InlineKeyboardButton(f"📞 {label}", callback_data=f"vacancy_show_phone:{vacancy.id}")
+                ])
             else:
                 # Кирилиця у шляху URL ламає валідацію кнопки в Telegram Bot API — кодуємо.
                 button_url = encode_vacancy_url(vacancy.contact_value)
-            label = f"👷 {vacancy.title}" if v_type == "experienced" else vacancy.title
-            keyboard.append([InlineKeyboardButton(label, url=button_url)])
+                keyboard.append([InlineKeyboardButton(label, url=button_url)])
 
     # Кнопки навігації
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="vacancies_menu")])
@@ -273,4 +276,17 @@ async def show_vacancy_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard),
         disable_web_page_preview=True # Щоб уникнути безладу з прев'ю
     )
+
+
+async def vacancy_show_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показує номер телефону вакансії у спливному повідомленні (без URL-кнопки tel:)."""
+    query = update.callback_query
+    vacancy_id = int(query.data.split(":")[1]) if ":" in query.data else 0
+    vacancy = await vacancy_service.get_vacancy_by_id(vacancy_id)
+
+    if not vacancy or not vacancy.is_active:
+        await query.answer("⚠️ Вакансію не знайдено або її вже деактивовано.", show_alert=True)
+        return
+
+    await query.answer(f"📞 {vacancy.title}\n{vacancy.contact_value}", show_alert=True)
 
