@@ -433,6 +433,13 @@ class MuseumService:
             logger.error(f"❌ Error checking existing booking: {e}")
             return False
 
+    def _normalize_phone(self, phone: str) -> str:
+        """Нормалізує номер телефону (відновлює провідний нуль, якщо Google Sheets обрізав його як число)."""
+        cleaned = str(phone).strip()
+        if cleaned.isdigit() and len(cleaned) == 9:
+            return f"0{cleaned}"
+        return cleaned
+
     def _parse_participant_names(self, parts_str: str) -> list:
         """Парсить рядок учасників з Google Sheets у список окремих ПІБ."""
         if not parts_str or not parts_str.strip():
@@ -490,7 +497,7 @@ class MuseumService:
                     if len(row) >= 2 and str(row[1]).strip() == excursion_date.strip():
                         reg_date = str(row[0]).strip() if len(row) > 0 else ""
                         parts_str = str(row[3]).strip() if len(row) > 3 else ""
-                        phone = str(row[4]).strip() if len(row) > 4 else ""
+                        phone = self._normalize_phone(row[4]) if len(row) > 4 else ""
 
                         parsed_names = self._parse_participant_names(parts_str)
                         if parsed_names:
