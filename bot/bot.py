@@ -78,6 +78,7 @@ from handlers.admin_handlers import (
     admin_add_holiday_date_start, admin_add_holiday_date_save,
     admin_del_holiday_date_menu, admin_del_holiday_date_confirm,
     admin_show_holiday_bookings, admin_export_users,
+    admin_export_doc_select, admin_export_doc_generate,
     moderate_approve_callback, moderate_reject_callback,
     admin_mail_archive_menu, admin_mail_show_category,
     admin_mail_show_detail, admin_mail_resend,
@@ -626,6 +627,8 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(handle_info_static, pattern="^info:"))
         self.app.add_handler(CallbackQueryHandler(admin_show_bookings, pattern="^admin_show_bookings(:\\d+)?$"))
         self.app.add_handler(CallbackQueryHandler(admin_show_holiday_bookings, pattern="^admin_show_holiday_bookings(:\\d+)?$"))
+        self.app.add_handler(CallbackQueryHandler(admin_export_doc_select, pattern="^admin_export_doc_select:(regular|holiday)$"))
+        self.app.add_handler(CallbackQueryHandler(admin_export_doc_generate, pattern="^admin_export_doc_gen:(regular|holiday):.+$"))
         # --- ПОЧАТОК ЗМІН (Музей) --- 03/11/2025
         # 1. Новий обробник для "Інфо" (фото + текст)
         self.app.add_handler(CallbackQueryHandler(show_museum_info, pattern="^museum:info$"))

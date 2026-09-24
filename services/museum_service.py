@@ -432,3 +432,135 @@ class MuseumService:
         except Exception as e:
             logger.error(f"❌ Error checking existing booking: {e}")
             return False
+
+    def _parse_participant_names(self, parts_str: str) -> list:
+        """Парсить рядок учасників з Google Sheets у список окремих ПІБ."""
+        if not parts_str or not parts_str.strip():
+            return []
+        import re
+        matches = re.findall(r"\d+\)\s*([^;]+)", parts_str)
+        if matches:
+            return [m.strip() for m in matches if m.strip()]
+        if ";" in parts_str:
+            return [p.strip() for p in parts_str.split(";") if p.strip()]
+        return [parts_str.strip()]
+
+    async def get_distinct_booking_dates(self, excursion_type: str = "regular") -> list:
+        """
+        Повертає список унікальних дат екскурсій (активні з розкладу + ті, на які є бронювання).
+        """
+        is_holiday = excursion_type == "holiday"
+        active_dates = await self.get_available_holiday_dates() if is_holiday else await self.get_available_dates()
+        db_dates = []
+
+        try:
+            async with AsyncSessionLocal() as session:
+                model = MuseumHolidayBooking if is_holiday else MuseumBooking
+                result = await session.execute(
+                    select(model.excursion_date).distinct()
+                )
+                db_dates = [row[0] for row in result.all() if row[0]]
+        except Exception as e:
+            logger.error(f"❌ Error fetching distinct dates from DB: {e}")
+
+        # Об'єднуємо зі збереженням порядку та без дублікатів
+        combined_dates = list(dict.fromkeys(active_dates + db_dates))
+        return combined_dates
+
+    async def get_visitors_for_date(self, excursion_date: str, excursion_type: str = "regular") -> list:
+        """
+        Отримує розгорнутий список відвідувачів на вказану дату екскурсії.
+        Кожен учасник групи отримує окремий запис для можливості власноручного підпису з ТБ.
+        Спочатку намагається прочитати з Google Sheets; якщо помилка або порожньо — читає з локальної SQLite БД.
+        """
+        is_holiday = excursion_type == "holiday"
+        sheet_name = "Holiday excursion list" if is_holiday else "MuseumBookings"
+        visitors = []
+
+        # 1. Спроба зчитування з Google Sheets
+        try:
+            loop = asyncio.get_running_loop()
+            raw_rows = await loop.run_in_executor(
+                None,
+                self.sheets.read_range,
+                f"'{sheet_name}'!A2:E500"
+            )
+            if raw_rows:
+                for row in raw_rows:
+                    if len(row) >= 2 and str(row[1]).strip() == excursion_date.strip():
+                        reg_date = str(row[0]).strip() if len(row) > 0 else ""
+                        parts_str = str(row[3]).strip() if len(row) > 3 else ""
+                        phone = str(row[4]).strip() if len(row) > 4 else ""
+
+                        parsed_names = self._parse_participant_names(parts_str)
+                        if parsed_names:
+                            for p_name in parsed_names:
+                                visitors.append({
+                                    "reg_date": reg_date,
+                                    "name": p_name,
+                                    "phone": phone
+                                })
+                        else:
+                            visitors.append({
+                                "reg_date": reg_date,
+                                "name": parts_str or "Не вказано",
+                                "phone": phone
+                            })
+
+                if visitors:
+                    logger.info(f"✅ Loaded {len(visitors)} visitors from Google Sheets for {excursion_date}")
+                    return visitors
+        except Exception as sheets_err:
+            logger.warning(f"⚠️ Google Sheets read failed for date {excursion_date}: {sheets_err}")
+
+        # 2. Fallback: вибірка з локальної SQLite БД
+        try:
+            import json
+            async with AsyncSessionLocal() as session:
+                model = MuseumHolidayBooking if is_holiday else MuseumBooking
+                result = await session.execute(
+                    select(model)
+                    .where(model.excursion_date == excursion_date)
+                    .order_by(model.created_at.asc())
+                )
+                bookings = result.scalars().all()
+
+                for b in bookings:
+                    local_created_at = self._to_kyiv_time(b.created_at)
+                    reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else ""
+
+                    has_expanded = False
+                    if b.participants_details:
+                        try:
+                            details = json.loads(b.participants_details)
+                            if isinstance(details, list) and len(details) > 0:
+                                for p in details:
+                                    if isinstance(p, dict):
+                                        name = p.get("name", "").strip()
+                                        if is_holiday and p.get("age"):
+                                            name = f"{name} ({p.get('age')}р.)"
+                                    else:
+                                        name = str(p).strip()
+
+                                    if name:
+                                        visitors.append({
+                                            "reg_date": reg_date,
+                                            "name": name,
+                                            "phone": b.user_phone
+                                        })
+                                        has_expanded = True
+                        except Exception as json_err:
+                            logger.warning(f"Error parsing participants_details: {json_err}")
+
+                    if not has_expanded:
+                        visitors.append({
+                            "reg_date": reg_date,
+                            "name": b.user_name.strip(),
+                            "phone": b.user_phone
+                        })
+
+                logger.info(f"✅ Loaded {len(visitors)} visitors from SQLite for {excursion_date}")
+                return visitors
+        except Exception as db_err:
+            logger.error(f"❌ Error fetching visitors from DB: {db_err}")
+            return []

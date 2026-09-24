@@ -19,6 +19,7 @@ from services.museum_service import MuseumService
 from services.news_service import NewsService, format_kyiv_time
 from services.lost_items_service import LostItemsService, format_kyiv_date as format_lost_date
 from services.vacancy_service import VacancyService
+from services.museum_document_service import generate_visitors_document
 
 
 user_service = UserService()
@@ -3052,4 +3053,150 @@ async def admin_show_holiday_bookings(update: Update, context: ContextTypes.DEFA
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
             )
+        )
+
+
+# --- ФОРМУВАННЯ ОФІЦІЙНОГО ДОКУМЕНТА ВІДВІДУВАЧІВ (DOCX) ---
+async def admin_export_doc_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Показує список доступних дат для вибору та формування офіційного списку відвідувачів.
+    """
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    user_id = update.effective_user.id
+    if user_id not in MUSEUM_ADMIN_IDS:
+        if query:
+            await query.message.reply_text(f"⛔ Помилка доступу. Ваш ID: {user_id}")
+        return
+
+    excursion_type = "regular"
+    if query and query.data and ":" in query.data:
+        excursion_type = query.data.split(":")[1]
+
+    is_holiday = excursion_type == "holiday"
+    type_label = "святкової" if is_holiday else "звичайної"
+
+    dates = await museum_service.get_distinct_booking_dates(excursion_type=excursion_type)
+
+    if not dates:
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
+        text = f"ℹ️ Наразі немає активних або зареєстрованих дат для {type_label} екскурсії."
+        if query:
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    keyboard = []
+    for date_item in dates:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"🗓 {date_item}",
+                callback_data=f"admin_export_doc_gen:{excursion_type}:{date_item}"
+            )
+        ])
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
+
+    text = (
+        f"📄 <b>Формування списку відвідувачів ({type_label} екскурсія):</b>\n\n"
+        f"Оберіть дату екскурсії, за якою необхідно сформувати офіційний документ "
+        f"(Word .docx, Times New Roman 14 pt, відомість інструктажу з ТБ):"
+    )
+
+    if query:
+        await query.edit_message_text(
+            text=text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.HTML
+        )
+
+
+async def admin_export_doc_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Формує та надсилає DOCX файл зі списком зареєстрованих відвідувачів на обрану дату.
+    """
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    user_id = update.effective_user.id
+    if user_id not in MUSEUM_ADMIN_IDS:
+        if query:
+            await query.message.reply_text(f"⛔ Помилка доступу. Ваш ID: {user_id}")
+        return
+
+    # Формат callback_data: admin_export_doc_gen:{excursion_type}:{date_item}
+    parts = query.data.split(":", 2)
+    excursion_type = parts[1] if len(parts) > 1 else "regular"
+    excursion_date = parts[2] if len(parts) > 2 else ""
+
+    if not excursion_date:
+        if query:
+            await query.edit_message_text(
+                "❌ Не вказано дату екскурсії.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]])
+            )
+        return
+
+    is_holiday = excursion_type == "holiday"
+    type_label = "святкову" if is_holiday else "стандартну"
+
+    await query.edit_message_text(
+        f"⏳ <b>Формую офіційний список на {html.escape(excursion_date)}...</b>\nБудь ласка, зачекайте.",
+        parse_mode=ParseMode.HTML
+    )
+
+    try:
+        visitors = await museum_service.get_visitors_for_date(excursion_date, excursion_type=excursion_type)
+
+        if not visitors:
+            keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"admin_export_doc_select:{excursion_type}")]]
+            await query.edit_message_text(
+                f"ℹ️ На дату <b>{html.escape(excursion_date)}</b> немає зареєстрованих відвідувачів.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode=ParseMode.HTML
+            )
+            return
+
+        doc_result = generate_visitors_document({
+            "excursion_date": excursion_date,
+            "excursion_type": excursion_type,
+            "visitors": visitors
+        })
+
+        caption = (
+            f"📄 <b>Список зареєстрованих відвідувачів</b>\n"
+            f"🏛 <b>Екскурсія:</b> {type_label.capitalize()}\n"
+            f"🗓 <b>Дата:</b> {html.escape(excursion_date)}\n"
+            f"👥 <b>Зареєстровано осіб:</b> {doc_result['total_count']}\n\n"
+            f"<i>Документ оформлено згідно з вимогами діловодства (Times New Roman 14 pt, "
+            f"інтервал 1.15, вирівнювання по ширині, бланк з ТБ). Готовий до друку.</i>"
+        )
+
+        back_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Назад до вибору дати", callback_data=f"admin_export_doc_select:{excursion_type}")],
+            [InlineKeyboardButton("🏛 Адмін-панель Музею", callback_data="admin_museum_menu")]
+        ])
+
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=doc_result["stream"],
+            filename=doc_result["filename"],
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=back_keyboard
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Помилка при формуванні списку відвідувачів: {e}", exc_info=True)
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"❌ Сталася помилка при формуванні документу: {html.escape(str(e))}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
