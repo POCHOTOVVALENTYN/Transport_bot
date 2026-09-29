@@ -1,13 +1,31 @@
 import io
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
+from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
 from docx.oxml import parse_xml, OxmlElement
 from docx.oxml.ns import nsdecls, qn
 
 from utils.logger import logger
+
+
+def _apply_run_font(run, *, is_bold: bool = False, font_size: int = 14) -> None:
+    """Гарантує застосування шрифту Times New Roman (включно з кирилицею в OpenXML) для run."""
+    run.bold = is_bold
+    run.font.name = "Times New Roman"
+    run.font.size = Pt(font_size)
+    run.font.color.rgb = RGBColor(0, 0, 0)
+
+    r_pr = run._r.get_or_add_rPr()
+    r_fonts = r_pr.find(qn("w:rFonts"))
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.append(r_fonts)
+    r_fonts.set(qn("w:ascii"), "Times New Roman")
+    r_fonts.set(qn("w:hAnsi"), "Times New Roman")
+    r_fonts.set(qn("w:cs"), "Times New Roman")
 
 
 def _set_cell_style(
@@ -16,10 +34,12 @@ def _set_cell_style(
     *,
     is_bold: bool = False,
     font_size: int = 14,
-    alignment: WD_ALIGN_PARAGRAPH = WD_ALIGN_PARAGRAPH.JUSTIFY
+    alignment: WD_ALIGN_PARAGRAPH = WD_ALIGN_PARAGRAPH.LEFT
 ) -> None:
-    """Встановлює уніфікований стиль для комірки таблиці: Times New Roman, інтервал 1.15, вирівнювання по ширині."""
+    """Встановлює уніфікований стиль для комірки таблиці: Times New Roman 14pt, інтервал 1.15, вертикальне центрування."""
     cell.text = text
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
     paragraph = cell.paragraphs[0]
     paragraph.alignment = alignment
     paragraph.paragraph_format.line_spacing = 1.15
@@ -27,19 +47,7 @@ def _set_cell_style(
     paragraph.paragraph_format.space_after = Pt(0)
 
     for run in paragraph.runs:
-        run.bold = is_bold
-        run.font.name = "Times New Roman"
-        run.font.size = Pt(font_size)
-        run.font.color.rgb = RGBColor(0, 0, 0)
-        # Гарантуємо застосування шрифту для кирилиці в OpenXML
-        r_pr = run._r.get_or_add_rPr()
-        r_fonts = r_pr.find(qn("w:rFonts"))
-        if r_fonts is None:
-            r_fonts = OxmlElement("w:rFonts")
-            r_pr.append(r_fonts)
-        r_fonts.set(qn("w:ascii"), "Times New Roman")
-        r_fonts.set(qn("w:hAnsi"), "Times New Roman")
-        r_fonts.set(qn("w:cs"), "Times New Roman")
+        _apply_run_font(run, is_bold=is_bold, font_size=font_size)
 
 
 def _apply_table_borders(table) -> None:
@@ -56,6 +64,38 @@ def _apply_table_borders(table) -> None:
         f"</w:tblBorders>"
     )
     tbl_pr.append(borders_element)
+
+
+def _configure_table_layout(table, column_widths: List[Inches]) -> None:
+    """
+    Фіксує макет таблиці (w:tblLayout type="fixed"), компактні внутрішні відступи комірок (w:tblCellMar)
+    та синхронізує ширини колонок у w:tblGrid для точного відображення у Word, LibreOffice та Google Docs.
+    """
+    tbl_pr = table._tbl.tblPr
+
+    tbl_layout = parse_xml(f'<w:tblLayout {nsdecls("w")} w:type="fixed"/>')
+    tbl_pr.append(tbl_layout)
+
+    cell_margins = parse_xml(
+        f'<w:tblCellMar {nsdecls("w")}>'
+        f'  <w:top w:w="72" w:type="dxa"/>'
+        f'  <w:left w:w="80" w:type="dxa"/>'
+        f'  <w:bottom w:w="72" w:type="dxa"/>'
+        f'  <w:right w:w="80" w:type="dxa"/>'
+        f"</w:tblCellMar>"
+    )
+    tbl_pr.append(cell_margins)
+
+    for idx, width in enumerate(column_widths):
+        table.columns[idx].width = width
+
+    tbl_grid = table._tbl.tblGrid
+    if tbl_grid is not None:
+        grid_cols = tbl_grid.findall(qn("w:gridCol"))
+        for idx, width in enumerate(column_widths):
+            dxa_val = str(int(round(width.inches * 1440)))
+            if idx < len(grid_cols):
+                grid_cols[idx].set(qn("w:w"), dxa_val)
 
 
 def _apply_row_rules(row, *, is_header: bool = False) -> None:
@@ -99,20 +139,23 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     doc = Document()
 
-    # 1. Альбомна орієнтація (Landscape A4: 297 x 210 мм)
+    # 1. Альбомна орієнтація (Landscape A4: 297 x 210 мм) та оптимізовані поля 0.4" (10.16 мм)
     section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
     section.page_width = Inches(11.69)
     section.page_height = Inches(8.27)
-    section.left_margin = Inches(0.6)
-    section.right_margin = Inches(0.6)
-    section.top_margin = Inches(0.6)
-    section.bottom_margin = Inches(0.6)
+    section.left_margin = Inches(0.4)
+    section.right_margin = Inches(0.4)
+    section.top_margin = Inches(0.4)
+    section.bottom_margin = Inches(0.4)
 
     # 2. Налаштування базового стилю Normal
     normal_style = doc.styles["Normal"]
     normal_style.font.name = "Times New Roman"
     normal_style.font.size = Pt(14)
     normal_style.font.color.rgb = RGBColor(0, 0, 0)
+    normal_style.paragraph_format.line_spacing = 1.15
+    normal_style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
     # 3. Шапка документа зверху таблиці
     header_lines = [
@@ -125,20 +168,18 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     for line in header_lines:
         paragraph = doc.add_paragraph()
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         paragraph.paragraph_format.line_spacing = 1.15
         paragraph.paragraph_format.space_before = Pt(0)
         paragraph.paragraph_format.space_after = Pt(2)
 
         run = paragraph.add_run(line)
-        run.bold = True
-        run.font.name = "Times New Roman"
-        run.font.size = Pt(14)
+        _apply_run_font(run, is_bold=True, font_size=14)
 
-    # Невеликий відступ перед таблицею
+    # Компактний відступ перед таблицею
     empty_p = doc.add_paragraph()
     empty_p.paragraph_format.space_before = Pt(0)
-    empty_p.paragraph_format.space_after = Pt(6)
+    empty_p.paragraph_format.space_after = Pt(4)
 
     # 4. Колонки таблиці
     column_headers = [
@@ -149,13 +190,21 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
         "Згода на гарантування дотримання правил з техніки безпеки та поведінки на території підвищеної небезпеки",
     ]
 
-    # Ширини колонок для альбомного формату (~10.49 дюймів доступної ширини)
+    # Оптимізовані ширини колонок для альбомного формату A4 (доступна ширина 10.89 дюймів = 276.6 мм)
     column_widths = [
-        Inches(0.6),   # № п/п
-        Inches(1.8),   # Дата реєстрації
-        Inches(3.2),   # ПІБ
-        Inches(1.8),   # Телефон
-        Inches(3.09),  # Згода / підпис ТБ
+        Inches(0.55),  # № п/п (~14.0 мм — вміщує "№ п/п" та двозначні номери в 1 рядок)
+        Inches(1.65),  # Дата реєстрації (~41.9 мм — вміщує "ДД.ММ.РРРР ГГ:ХХ" в 1 рядок)
+        Inches(3.65),  # ПІБ (~92.7 мм — максимальний простір для довгих ПІБ та віку)
+        Inches(1.54),  # Телефон (~39.1 мм — вміщує номер телефону в 1 рядок без переносу)
+        Inches(3.50),  # Згода / підпис ТБ (~88.9 мм — компактна шапка та широке поле для підпису)
+    ]
+
+    data_alignments = [
+        WD_ALIGN_PARAGRAPH.CENTER,  # № п/п
+        WD_ALIGN_PARAGRAPH.CENTER,  # Дата реєстрації
+        WD_ALIGN_PARAGRAPH.LEFT,    # ПІБ (без розтягування пробілів між прізвищем та ім'ям)
+        WD_ALIGN_PARAGRAPH.CENTER,  # Контактний номер телефону
+        WD_ALIGN_PARAGRAPH.CENTER,  # Згода / підпис
     ]
 
     table = doc.add_table(rows=1, cols=5)
@@ -163,6 +212,7 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
     table.autofit = False
 
     _apply_table_borders(table)
+    _configure_table_layout(table, column_widths)
 
     # Шапка таблиці
     header_row = table.rows[0]
@@ -176,7 +226,7 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
             header_text,
             is_bold=True,
             font_size=14,
-            alignment=WD_ALIGN_PARAGRAPH.JUSTIFY,
+            alignment=WD_ALIGN_PARAGRAPH.CENTER,
         )
 
     # 5. Заповнення рядків відвідувачів
@@ -184,9 +234,9 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
         row = table.add_row()
         _apply_row_rules(row, is_header=False)
 
-        reg_date_text = str(visitor.get("reg_date", ""))
-        name_text = str(visitor.get("name", ""))
-        phone_text = str(visitor.get("phone", ""))
+        reg_date_text = str(visitor.get("reg_date", "")).strip()
+        name_text = str(visitor.get("name", "")).strip()
+        phone_text = str(visitor.get("phone", "")).strip()
         signature_placeholder = ""  # Порожнє місце під власноручний підпис
 
         cell_values = [
@@ -205,11 +255,11 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
                 value,
                 is_bold=False,
                 font_size=14,
-                alignment=WD_ALIGN_PARAGRAPH.JUSTIFY,
+                alignment=data_alignments[col_idx],
             )
 
     # 6. Підсумковий блок
-    doc.add_paragraph().paragraph_format.space_before = Pt(8)
+    doc.add_paragraph().paragraph_format.space_before = Pt(6)
 
     footer_summary = doc.add_paragraph()
     footer_summary.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -218,9 +268,7 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
     footer_summary.paragraph_format.space_after = Pt(4)
 
     run_summary = footer_summary.add_run(f"Всього зареєстровано відвідувачів: {len(visitors)} осіб.")
-    run_summary.bold = True
-    run_summary.font.name = "Times New Roman"
-    run_summary.font.size = Pt(14)
+    _apply_run_font(run_summary, is_bold=True, font_size=14)
 
     footer_sign = doc.add_paragraph()
     footer_sign.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -231,8 +279,7 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
     run_sign = footer_sign.add_run(
         "Відповідальний за проведення інструктажу з ТБ: ___________________ / ___________________ /"
     )
-    run_sign.font.name = "Times New Roman"
-    run_sign.font.size = Pt(14)
+    _apply_run_font(run_sign, is_bold=False, font_size=14)
 
     # 7. Збереження у бінарний потік BytesIO
     stream = io.BytesIO()
@@ -250,3 +297,4 @@ def generate_visitors_document(payload: Dict[str, Any]) -> Dict[str, Any]:
         "filename": filename,
         "total_count": len(visitors),
     }
+

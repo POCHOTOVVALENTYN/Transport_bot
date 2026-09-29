@@ -226,9 +226,9 @@ class TransportBot:
                 CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$"),
                 CommandHandler("admin_museum", admin_menu),
 
-                # === 👇 (3) ДОДАЄМО ВИХІД В ЗАГАЛЬНУ АДМІНКУ ТУТ 👇 ===
-                # Це потрібно, щоб кнопка "Скасувати" (яка веде в general_admin_menu) спрацювала як вихід з діалогу
-                CallbackQueryHandler(show_general_admin_menu, pattern="^general_admin_menu$")
+                # === 👇 (3) ДОДАЄМО ВИХІД В ЗАГАЛЬНУ АДМІНКУ ТА ГОЛОВНЕ МЕНЮ ТУТ 👇 ===
+                CallbackQueryHandler(show_general_admin_menu, pattern="^general_admin_menu$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$")
             ],
             allow_reentry=True
         )
@@ -600,7 +600,6 @@ class TransportBot:
         self.app.add_handler(thanks_conv)
         self.app.add_handler(suggestion_conv)
         self.app.add_handler(museum_conv)
-        self.app.add_handler(admin_conv)
         self.app.add_handler(accessible_conv)
 
         logger.info("✅ All handlers configured")

@@ -2425,9 +2425,10 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
 
 # --- ІСНУЮЧА ФУНКЦІЯ: Меню Музею (Максим) ---
 async def admin_museum_menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показує меню музею"""
+    """Показує меню музею (безпечно працює як з текстових, так і з медіа/документ-повідомлень)."""
     query = update.callback_query
-    if query: await query.answer()
+    if query:
+        await query.answer()
 
     # Перевірка на адміна
     if update.effective_user.id not in MUSEUM_ADMIN_IDS:
@@ -2436,8 +2437,19 @@ async def admin_museum_menu_show(update: Update, context: ContextTypes.DEFAULT_T
     keyboard = await get_admin_main_menu_keyboard()
     text = "👋 Вітаємо в адмін-панелі Музею!"
 
-    if query:
-        await query.edit_message_text(text, reply_markup=keyboard)
+    if query and query.message:
+        if query.message.text:
+            try:
+                await query.edit_message_text(text, reply_markup=keyboard)
+            except Exception:
+                await update.effective_chat.send_message(text, reply_markup=keyboard)
+        else:
+            # Якщо кнопка натиснута під згенерованим файлом (.docx) — зберігаємо файл у чаті, прибираючи лише кнопки
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            await update.effective_chat.send_message(text, reply_markup=keyboard)
     else:
         await update.effective_chat.send_message(text, reply_markup=keyboard)
 
@@ -2768,20 +2780,32 @@ async def admin_menu_show(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "👋 Вітаємо в адмін-панелі Музею!"
 
     if update.callback_query:
-        # Якщо це натискання кнопки
-        await update.callback_query.answer()
-        try:
-            await update.callback_query.edit_message_text(
-                text=text,
-                reply_markup=keyboard
-            )
-        except Exception as e:
-            # Помилка (напр., повідомлення те саме) - просто видаляємо та надсилаємо нове
-            await update.callback_query.message.delete()
+        query = update.callback_query
+        await query.answer()
+        if query.message and not query.message.text:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
             await update.effective_chat.send_message(
                 text=text,
                 reply_markup=keyboard
             )
+        else:
+            try:
+                await query.edit_message_text(
+                    text=text,
+                    reply_markup=keyboard
+                )
+            except Exception:
+                try:
+                    await query.message.delete()
+                except Exception:
+                    pass
+                await update.effective_chat.send_message(
+                    text=text,
+                    reply_markup=keyboard
+                )
     else:
         # Якщо це команда /admin_museum
         await update.effective_chat.send_message(
@@ -3057,6 +3081,33 @@ async def admin_show_holiday_bookings(update: Update, context: ContextTypes.DEFA
 
 
 # --- ФОРМУВАННЯ ОФІЦІЙНОГО ДОКУМЕНТА ВІДВІДУВАЧІВ (DOCX) ---
+async def _render_or_send_text(
+    update: Update,
+    query,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+    parse_mode: str = ParseMode.HTML
+) -> None:
+    """
+    Безпечно відображає текстове меню: якщо поточне повідомлення є документом (.docx),
+    зберігає файл у чаті (прибираючи лише його інлайн-кнопки) і надсилає нове текстове повідомлення.
+    """
+    if query and query.message:
+        if query.message.text:
+            try:
+                await query.edit_message_text(text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+                return
+            except Exception:
+                pass
+        else:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+    await update.effective_chat.send_message(text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+
+
 async def admin_export_doc_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Показує список доступних дат для вибору та формування офіційного списку відвідувачів.
@@ -3067,7 +3118,7 @@ async def admin_export_doc_select(update: Update, context: ContextTypes.DEFAULT_
 
     user_id = update.effective_user.id
     if user_id not in MUSEUM_ADMIN_IDS:
-        if query:
+        if query and query.message:
             await query.message.reply_text(f"⛔ Помилка доступу. Ваш ID: {user_id}")
         return
 
@@ -3079,20 +3130,21 @@ async def admin_export_doc_select(update: Update, context: ContextTypes.DEFAULT_
     type_label = "святкової" if is_holiday else "звичайної"
 
     dates = await museum_service.get_distinct_booking_dates(excursion_type=excursion_type)
+    context.user_data[f"export_dates_{excursion_type}"] = dates
 
     if not dates:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
         text = f"ℹ️ Наразі немає активних або зареєстрованих дат для {type_label} екскурсії."
-        if query:
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await _render_or_send_text(update, query, text, InlineKeyboardMarkup(keyboard))
         return
 
     keyboard = []
-    for date_item in dates:
+    for idx, date_item in enumerate(dates):
+        # Використовуємо індекс, щоб callback_data гарантовано не перевищувала ліміт Telegram у 64 байти UTF-8
         keyboard.append([
             InlineKeyboardButton(
                 f"🗓 {date_item}",
-                callback_data=f"admin_export_doc_gen:{excursion_type}:{date_item}"
+                callback_data=f"admin_export_doc_gen:{excursion_type}:{idx}"
             )
         ])
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
@@ -3103,12 +3155,7 @@ async def admin_export_doc_select(update: Update, context: ContextTypes.DEFAULT_
         f"(Word .docx, Times New Roman 14 pt, відомість інструктажу з ТБ):"
     )
 
-    if query:
-        await query.edit_message_text(
-            text=text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode=ParseMode.HTML
-        )
+    await _render_or_send_text(update, query, text, InlineKeyboardMarkup(keyboard))
 
 
 async def admin_export_doc_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3121,40 +3168,54 @@ async def admin_export_doc_generate(update: Update, context: ContextTypes.DEFAUL
 
     user_id = update.effective_user.id
     if user_id not in MUSEUM_ADMIN_IDS:
-        if query:
+        if query and query.message:
             await query.message.reply_text(f"⛔ Помилка доступу. Ваш ID: {user_id}")
         return
 
-    # Формат callback_data: admin_export_doc_gen:{excursion_type}:{date_item}
+    # Формат callback_data: admin_export_doc_gen:{excursion_type}:{idx_or_date}
     parts = query.data.split(":", 2)
     excursion_type = parts[1] if len(parts) > 1 else "regular"
-    excursion_date = parts[2] if len(parts) > 2 else ""
+    raw_target = parts[2] if len(parts) > 2 else ""
+
+    excursion_date = ""
+    if raw_target.isdigit():
+        idx = int(raw_target)
+        cached_dates = context.user_data.get(f"export_dates_{excursion_type}")
+        if not cached_dates:
+            cached_dates = await museum_service.get_distinct_booking_dates(excursion_type=excursion_type)
+            context.user_data[f"export_dates_{excursion_type}"] = cached_dates
+        if 0 <= idx < len(cached_dates):
+            excursion_date = cached_dates[idx]
+    else:
+        excursion_date = raw_target
 
     if not excursion_date:
-        if query:
-            await query.edit_message_text(
-                "❌ Не вказано дату екскурсії.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]])
-            )
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"admin_export_doc_select:{excursion_type}")]]
+        await _render_or_send_text(update, query, "❌ Не вдалося визначити дату екскурсії. Спробуйте обрати зі списку ще раз.", InlineKeyboardMarkup(keyboard))
         return
 
     is_holiday = excursion_type == "holiday"
     type_label = "святкову" if is_holiday else "стандартну"
 
-    await query.edit_message_text(
-        f"⏳ <b>Формую офіційний список на {html.escape(excursion_date)}...</b>\nБудь ласка, зачекайте.",
-        parse_mode=ParseMode.HTML
-    )
+    if query and query.message and query.message.text:
+        try:
+            await query.edit_message_text(
+                f"⏳ <b>Формую офіційний список на {html.escape(excursion_date)}...</b>\nБудь ласка, зачекайте.",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
 
     try:
         visitors = await museum_service.get_visitors_for_date(excursion_date, excursion_type=excursion_type)
 
         if not visitors:
             keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"admin_export_doc_select:{excursion_type}")]]
-            await query.edit_message_text(
+            await _render_or_send_text(
+                update,
+                query,
                 f"ℹ️ На дату <b>{html.escape(excursion_date)}</b> немає зареєстрованих відвідувачів.",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode=ParseMode.HTML
+                InlineKeyboardMarkup(keyboard)
             )
             return
 
@@ -3170,7 +3231,7 @@ async def admin_export_doc_generate(update: Update, context: ContextTypes.DEFAUL
             f"🗓 <b>Дата:</b> {html.escape(excursion_date)}\n"
             f"👥 <b>Зареєстровано осіб:</b> {doc_result['total_count']}\n\n"
             f"<i>Документ оформлено згідно з вимогами діловодства (Times New Roman 14 pt, "
-            f"інтервал 1.15, вирівнювання по ширині, бланк з ТБ). Готовий до друку.</i>"
+            f"інтервал 1.15, альбомна орієнтація, бланк з ТБ). Готовий до друку.</i>"
         )
 
         back_keyboard = InlineKeyboardMarkup([
@@ -3178,25 +3239,30 @@ async def admin_export_doc_generate(update: Update, context: ContextTypes.DEFAUL
             [InlineKeyboardButton("🏛 Адмін-панель Музею", callback_data="admin_museum_menu")]
         ])
 
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=doc_result["stream"],
             filename=doc_result["filename"],
             caption=caption,
             parse_mode=ParseMode.HTML,
-            reply_markup=back_keyboard
+            reply_markup=back_keyboard,
+            read_timeout=30,
+            write_timeout=30,
+            connect_timeout=15
         )
+
+        if query and query.message:
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
 
     except Exception as e:
         logger.error(f"❌ Помилка при формуванні списку відвідувачів: {e}", exc_info=True)
-        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")]]
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"❌ Сталася помилка при формуванні документу: {html.escape(str(e))}",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"admin_export_doc_select:{excursion_type}")]]
+        await _render_or_send_text(
+            update,
+            query,
+            f"❌ Сталася помилка при формуванні документу: {html.escape(str(e))}",
+            InlineKeyboardMarkup(keyboard)
         )

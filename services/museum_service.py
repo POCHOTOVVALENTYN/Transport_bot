@@ -225,11 +225,20 @@ class MuseumService:
                 bookings = result.scalars().all()
                 if not bookings: return
                 
+                import json
                 rows = []
                 for b in bookings:
                     local_dt = self._to_kyiv_time(b.created_at)
                     reg_date = local_dt.strftime("%d.%m.%Y %H:%M") if local_dt else ""
-                    rows.append([reg_date, b.excursion_date, str(b.people_count), b.user_name, b.user_phone])
+                    parts_str = b.user_name
+                    if b.participants_details:
+                        try:
+                            details = json.loads(b.participants_details)
+                            if isinstance(details, list) and len(details) > 0:
+                                parts_str = "; ".join([f"{idx+1}) {p.get('name','')}" for idx, p in enumerate(details)])
+                        except Exception:
+                            pass
+                    rows.append([reg_date, b.excursion_date, str(b.people_count), parts_str, b.user_phone])
                 
                 # Відправляємо всі пакетом
                 loop = asyncio.get_running_loop()
@@ -441,20 +450,23 @@ class MuseumService:
         return cleaned
 
     def _parse_participant_names(self, parts_str: str) -> list:
-        """Парсить рядок учасників з Google Sheets у список окремих ПІБ."""
+        """Парсить рядок учасників з Google Sheets або БД у список окремих ПІБ (підтримує нумерацію, ';' та переноси рядків)."""
         if not parts_str or not parts_str.strip():
             return []
         import re
-        matches = re.findall(r"\d+\)\s*([^;]+)", parts_str)
+        matches = re.findall(r"\d+\)\s*([^;\n]+)", parts_str)
         if matches:
             return [m.strip() for m in matches if m.strip()]
-        if ";" in parts_str:
-            return [p.strip() for p in parts_str.split(";") if p.strip()]
+        if ";" in parts_str or "\n" in parts_str:
+            raw_parts = re.split(r"[;\n]+", parts_str)
+            cleaned_parts = [re.sub(r"^\d+[\)\.]\s*", "", p.strip()).strip() for p in raw_parts]
+            return [p for p in cleaned_parts if p]
         return [parts_str.strip()]
 
     async def get_distinct_booking_dates(self, excursion_type: str = "regular") -> list:
         """
-        Повертає список унікальних дат екскурсій (активні з розкладу + ті, на які є бронювання).
+        Повертає список унікальних дат екскурсій (активні з розкладу + ті, на які є бронювання),
+        відфільтровуючи службові тестові записи (TEST_*).
         """
         is_holiday = excursion_type == "holiday"
         active_dates = await self.get_available_holiday_dates() if is_holiday else await self.get_available_dates()
@@ -470,8 +482,12 @@ class MuseumService:
         except Exception as e:
             logger.error(f"❌ Error fetching distinct dates from DB: {e}")
 
-        # Об'єднуємо зі збереженням порядку та без дублікатів
-        combined_dates = list(dict.fromkeys(active_dates + db_dates))
+        # Об'єднуємо зі збереженням порядку, без дублікатів та без тестових дат
+        combined_dates = [
+            str(d).strip()
+            for d in dict.fromkeys(active_dates + db_dates)
+            if d and not str(d).strip().startswith("TEST_")
+        ]
         return combined_dates
 
     async def get_visitors_for_date(self, excursion_date: str, excursion_type: str = "regular") -> list:
@@ -490,7 +506,7 @@ class MuseumService:
             raw_rows = await loop.run_in_executor(
                 None,
                 self.sheets.read_range,
-                f"'{sheet_name}'!A2:E500"
+                f"'{sheet_name}'!A2:E"
             )
             if raw_rows:
                 for row in raw_rows:
@@ -535,6 +551,7 @@ class MuseumService:
                 for b in bookings:
                     local_created_at = self._to_kyiv_time(b.created_at)
                     reg_date = local_created_at.strftime("%d.%m.%Y %H:%M") if local_created_at else ""
+                    normalized_phone = self._normalize_phone(b.user_phone)
 
                     has_expanded = False
                     if b.participants_details:
@@ -553,18 +570,27 @@ class MuseumService:
                                         visitors.append({
                                             "reg_date": reg_date,
                                             "name": name,
-                                            "phone": b.user_phone
+                                            "phone": normalized_phone
                                         })
                                         has_expanded = True
                         except Exception as json_err:
                             logger.warning(f"Error parsing participants_details: {json_err}")
 
                     if not has_expanded:
-                        visitors.append({
-                            "reg_date": reg_date,
-                            "name": b.user_name.strip(),
-                            "phone": b.user_phone
-                        })
+                        parsed_fallback = self._parse_participant_names(b.user_name)
+                        if parsed_fallback:
+                            for p_name in parsed_fallback:
+                                visitors.append({
+                                    "reg_date": reg_date,
+                                    "name": p_name,
+                                    "phone": normalized_phone
+                                })
+                        else:
+                            visitors.append({
+                                "reg_date": reg_date,
+                                "name": b.user_name.strip(),
+                                "phone": normalized_phone
+                            })
 
                 logger.info(f"✅ Loaded {len(visitors)} visitors from SQLite for {excursion_date}")
                 return visitors
