@@ -36,6 +36,32 @@ except ImportError:
 
 logger = logging.getLogger("transport_bot")
 
+EASYWAY_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7"
+}
+
+
+def safe_int(value: any, default: int = 0) -> int:
+    """Безпечне приведення значення до цілого числа без падіння на None або ''."""
+    if value is None or value == "":
+        return default
+    try:
+        return int(float(value))
+    except (ValueError, TypeError):
+        return default
+
+
+def safe_float(value: any, default: float = 0.0) -> float:
+    """Безпечне приведення значення до числа з плаваючою крапкою без падіння на None або ''."""
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
 
 class EasyWayService:
     """Сервіс для роботи з API EasyWay v1.2"""
@@ -87,16 +113,25 @@ class EasyWayService:
 
         for attempt in range(3):
             try:
-                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+                async with aiohttp.ClientSession(
+                    connector=aiohttp.TCPConnector(ssl=False),
+                    headers=EASYWAY_HEADERS
+                ) as session:
                     async with session.get(url, timeout=timeout) as response:
                         if response.status == 200:
                             data = await response.json(content_type=None)
-                            self.routes_cache["routes_list"] = data
+                            if isinstance(data, dict) and not data.get("error"):
+                                self.routes_cache["routes_list"] = data
                             self._log_api_duration("GetRoutesList", start_ts)
                             return data
+                        else:
+                            logger.warning(f"GetRoutesList API returned status {response.status} on attempt {attempt + 1}")
+                            if attempt < 2:
+                                await asyncio.sleep(1.0 * (attempt + 1))
             except Exception as e:
-                logger.warning(f"GetRoutesList error: {e}")
-                if attempt < 2: await asyncio.sleep(2)
+                logger.warning(f"GetRoutesList error on attempt {attempt + 1}: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(1.0 * (attempt + 1))
         return {"error": "Не вдалося завантажити список маршрутів."}
 
     async def get_places_by_name(self, search_term: str) -> dict:
@@ -120,7 +155,10 @@ class EasyWayService:
 
         for attempt in range(3):
             try:
-                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
+                async with aiohttp.ClientSession(
+                    connector=aiohttp.TCPConnector(ssl=False),
+                    headers=EASYWAY_HEADERS
+                ) as session:
                     async with session.get(url, timeout=timeout) as response:
                         if response.status == 200:
                             parsed = self._parse_places_response(await response.json(content_type=None))
@@ -128,10 +166,15 @@ class EasyWayService:
                                 self.places_cache[cache_key] = parsed
                             self._log_api_duration("GetPlacesByName", start_ts, f"(term={cache_key})")
                             return parsed
+                        else:
+                            logger.warning(f"GetPlacesByName status {response.status} for term '{search_term}' on attempt {attempt + 1}")
+                            if attempt < 2:
+                                await asyncio.sleep(0.5 * (attempt + 1))
             except Exception as e:
-                logger.warning(f"Search error: {e}")
-                if attempt < 2: await asyncio.sleep(1)
-        return {"error": "Сервер не відповів."}
+                logger.warning(f"Search error on attempt {attempt + 1}: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        return {"error": "Сервер не відповів вчасно."}
 
     async def get_stop_info_v12(self, stop_id: int) -> dict:
         """Отримання інформації про зупинку"""
@@ -149,12 +192,15 @@ class EasyWayService:
             "format": self.config.DEFAULT_FORMAT,
         }
         url = self._build_url(params)
-        timeout = aiohttp.ClientTimeout(total=10)
+        timeout = aiohttp.ClientTimeout(total=8)
 
         for attempt in range(3):
             try:
-                async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                    logger.info(f"EasyWay API Call v1.2 (REAL REQUEST): {url}")
+                async with aiohttp.ClientSession(
+                    connector=aiohttp.TCPConnector(ssl=False),
+                    headers=EASYWAY_HEADERS
+                ) as session:
+                    logger.info(f"EasyWay API Call v1.2 (REAL REQUEST): {url} (attempt {attempt + 1})")
                     async with session.get(url, timeout=timeout) as response:
                         if response.status == 200:
                             parsed = self._parse_stop_info_v12(await response.json(content_type=None))
@@ -162,10 +208,15 @@ class EasyWayService:
                                 self.stop_cache[stop_id] = parsed
                             self._log_api_duration("GetStopInfo", start_ts, f"(stop_id={stop_id})")
                             return parsed
+                        else:
+                            logger.warning(f"EasyWay GetStopInfo status {response.status} for stop_id={stop_id} on attempt {attempt + 1}")
+                            if attempt < 2:
+                                await asyncio.sleep(0.5 * (attempt + 1))
             except Exception as e:
-                logger.warning(f"StopInfo error: {e}")
-                if attempt < 2: await asyncio.sleep(0.5)
-        return {"error": "Сервер не відповів."}
+                logger.warning(f"StopInfo error on attempt {attempt + 1}: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+        return {"error": "Сервер не відповів вчасно."}
 
     async def get_vehicles_on_route(self, route_id: int) -> List[dict]:
         """
@@ -188,19 +239,27 @@ class EasyWayService:
 
         url = self._build_url(params)
 
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
-                async with session.get(url, timeout=8) as response:
-                    if response.status == 200:
-                        data = await response.json(content_type=None)
-                        parsed = self._parse_route_gps(data)
-                        self.route_gps_cache[route_id] = parsed
-                        self._log_api_duration("GetRouteGPS", start_ts, f"(route_id={route_id})")
-                        return parsed
-                    else:
-                        logger.warning(f"API returned status {response.status} for GetRouteGPS")
-        except Exception as e:
-            logger.error(f"Error getting route GPS: {e}")
+        for attempt in range(2):
+            try:
+                async with aiohttp.ClientSession(
+                    connector=aiohttp.TCPConnector(ssl=False),
+                    headers=EASYWAY_HEADERS
+                ) as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as response:
+                        if response.status == 200:
+                            data = await response.json(content_type=None)
+                            parsed = self._parse_route_gps(data)
+                            self.route_gps_cache[route_id] = parsed
+                            self._log_api_duration("GetRouteGPS", start_ts, f"(route_id={route_id})")
+                            return parsed
+                        else:
+                            logger.warning(f"API returned status {response.status} for GetRouteGPS (route_id={route_id})")
+                            if attempt < 1:
+                                await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.error(f"Error getting route GPS (route_id={route_id}): {e}")
+                if attempt < 1:
+                    await asyncio.sleep(0.5)
 
         return []
 
@@ -209,6 +268,9 @@ class EasyWayService:
         accessible_vehicles = []
 
         try:
+            if not isinstance(data, dict):
+                return []
+
             vehicles = data.get("vehicle", [])
             if isinstance(vehicles, dict):
                 vehicles = [vehicles]
@@ -219,15 +281,19 @@ class EasyWayService:
             if vehicles:
                 logger.info(f"🔍 RAW VEHICLE DATA (First item): {vehicles[0]}")
 
-            all_ids = [str(v.get("id")) for v in vehicles]
+            all_ids = [str(v.get("id")) for v in vehicles if isinstance(v, dict)]
             logger.info(f"📋 Всі ID на маршруті: {all_ids}")
 
             for v in vehicles:
-                if v.get('data_relevance') == 0: continue
+                if not isinstance(v, dict):
+                    continue
+                if v.get('data_relevance') == 0:
+                    continue
 
                 # 2. 🔥 ГОЛОВНЕ ВИПРАВЛЕННЯ: Фільтруємо за інклюзивністю 🔥
-                # Якщо handicapped != 1 — це звичайний вагон, пропускаємо його.
-                if v.get("handicapped", 0) != 1:
+                # Підтримуємо і числове 1, і рядкове '1', і булеве True
+                is_handicapped = str(v.get("handicapped", "0")).lower() in ["1", "true"]
+                if not is_handicapped:
                     continue
 
                 raw_id = str(v.get("id") or v.get("bortNumber") or "").strip()
@@ -236,9 +302,9 @@ class EasyWayService:
                 real_bort = VEHICLE_ID_MAP.get(raw_id)
                 bort_number = real_bort if real_bort else raw_id
 
-                lat = float(v.get("lat", 0))
-                lng = float(v.get("lng", 0))
-                direction = int(v.get("direction", 0))
+                lat = safe_float(v.get("lat"), 0.0)
+                lng = safe_float(v.get("lng"), 0.0)
+                direction = safe_int(v.get("direction"), 0)
 
                 # Зберігаємо флаг handicapped про всяк випадок, але додаємо ВСІХ
                 is_accessible_api = v.get("handicapped", False)
@@ -265,16 +331,27 @@ class EasyWayService:
 
     def _parse_places_response(self, data: dict, root_key: str = "item") -> dict:
         try:
+            if not isinstance(data, dict):
+                return {"error": "Некоректний формат відповіді API"}
+            if data.get("error"):
+                return {"error": str(data.get("error"))}
+
             items = data.get(root_key, [])
-            if not isinstance(items, list): items = [items]
+            if not isinstance(items, list):
+                items = [items]
             parsed_stops = []
             for item in items:
+                if not isinstance(item, dict):
+                    continue
                 if item.get("@attributes", {}).get("type") == "stop":
                     trams = []
                     trols = []
                     routes_data = item.get("routes", {}).get("route", [])
-                    if not isinstance(routes_data, list): routes_data = [routes_data]
+                    if not isinstance(routes_data, list):
+                        routes_data = [routes_data]
                     for route in routes_data:
+                        if not isinstance(route, dict):
+                            continue
                         title = route.get("title")
                         rtype = route.get("@attributes", {}).get("type") or route.get("type")
                         if rtype == "tram":
@@ -282,12 +359,14 @@ class EasyWayService:
                         elif rtype == "trol":
                             trols.append(title)
                     summary_parts = []
-                    if trams: summary_parts.append(f"🚋 {', '.join(trams)}")
-                    if trols: summary_parts.append(f"🚎 {', '.join(trols)}")
+                    if trams:
+                        summary_parts.append(f"🚋 {', '.join(trams)}")
+                    if trols:
+                        summary_parts.append(f"🚎 {', '.join(trols)}")
                     routes_summary = " | ".join(summary_parts)
                     if routes_summary:
                         parsed_stops.append({
-                            "id": int(item.get("id", 0)),
+                            "id": safe_int(item.get("id")),
                             "title": item.get("title", ""),
                             "routes_summary": routes_summary
                         })
@@ -297,34 +376,55 @@ class EasyWayService:
 
     def _parse_stop_info_v12(self, data: Dict) -> Dict:
         try:
+            if not isinstance(data, dict):
+                return {"error": "Некоректний формат відповіді API"}
+            if data.get("error"):
+                return {"error": str(data.get("error"))}
+
             stop = data
             parsed = {
-                "id": stop.get("id"),
-                "title": stop.get("title"),
-                "lat": float(stop.get("lat", 0)),
-                "lng": float(stop.get("lng", 0)),
+                "id": safe_int(stop.get("id")),
+                "title": str(stop.get("title") or ""),
+                "lat": safe_float(stop.get("lat"), 0.0),
+                "lng": safe_float(stop.get("lng"), 0.0),
                 "routes": [],
             }
 
-            raw_routes = stop.get("routes", [])
+            raw_routes = stop.get("routes")
+            if isinstance(raw_routes, dict) and "route" in raw_routes:
+                raw_routes = raw_routes["route"]
+
             if not raw_routes:
                 transports = stop.get("transports", [])
                 if isinstance(transports, list):
+                    raw_routes = []
                     for t in transports:
+                        if not isinstance(t, dict):
+                            continue
                         t_routes = t.get("routes", [])
                         if isinstance(t_routes, list):
                             raw_routes.extend(t_routes)
                         elif isinstance(t_routes, dict):
-                            raw_routes.append(t_routes)
+                            if "route" in t_routes:
+                                r_inner = t_routes["route"]
+                                if isinstance(r_inner, list):
+                                    raw_routes.extend(r_inner)
+                                else:
+                                    raw_routes.append(r_inner)
+                            else:
+                                raw_routes.append(t_routes)
 
             if not isinstance(raw_routes, list):
-                raw_routes = [raw_routes]
+                raw_routes = [raw_routes] if raw_routes else []
 
             for route in raw_routes:
-                bort_number = str(route.get("bortNumber", "")).strip()
+                if not isinstance(route, dict):
+                    continue
+
+                bort_number = str(route.get("bortNumber") or "").strip()
                 transport_key = route.get("transportKey")
 
-                is_api_handicapped = route.get("handicapped", False)
+                is_api_handicapped = bool(route.get("handicapped", False))
                 is_local_handicapped = False
                 if transport_key == 'tram' and bort_number in ACCESSIBLE_TRAMS:
                     is_local_handicapped = True
@@ -332,24 +432,24 @@ class EasyWayService:
                     is_local_handicapped = True
 
                 parsed_route = {
-                    "id": route.get("id"),
-                    "title": route.get("title"),
-                    "direction": int(route.get("direction", 0)),
+                    "id": safe_int(route.get("id")),
+                    "title": str(route.get("title") or "").strip(),
+                    "direction": safe_int(route.get("direction"), 0),
                     "direction_title": route.get("directionTitle"),
                     "transport_name": route.get("transportName"),
                     "transport_key": transport_key,
                     "handicapped": is_api_handicapped or is_local_handicapped,
                     "bort_number": bort_number,
-                    "time_left": float(route.get("timeLeft", 9999)),
-                    "time_left_formatted": route.get("timeLeftFormatted", ""),
-                    "time_source": route.get("timeSource", "unknown"),
-                    "wifi": route.get("wifi", False),
-                    "aircond": route.get("aircond", False),
+                    "time_left": safe_float(route.get("timeLeft"), default=9999.0),
+                    "time_left_formatted": str(route.get("timeLeftFormatted") or ""),
+                    "time_source": str(route.get("timeSource") or "unknown"),
+                    "wifi": bool(route.get("wifi", False)),
+                    "aircond": bool(route.get("aircond", False)),
                 }
                 parsed["routes"].append(parsed_route)
             return parsed
         except Exception as e:
-            logger.error(f"Error parsing stop info: {e}")
+            logger.error(f"Error parsing stop info: {e}", exc_info=True)
             return {"error": str(e)}
 
     def filter_handicapped_routes(self, stop_info: dict) -> List[dict]:

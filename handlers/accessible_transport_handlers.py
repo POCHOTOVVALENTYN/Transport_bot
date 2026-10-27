@@ -289,8 +289,19 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
         stop_info = await easyway_service.get_stop_info_v12(stop_id=stop_id)
 
         if stop_info.get("error"):
-            await query.edit_message_text(f"❌ Помилка API: {stop_info['error']}")
-            return States.ACCESSIBLE_SEARCH_STOP
+            error_message = html.escape(str(stop_info['error']))
+            error_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Спробувати знову", callback_data=f"stop_{stop_id}")],
+                [InlineKeyboardButton("⬅️ До списку зупинок", callback_data="accessible_back_to_list")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+            ])
+            await query.edit_message_text(
+                f"❌ <b>Помилка отримання даних:</b> {error_message}\n\n"
+                f"Будь ласка, спробуйте повторити запит або оберіть іншу зупинку.",
+                reply_markup=error_keyboard,
+                parse_mode=ParseMode.HTML
+            )
+            return States.ACCESSIBLE_SELECT_STOP
 
         stop_title = html.escape(stop_info.get("title", f"Зупинка {stop_id}"))
 
@@ -348,21 +359,28 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
                     routes_to_scan.append((r_title, target_id, api_transport_key, r_direction))
                     seen_routes.add(unique_key)
 
-        # 4. Скануємо GPS (паралельно)
-        tasks = [easyway_service.get_vehicles_on_route(r_id) for _, r_id, _, _ in routes_to_scan]
+        global_route_data = {}
+        routes_meta_info = {}
 
-        global_results = []
-        if tasks:
-            global_results = await asyncio.gather(*tasks)
+        # 4. Скануємо GPS (паралельно з обмеженням сплеску через семафор)
+        if routes_to_scan:
+            semaphore = asyncio.Semaphore(3)
 
-            global_route_data = {}
-            routes_meta_info = {}
+            async def fetch_vehicles_with_limit(route_id):
+                async with semaphore:
+                    return await easyway_service.get_vehicles_on_route(route_id)
+
+            tasks = [fetch_vehicles_with_limit(r_id) for _, r_id, _, _ in routes_to_scan]
+            global_results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for i, (r_name, r_id, r_type, target_dir) in enumerate(routes_to_scan):
                 raw_vehicles = global_results[i] if i < len(global_results) else []
+                if isinstance(raw_vehicles, Exception):
+                    logger.warning(f"Error fetching vehicles for route {r_name}: {raw_vehicles}")
+                    raw_vehicles = []
 
                 logger.info(
-                    f"[DEBUG] Route {r_name} ({r_type}): Service returned {len(raw_vehicles) if raw_vehicles else 0} items")
+                    f"[DEBUG] Route {r_name} ({r_type}): Service returned {len(raw_vehicles)} items")
 
                 unique_key = f"{r_name}_{r_type}"
                 global_route_data[unique_key] = raw_vehicles
@@ -372,8 +390,8 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
                     'stop_direction': target_dir
                 }
 
-            # 6. Рендеримо
-            await _render_accessible_response(query, stop_title, stop_info, global_route_data, routes_meta_info)
+        # 5. Рендеримо (завжди викликається, навіть якщо routes_to_scan порожній)
+        await _render_accessible_response(query, stop_id, stop_title, stop_info, global_route_data, routes_meta_info)
 
         return States.ACCESSIBLE_SHOWING_RESULTS
 
@@ -382,15 +400,23 @@ async def accessible_stop_selected(update: Update, context: ContextTypes.DEFAULT
     except Exception as e:
         logger.error(f"Error in accessible_stop_selected: {e}", exc_info=True)
         try:
-            await query.edit_message_text(f"❌ Помилка: {str(e)}")
-        except:
+            error_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ До списку зупинок", callback_data="accessible_back_to_list")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
+            ])
+            await query.edit_message_text(
+                f"❌ <b>Помилка:</b> {html.escape(str(e))}",
+                reply_markup=error_keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
             pass
         return States.ACCESSIBLE_SEARCH_STOP
 
 
 # === ЛОГІКА ВІДОБРАЖЕННЯ (ФІНАЛЬНА) ===
 
-async def _render_accessible_response(query, stop_title: str, stop_info: dict, global_route_data: dict,
+async def _render_accessible_response(query, stop_id: int, stop_title: str, stop_info: dict, global_route_data: dict,
                                       routes_meta: dict):
     """
     Формує повідомлення.
@@ -535,7 +561,7 @@ async def _render_accessible_response(query, stop_title: str, stop_info: dict, g
         message = message[:3900] + "\n\n...(повідомлення скорочено)..."
 
     keyboard = [
-        [InlineKeyboardButton("🔄 Оновити дані", callback_data=f"stop_{query.data.split('_')[-1]}")],
+        [InlineKeyboardButton("🔄 Оновити дані", callback_data=f"stop_{stop_id}")],
         [InlineKeyboardButton("⬅️ До списку зупинок", callback_data="accessible_back_to_list")],
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
     ]
