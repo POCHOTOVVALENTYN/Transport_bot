@@ -23,20 +23,16 @@ async def delete_message_callback(update: Update, context: ContextTypes.DEFAULT_
 
 async def dismiss_broadcast_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Видаляє повідомлення розсилки і показує Головне меню.
+    Видаляє повідомлення розсилки без повторного виклику меню, зберігаючи чистоту чату.
     """
     query = update.callback_query
     await query.answer()
 
-    # 1. Видаляємо повідомлення з новиною
+    # Видаляємо повідомлення з новиною
     try:
         await query.message.delete()
-    except Exception:
-        pass
-
-    # 2. Викликаємо головне меню (щоб користувач повернувся в інтерфейс)
-    from handlers.menu_handlers import main_menu
-    await main_menu(update, context)
+    except Exception as e:
+        logger.warning(f"Не вдалося видалити повідомлення розсилки: {e}")
 
 
 async def get_back_keyboard(callback_data: str = "main_menu") -> InlineKeyboardMarkup:

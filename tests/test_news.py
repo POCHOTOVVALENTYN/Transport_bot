@@ -116,20 +116,16 @@ async def run_news_tests() -> None:
     assert "ОПЕРАТИВНА ІНФОРМАЦІЯ | КП «ОМЕТ»" in alert_payload["text"]
 
     alert_buttons = [btn for row in alert_payload["reply_markup"].inline_keyboard for btn in row]
-    assert len(alert_buttons) == 3, "Сповіщення має містити рівно 3 кнопки (читати, всі новини, приховати)"
+    assert len(alert_buttons) == 2, "Сповіщення має містити рівно 2 кнопки (оперативні новини, зрозуміло)"
 
-    read_btn = alert_buttons[0]
-    assert read_btn.text == "📖 Читати новину"
-    assert read_btn.callback_data == f"news_client_view:{test_news_id}:0"
+    news_btn = alert_buttons[0]
+    assert news_btn.text == "📢 Оперативні новини"
+    assert news_btn.callback_data == "news_client_list:0"
 
-    all_news_btn = alert_buttons[1]
-    assert all_news_btn.text == "📢 Всі оперативні новини"
-    assert all_news_btn.callback_data == "news_client_list:0"
-
-    dismiss_btn = alert_buttons[2]
-    assert dismiss_btn.text == "🗑 Зрозуміло (Приховати)"
+    dismiss_btn = alert_buttons[1]
+    assert dismiss_btn.text == "🗑 Зрозуміло"
     assert dismiss_btn.callback_data == "delete_message"
-    print("   ✅ Текст та клавіатура стандартного сповіщення повністю відповідають специфікації")
+    print("   ✅ Текст та клавіатура стандартного сповіщення повністю відповідають оновленій специфікації")
 
     print("\n🎉 УСІ 9 ТЕСТІВ УСПІШНО ПРОЙДЕНО БЕЗ ПОМИЛОК!")
 

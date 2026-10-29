@@ -9,15 +9,14 @@ from utils.logger import logger
 news_service = NewsService()
 
 
-def build_news_broadcast_alert(news_id: int) -> dict[str, Any]:
+def build_news_broadcast_alert(news_id: int = 0) -> dict[str, Any]:
     """
     Формує текст та клавіатуру стандартного сповіщення для розсилки в чат.
-    RORO: приймає news_id, повертає dict з 'text' та 'reply_markup'.
+    RORO: приймає news_id (опціонально), повертає dict з 'text' та 'reply_markup'.
     """
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📖 Читати новину", callback_data=f"news_client_view:{news_id}:0")],
-        [InlineKeyboardButton("📢 Всі оперативні новини", callback_data="news_client_list:0")],
-        [InlineKeyboardButton("🗑 Зрозуміло (Приховати)", callback_data="delete_message")]
+        [InlineKeyboardButton("📢 Оперативні новини", callback_data="news_client_list:0")],
+        [InlineKeyboardButton("🗑 Зрозуміло", callback_data="delete_message")]
     ])
     return {
         "text": NEWS_BROADCAST_ALERT,
