@@ -11,7 +11,9 @@ from config.settings import MUSEUM_ADMIN_ID, MUSEUM_ADMIN_IDS, GOOGLE_SHEETS_ID,
 from integrations.google_sheets.client import GoogleSheetsClient
 from utils.logger import logger
 from bot.states import States
+from config.messages import NEWS_BROADCAST_ALERT
 from handlers.command_handlers import get_admin_main_menu_keyboard
+from handlers.news_handlers import build_news_broadcast_alert
 
 from services.user_service import UserService
 from services.tickets_service import TicketsService
@@ -2217,13 +2219,25 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
 
     # 3. Робимо "Прев'ю"
     # Ми зберігаємо повідомлення в змінну і додаємо його ID у список видалення
-    preview_title_msg = await msg.reply_text("👁 <b>Попередній перегляд:</b>", parse_mode=ParseMode.HTML)
+    preview_title_msg = await msg.reply_text(
+        "👁 <b>Попередній перегляд матеріалу:</b>\n"
+        "<i>(Саме так новина відображатиметься у розділі «Оперативні новини»)</i>",
+        parse_mode=ParseMode.HTML
+    )
     msgs_to_delete.append(preview_title_msg.message_id)
-    # ==============================
 
     preview_msg = await msg.copy(chat_id=user_id)
     # Додаємо ID самого прев'ю (копії) до списку видалення
     context.user_data['msgs_to_delete'].append(preview_msg.message_id)
+
+    # Прев'ю компактного пуш-сповіщення, яке отримають пасажири в чат
+    preview_alert_msg = await msg.reply_text(
+        "💬 <b>Попередній перегляд сповіщення в чаті пасажирів:</b>\n"
+        "<i>(Новину буде додано в розділ «Оперативні новини», а підписники отримають це сповіщення)</i>\n\n"
+        f"{NEWS_BROADCAST_ALERT}",
+        parse_mode=ParseMode.HTML
+    )
+    msgs_to_delete.append(preview_alert_msg.message_id)
 
     # 4. Клавіатура вибору строку дії новини (перед підтвердженням)
     duration_keyboard = [
@@ -2278,8 +2292,8 @@ async def admin_broadcast_duration_selected(update: Update, context: ContextType
     await query.edit_message_text(
         f"📢 <b>Підготовка до розсилки</b>\n\n"
         f"👥 Кількість отримувачів: <b>{users_count}</b>\n"
-        f"⏳ Строк дії новини: <b>{duration_label}</b>\n"
-        f"⚠️ Перевірте вигляд повідомлення вище.\n"
+        f"⏳ Строк дії новини: <b>{duration_label}</b>\n\n"
+        f"ℹ️ <i>Повний матеріал буде збережено в «Оперативні новини», а підписникам надійде стандартне сповіщення з кнопкою швидкого перегляду.</i>\n\n"
         f"Натисніть <b>Надіслати</b> для запуску або <b>Скасувати</b> для редагування.",
         reply_markup=InlineKeyboardMarkup(confirm_keyboard),
         parse_mode=ParseMode.HTML
@@ -2348,25 +2362,24 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         blocked = 0
         start_time = datetime.now()
 
-        # Кнопка "Закрити" ТІЛЬКИ для користувачів
-        user_close_btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗑 Зрозуміло (Приховати)", callback_data="broadcast_dismiss")]
-        ])
+        # Формуємо стандартне сповіщення для пасажирів (Варіант 1)
+        news_id = created_news.id if created_news else 0
+        alert_payload = build_news_broadcast_alert(news_id=news_id)
 
-        # Цикл розсилки
+        # Цикл розсилки стандартного сповіщення
         for index, user_id in enumerate(users, start=1):
             try:
-                await context.bot.copy_message(
+                await context.bot.send_message(
                     chat_id=user_id,
-                    from_chat_id=from_chat_id,
-                    message_id=msg_id,
-                    reply_markup=user_close_btn  # Додаємо кнопку тільки тут
+                    text=alert_payload["text"],
+                    reply_markup=alert_payload["reply_markup"],
+                    parse_mode=ParseMode.HTML
                 )
                 count += 1
                 if index % BROADCAST_BATCH_SIZE == 0:
                     await asyncio.sleep(BROADCAST_PAUSE_SEC)
             except Exception as e:
-                logger.warning(f"Failed to send broadcast to {user_id}: {e}")
+                logger.warning(f"Failed to send broadcast alert to {user_id}: {e}")
                 blocked += 1
 
         # Оновлюємо статистику створеної новини
@@ -2388,7 +2401,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         await context.bot.send_message(
             chat_id=chat_id,
             text=(
-                f"✅ <b>Розсилка завершена та додана в «Оперативні новини»!</b>\n\n"
+                f"✅ <b>Новину опубліковано в «Оперативні новини», а сповіщення надіслано!</b>\n\n"
                 f"📨 Успішно надіслано: <b>{count}</b>\n"
                 f"🚫 Не отримали (блокували): <b>{blocked}</b>\n"
                 f"⏱️ Час виконання: <b>{duration:.1f} сек.</b>"
@@ -2534,17 +2547,24 @@ async def admin_add_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE
         if parsed_date < datetime.now():
             raise ValueError("Дата не може бути у минулому.")
 
-        # --- ВАЛІДАЦІЯ ПРОЙДЕНА ---
-        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
-        sheets.append_row(sheet_name="MuseumDates", values=[date_text])
-        museum_service.invalidate_dates_cache()
+        # --- ВАЛІДАЦІЯ ДАТИ ПРОЙДЕНА -> ЗАПИТУЄМО МАКСИМАЛЬНУ КІЛЬКІСТЬ МІСЦЬ ---
+        context.user_data['pending_museum_date'] = date_text
+        context.user_data['pending_museum_type'] = 'regular'
 
-        logger.info(f"✅ Admin added new date: {date_text}")
-        await update.message.reply_text(f"✅ Дату '<b>{date_text}</b>' успішно додано.", parse_mode=ParseMode.HTML)
-
-        # Повертаємося до головного адмін-меню
-        await admin_menu_show(update, context) # Показуємо повне меню
-        return ConversationHandler.END # Завершуємо діалог
+        keyboard = [
+            [InlineKeyboardButton("60 місць (за замовчуванням)", callback_data="admin_date_cap:60")],
+            [InlineKeyboardButton("45 місць", callback_data="admin_date_cap:45"), InlineKeyboardButton("30 місць", callback_data="admin_date_cap:30")],
+            [InlineKeyboardButton("⬅️ Скасувати", callback_data="admin_museum_menu")]
+        ]
+        await update.message.reply_text(
+            f"🗓️ Дата: <b>{date_text}</b>\n\n"
+            f"Вкажіть максимальну кількість вільних місць на цю дату:\n"
+            f"• Оберіть кнопку швидкого вибору або\n"
+            f"• Напишіть число від 1 до 200 вручну в чат.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.HTML
+        )
+        return States.ADMIN_STATE_ADD_DATE_CAPACITY
 
     except ValueError as e:
         # --- ВАЛІДАЦІЯ НЕ ПРОЙДЕНА ---
@@ -2554,15 +2574,112 @@ async def admin_add_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"Будь ласка, спробуйте ще раз або натисніть 'Назад'.",
             parse_mode=ParseMode.HTML
         )
-        # Повертаємося до ЦЬОГО Ж стану, змушуючи адміна ввести дату знову
         return States.ADMIN_STATE_ADD_DATE
 
     except Exception as e:
-        # --- Інша помилка (напр. Google Sheets) ---
-        logger.error(f"Failed to add date by admin: {e}")
-        await update.message.reply_text(f"❌ Сталася системна помилка при додаванні дати: {e}")
+        # --- Інша помилка ---
+        logger.error(f"Failed to process date by admin: {e}")
+        await update.message.reply_text(f"❌ Сталася системна помилка: {e}")
+        await admin_menu_show(update, context)
+        return ConversationHandler.END
 
-        await admin_menu_show(update, context) # Показуємо ПОВНЕ меню
+
+async def admin_add_date_capacity_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in MUSEUM_ADMIN_IDS:
+        return ConversationHandler.END
+
+    date_text = context.user_data.get('pending_museum_date')
+    if not date_text:
+        await admin_menu_show(update, context)
+        return ConversationHandler.END
+
+    capacity = None
+    query = update.callback_query
+    if query:
+        await query.answer()
+        data = query.data
+        if data.startswith("admin_date_cap:"):
+            try:
+                capacity = int(data.split(":")[1])
+            except ValueError:
+                capacity = None
+    elif update.message and update.message.text:
+        text = update.message.text.strip()
+        if text.isdigit():
+            val = int(text)
+            if 1 <= val <= 200:
+                capacity = val
+
+    if capacity is None:
+        keyboard = [
+            [InlineKeyboardButton("60 місць (за замовчуванням)", callback_data="admin_date_cap:60")],
+            [InlineKeyboardButton("45 місць", callback_data="admin_date_cap:45"), InlineKeyboardButton("30 місць", callback_data="admin_date_cap:30")],
+            [InlineKeyboardButton("⬅️ Скасувати", callback_data="admin_museum_menu")]
+        ]
+        msg_text = "❌ Будь ласка, введіть коректне число від 1 до 200 або оберіть кнопку нижче:"
+        if query:
+            await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard))
+        return States.ADMIN_STATE_ADD_DATE_CAPACITY
+
+    try:
+        # 1. Зберігаємо в SQLite БД
+        await museum_service.set_date_max_capacity(date_text, capacity, excursion_type="regular")
+
+        # 2. Зберігаємо в Google Sheets (Колонка A: дата, Колонка C: ліміт)
+        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
+        loop = asyncio.get_running_loop()
+        dates_data = await loop.run_in_executor(
+            None,
+            sheets.read_range,
+            "MuseumDates!A1:A100"
+        )
+        first_empty_row = 1
+        if dates_data:
+            first_empty_row = len(dates_data) + 1
+
+        cell_date = f"A{first_empty_row}"
+        cell_cap = f"C{first_empty_row}"
+
+        await loop.run_in_executor(
+            None,
+            sheets.update_cell,
+            "MuseumDates",
+            cell_date,
+            date_text
+        )
+        await loop.run_in_executor(
+            None,
+            sheets.update_cell,
+            "MuseumDates",
+            cell_cap,
+            str(capacity)
+        )
+        museum_service.invalidate_dates_cache()
+
+        logger.info(f"✅ Admin added new regular date: {date_text} with capacity {capacity} in {cell_date}/{cell_cap}")
+        success_msg = f"✅ Звичайну екскурсію на '<b>{date_text}</b>' з лімітом <b>{capacity} місць</b> успішно додано."
+        if query:
+            await query.message.reply_text(success_msg, parse_mode=ParseMode.HTML)
+        else:
+            await update.message.reply_text(success_msg, parse_mode=ParseMode.HTML)
+
+        context.user_data.pop('pending_museum_date', None)
+        context.user_data.pop('pending_museum_type', None)
+
+        await admin_menu_show(update, context)
+        return ConversationHandler.END
+
+    except Exception as e:
+        logger.error(f"Failed to save date capacity by admin: {e}")
+        err_msg = f"❌ Сталася системна помилка при додаванні дати: {e}"
+        if query:
+            await query.message.reply_text(err_msg)
+        else:
+            await update.message.reply_text(err_msg)
+        await admin_menu_show(update, context)
         return ConversationHandler.END
 
 
@@ -2597,9 +2714,10 @@ async def admin_del_date_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         keyboard = []
         for i, row in enumerate(dates_data):
             if row:  # Переконуємося, що рядок не пустий
-                date_str = row[0]
+                date_str = str(row[0]).strip()
                 cell_ref = f"A{i + 1}"  # A1, A2, ...
-                keyboard.append([InlineKeyboardButton(f"❌ {date_str}", callback_data=f"admin_del_confirm:{cell_ref}")])
+                cap = await museum_service.get_date_max_capacity(date_str, excursion_type="regular")
+                keyboard.append([InlineKeyboardButton(f"❌ {date_str} (ліміт: {cap})", callback_data=f"admin_del_confirm:{cell_ref}")])
 
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
         await query.edit_message_text("Оберіть дату, яку потрібно видалити:",
@@ -2619,30 +2737,30 @@ async def admin_del_date_confirm(update: Update, context: ContextTypes.DEFAULT_T
 
     cell_to_delete = query.data.split(":")[1] # "A5"
 
-    # --- ПОЧАТОК ВИПРАВЛЕННЯ ---
-
-    # 1. Створюємо клавіатуру "Назад" ЗАЗДАЛЕГІДЬ
     keyboard_back = [
         [InlineKeyboardButton("⬅️ Назад до адмін-панелі", callback_data="admin_museum_menu")]
     ]
     reply_markup_back = InlineKeyboardMarkup(keyboard_back)
 
-    # 2. (Покращення) Отримуємо текст кнопки, яку натиснули
-    #    (Ваш старий код [0][0] працював би, лише якщо натиснути першу кнопку)
     date_str = ""
     for row in query.message.reply_markup.inline_keyboard:
         if row[0].callback_data == query.data:
-            date_str = row[0].text.replace("❌ ", "")
+            btn_text = row[0].text.replace("❌ ", "").strip()
+            date_str = btn_text.split(" (")[0].strip()
             break
-    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     try:
         sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
         ok = sheets.clear_cell(sheet_name="MuseumDates", cell=cell_to_delete)
+        # Очищуємо також відповідну клітинку місткості в колонці C
+        row_num = cell_to_delete.replace("A", "")
+        sheets.clear_cell(sheet_name="MuseumDates", cell=f"C{row_num}")
+
         if ok:
+            if date_str:
+                await museum_service.remove_date_capacity(date_str, excursion_type="regular")
             museum_service.invalidate_dates_cache()
 
-        # --- ПОЧАТОК ВИПРАВЛЕННЯ 2 ---
         if ok:
             await query.edit_message_text(
                 text=f"✅ Дату '{date_str}' (комірка {cell_to_delete}) видалено.",
@@ -2656,18 +2774,13 @@ async def admin_del_date_confirm(update: Update, context: ContextTypes.DEFAULT_T
                 ),
                 reply_markup=reply_markup_back
             )
-        # --- КІНЕЦЬ ВИПРАВЛЕННЯ 2 ---
 
     except Exception as e:
         logger.error(f"Failed to delete date: {e}")
-
-        # --- ПОЧАТОК ВИПРАВЛЕННЯ 3 ---
-        # Додаємо reply_markup до повідомлення про помилку
         await query.edit_message_text(
             text=f"❌ Помилка при видаленні: {e}",
             reply_markup=reply_markup_back
         )
-        # --- КІНЕЦЬ ВИПРАВЛЕННЯ 3 ---
 
     return ConversationHandler.END
 
@@ -2861,37 +2974,24 @@ async def admin_add_holiday_date_save(update: Update, context: ContextTypes.DEFA
         if parsed_date < datetime.now():
             raise ValueError("Дата не може бути у минулому.")
 
-        # --- ВАЛІДАЦІЯ ПРОЙДЕНА ---
-        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
-        
-        loop = asyncio.get_running_loop()
-        dates_data = await loop.run_in_executor(
-            None,
-            sheets.read_range,
-            "MuseumDates!B1:B100"
-        )
-        
-        first_empty_row = 1
-        if dates_data:
-            first_empty_row = len(dates_data) + 1
-        
-        cell_ref = f"B{first_empty_row}"
-        
-        await loop.run_in_executor(
-            None,
-            sheets.update_cell,
-            "MuseumDates",
-            cell_ref,
-            date_text
-        )
-        
-        museum_service.invalidate_holiday_dates_cache()
+        # --- ВАЛІДАЦІЯ ДАТИ ПРОЙДЕНА -> ЗАПИТУЄМО МАКСИМАЛЬНУ КІЛЬКІСТЬ МІСЦЬ ---
+        context.user_data['pending_holiday_date'] = date_text
+        context.user_data['pending_holiday_type'] = 'holiday'
 
-        logger.info(f"✅ Admin added new holiday date: {date_text} in {cell_ref}")
-        await update.message.reply_text(f"✅ Святкову дату '<b>{date_text}</b>' успішно додано.", parse_mode=ParseMode.HTML)
-
-        await admin_menu_show(update, context)
-        return ConversationHandler.END
+        keyboard = [
+            [InlineKeyboardButton("40 місць (за замовчуванням)", callback_data="admin_holiday_cap:40")],
+            [InlineKeyboardButton("30 місць", callback_data="admin_holiday_cap:30"), InlineKeyboardButton("20 місць", callback_data="admin_holiday_cap:20")],
+            [InlineKeyboardButton("⬅️ Скасувати", callback_data="admin_museum_menu")]
+        ]
+        await update.message.reply_text(
+            f"🎉 Святкова дата: <b>{date_text}</b>\n\n"
+            f"Вкажіть максимальну кількість вільних місць на цю святкову дату:\n"
+            f"• Оберіть кнопку швидкого вибору або\n"
+            f"• Напишіть число від 1 до 200 вручну в чат.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode=ParseMode.HTML
+        )
+        return States.ADMIN_STATE_ADD_HOLIDAY_DATE_CAPACITY
 
     except ValueError as e:
         logger.warning(f"Admin holiday date validation failed: {e}")
@@ -2903,8 +3003,107 @@ async def admin_add_holiday_date_save(update: Update, context: ContextTypes.DEFA
         return States.ADMIN_STATE_ADD_HOLIDAY_DATE
 
     except Exception as e:
-        logger.error(f"Failed to add holiday date by admin: {e}")
-        await update.message.reply_text(f"❌ Сталася системна помилка при додаванні святкової дати: {e}")
+        logger.error(f"Failed to process holiday date by admin: {e}")
+        await update.message.reply_text(f"❌ Сталася системна помилка: {e}")
+        await admin_menu_show(update, context)
+        return ConversationHandler.END
+
+
+async def admin_add_holiday_date_capacity_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in MUSEUM_ADMIN_IDS:
+        return ConversationHandler.END
+
+    date_text = context.user_data.get('pending_holiday_date')
+    if not date_text:
+        await admin_menu_show(update, context)
+        return ConversationHandler.END
+
+    capacity = None
+    query = update.callback_query
+    if query:
+        await query.answer()
+        data = query.data
+        if data.startswith("admin_holiday_cap:"):
+            try:
+                capacity = int(data.split(":")[1])
+            except ValueError:
+                capacity = None
+    elif update.message and update.message.text:
+        text = update.message.text.strip()
+        if text.isdigit():
+            val = int(text)
+            if 1 <= val <= 200:
+                capacity = val
+
+    if capacity is None:
+        keyboard = [
+            [InlineKeyboardButton("40 місць (за замовчуванням)", callback_data="admin_holiday_cap:40")],
+            [InlineKeyboardButton("30 місць", callback_data="admin_holiday_cap:30"), InlineKeyboardButton("20 місць", callback_data="admin_holiday_cap:20")],
+            [InlineKeyboardButton("⬅️ Скасувати", callback_data="admin_museum_menu")]
+        ]
+        msg_text = "❌ Будь ласка, введіть коректне число від 1 до 200 або оберіть кнопку нижче:"
+        if query:
+            await query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard))
+        return States.ADMIN_STATE_ADD_HOLIDAY_DATE_CAPACITY
+
+    try:
+        # 1. Зберігаємо в SQLite БД
+        await museum_service.set_date_max_capacity(date_text, capacity, excursion_type="holiday")
+
+        # 2. Зберігаємо в Google Sheets (Колонка B: дата, Колонка D: ліміт)
+        sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
+        loop = asyncio.get_running_loop()
+        dates_data = await loop.run_in_executor(
+            None,
+            sheets.read_range,
+            "MuseumDates!B1:B100"
+        )
+        first_empty_row = 1
+        if dates_data:
+            first_empty_row = len(dates_data) + 1
+
+        cell_date = f"B{first_empty_row}"
+        cell_cap = f"D{first_empty_row}"
+
+        await loop.run_in_executor(
+            None,
+            sheets.update_cell,
+            "MuseumDates",
+            cell_date,
+            date_text
+        )
+        await loop.run_in_executor(
+            None,
+            sheets.update_cell,
+            "MuseumDates",
+            cell_cap,
+            str(capacity)
+        )
+        museum_service.invalidate_holiday_dates_cache()
+
+        logger.info(f"✅ Admin added new holiday date: {date_text} with capacity {capacity} in {cell_date}/{cell_cap}")
+        success_msg = f"✅ Святкову екскурсію на '<b>{date_text}</b>' з лімітом <b>{capacity} місць</b> успішно додано."
+        if query:
+            await query.message.reply_text(success_msg, parse_mode=ParseMode.HTML)
+        else:
+            await update.message.reply_text(success_msg, parse_mode=ParseMode.HTML)
+
+        context.user_data.pop('pending_holiday_date', None)
+        context.user_data.pop('pending_holiday_type', None)
+
+        await admin_menu_show(update, context)
+        return ConversationHandler.END
+
+    except Exception as e:
+        logger.error(f"Failed to save holiday date capacity by admin: {e}")
+        err_msg = f"❌ Сталася системна помилка при додаванні святкової дати: {e}"
+        if query:
+            await query.message.reply_text(err_msg)
+        else:
+            await update.message.reply_text(err_msg)
         await admin_menu_show(update, context)
         return ConversationHandler.END
 
@@ -2932,9 +3131,10 @@ async def admin_del_holiday_date_menu(update: Update, context: ContextTypes.DEFA
         for i, row in enumerate(dates_data):
             if i == 0: continue
             if row:
-                date_str = row[0]
+                date_str = str(row[0]).strip()
                 cell_ref = f"B{i + 1}"
-                keyboard.append([InlineKeyboardButton(f"❌ {date_str}", callback_data=f"admin_del_holiday_confirm:{cell_ref}")])
+                cap = await museum_service.get_date_max_capacity(date_str, excursion_type="holiday")
+                keyboard.append([InlineKeyboardButton(f"❌ {date_str} (ліміт: {cap})", callback_data=f"admin_del_holiday_confirm:{cell_ref}")])
 
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin_museum_menu")])
         await query.edit_message_text("Оберіть святкову дату, яку потрібно видалити:",
@@ -2962,13 +3162,20 @@ async def admin_del_holiday_date_confirm(update: Update, context: ContextTypes.D
     date_str = ""
     for row in query.message.reply_markup.inline_keyboard:
         if row[0].callback_data == query.data:
-            date_str = row[0].text.replace("❌ ", "")
+            btn_text = row[0].text.replace("❌ ", "").strip()
+            date_str = btn_text.split(" (")[0].strip()
             break
 
     try:
         sheets = GoogleSheetsClient(GOOGLE_SHEETS_ID)
         ok = sheets.clear_cell(sheet_name="MuseumDates", cell=cell_to_delete)
+        # Очищуємо також відповідну клітинку місткості в колонці D
+        row_num = cell_to_delete.replace("B", "")
+        sheets.clear_cell(sheet_name="MuseumDates", cell=f"D{row_num}")
+
         if ok:
+            if date_str:
+                await museum_service.remove_date_capacity(date_str, excursion_type="holiday")
             museum_service.invalidate_holiday_dates_cache()
 
         if ok:

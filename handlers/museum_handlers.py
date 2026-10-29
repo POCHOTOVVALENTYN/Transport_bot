@@ -498,7 +498,8 @@ async def museum_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif field == "people":
         keyboard = await get_cancel_keyboard("museum_menu")
         if excursion_type == 'holiday':
-            available = context.user_data.get('holiday_available_places', MuseumLimits.HOLIDAY_MAX_TOTAL)
+            max_cap = context.user_data.get('holiday_max_total') or await museum_service.get_date_max_capacity(context.user_data.get('museum_date', ''), excursion_type='holiday')
+            available = context.user_data.get('holiday_available_places', max_cap)
             prompt = f"Оберіть або вкажіть нову кількість осіб (максимум {MuseumLimits.HOLIDAY_MAX_PER_BOOKING} людини, доступно місць: {available}):"
             kb_people = InlineKeyboardMarkup([
                 [InlineKeyboardButton("1 особа 👤", callback_data="museum_count:1"), InlineKeyboardButton("2 особи 👥", callback_data="museum_count:2")],
@@ -506,7 +507,8 @@ async def museum_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
             await query.edit_message_text(prompt, reply_markup=kb_people)
         elif excursion_type == 'regular':
-            available = context.user_data.get('regular_available_places', MuseumLimits.REGULAR_MAX_TOTAL)
+            max_cap = context.user_data.get('regular_max_total') or await museum_service.get_date_max_capacity(context.user_data.get('museum_date', ''), excursion_type='regular')
+            available = context.user_data.get('regular_available_places', max_cap)
             max_choice = min(MuseumLimits.REGULAR_MAX_PER_BOOKING, available) if available > 0 else MuseumLimits.REGULAR_MAX_PER_BOOKING
             prompt = f"Вкажіть нову кількість осіб цифрою (максимум {max_choice}, доступно місць: {available}):"
             await query.edit_message_text(prompt, reply_markup=keyboard)
@@ -552,18 +554,20 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     excursion_type = context.user_data.get('museum_type', 'regular')
     if excursion_type == 'holiday':
+        max_total = await museum_service.get_date_max_capacity(selected_date, excursion_type='holiday')
         count_exist = await museum_service.get_holiday_bookings_count(selected_date)
-        if count_exist >= MuseumLimits.HOLIDAY_MAX_TOTAL:
+        if count_exist >= max_total:
             keyboard_back = await get_back_keyboard("museum_menu")
             await query.edit_message_text(
-                text=f"😔 Вільні місця на цю дату закінчилися (досягнуто ліміт {MuseumLimits.HOLIDAY_MAX_TOTAL} осіб). КП 'ОМЕТ' приносить свої вибачення, зачекайте на доступну іншу святкову екскурсію. 🏛️",
+                text=f"😔 Вільні місця на цю дату закінчилися (досягнуто ліміт {max_total} осіб). КП 'ОМЕТ' приносить свої вибачення, зачекайте на доступну іншу святкову екскурсію. 🏛️",
                 reply_markup=keyboard_back
             )
             context.user_data.clear()
             return ConversationHandler.END
 
-        available = MuseumLimits.HOLIDAY_MAX_TOTAL - count_exist
+        available = max_total - count_exist
         context.user_data['holiday_available_places'] = available
+        context.user_data['holiday_max_total'] = max_total
 
         if available == 1:
             context.user_data['museum_people_count'] = 1
@@ -599,18 +603,20 @@ async def museum_get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return States.MUSEUM_PEOPLE_COUNT
     elif excursion_type == 'regular':
+        max_total = await museum_service.get_date_max_capacity(selected_date, excursion_type='regular')
         count_exist = await museum_service.get_bookings_count(selected_date)
-        if count_exist >= MuseumLimits.REGULAR_MAX_TOTAL:
+        if count_exist >= max_total:
             keyboard_back = await get_back_keyboard("museum_menu")
             await query.edit_message_text(
-                text=f"😔 Вільні місця на цю дату закінчилися (досягнуто ліміт {MuseumLimits.REGULAR_MAX_TOTAL} осіб). КП 'ОМЕТ' приносить свої вибачення, оберіть, будь ласка, іншу доступну дату. 🏛️",
+                text=f"😔 Вільні місця на цю дату закінчилися (досягнуто ліміт {max_total} осіб). КП 'ОМЕТ' приносить свої вибачення, оберіть, будь ласка, іншу доступну дату. 🏛️",
                 reply_markup=keyboard_back
             )
             context.user_data.clear()
             return ConversationHandler.END
 
-        available = MuseumLimits.REGULAR_MAX_TOTAL - count_exist
+        available = max_total - count_exist
         context.user_data['regular_available_places'] = available
+        context.user_data['regular_max_total'] = max_total
         max_choice = min(MuseumLimits.REGULAR_MAX_PER_BOOKING, available)
 
         if max_choice == 1:
@@ -696,7 +702,8 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
             )
             return States.MUSEUM_PEOPLE_COUNT
         
-        available = context.user_data.get('holiday_available_places', MuseumLimits.HOLIDAY_MAX_TOTAL)
+        max_cap = context.user_data.get('holiday_max_total') or await museum_service.get_date_max_capacity(context.user_data.get('museum_date', ''), 'holiday')
+        available = context.user_data.get('holiday_available_places', max_cap)
         if count > available:
             context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
                 context,
@@ -717,7 +724,8 @@ async def museum_get_people_count(update: Update, context: ContextTypes.DEFAULT_
             )
             return States.MUSEUM_PEOPLE_COUNT
 
-        available = context.user_data.get('regular_available_places', MuseumLimits.REGULAR_MAX_TOTAL)
+        max_cap = context.user_data.get('regular_max_total') or await museum_service.get_date_max_capacity(context.user_data.get('museum_date', ''), 'regular')
+        available = context.user_data.get('regular_available_places', max_cap)
         if count > available:
             context.user_data['dialog_message_id'] = await _edit_museum_dialog_message(
                 context,
@@ -958,8 +966,9 @@ async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
     excursion_type = context.user_data.get('museum_type', 'regular')
 
     if excursion_type == 'holiday':
+        max_total = await museum_service.get_date_max_capacity(date, excursion_type='holiday')
         count_exist = await museum_service.get_holiday_bookings_count(date)
-        if count_exist + count > MuseumLimits.HOLIDAY_MAX_TOTAL:
+        if count_exist + count > max_total:
             keyboard_final = await get_back_keyboard("museum_menu")
             await _edit_museum_dialog_message(
                 context,
@@ -988,8 +997,9 @@ async def museum_confirm_save(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         success = await museum_service.create_holiday_booking(date, count, name, phone, participants_json)
     elif excursion_type == 'regular':
+        max_total = await museum_service.get_date_max_capacity(date, excursion_type='regular')
         count_exist = await museum_service.get_bookings_count(date)
-        if count_exist + count > MuseumLimits.REGULAR_MAX_TOTAL:
+        if count_exist + count > max_total:
             keyboard_final = await get_back_keyboard("museum_menu")
             await _edit_museum_dialog_message(
                 context,

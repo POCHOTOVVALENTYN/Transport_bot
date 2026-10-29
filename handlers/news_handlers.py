@@ -1,11 +1,29 @@
-from typing import Optional
+from typing import Optional, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
+from config.messages import NEWS_BROADCAST_ALERT
 from services.news_service import NewsService, format_kyiv_time
 from utils.logger import logger
 
 news_service = NewsService()
+
+
+def build_news_broadcast_alert(news_id: int) -> dict[str, Any]:
+    """
+    Формує текст та клавіатуру стандартного сповіщення для розсилки в чат.
+    RORO: приймає news_id, повертає dict з 'text' та 'reply_markup'.
+    """
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📖 Читати новину", callback_data=f"news_client_view:{news_id}:0")],
+        [InlineKeyboardButton("📢 Всі оперативні новини", callback_data="news_client_list:0")],
+        [InlineKeyboardButton("🗑 Зрозуміло (Приховати)", callback_data="delete_message")]
+    ])
+    return {
+        "text": NEWS_BROADCAST_ALERT,
+        "reply_markup": keyboard
+    }
+
 
 
 async def clean_media_messages(chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -189,6 +207,26 @@ async def news_client_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             sent_media = await context.bot.send_video(
                 chat_id=chat_id,
                 video=news.media_file_id,
+                caption=caption,
+                reply_markup=back_markup,
+                parse_mode=ParseMode.HTML
+            )
+            context.user_data["media_message_ids"] = [sent_media.message_id]
+            return
+        elif news.media_type == "animation":
+            sent_media = await context.bot.send_animation(
+                chat_id=chat_id,
+                animation=news.media_file_id,
+                caption=caption,
+                reply_markup=back_markup,
+                parse_mode=ParseMode.HTML
+            )
+            context.user_data["media_message_ids"] = [sent_media.message_id]
+            return
+        elif news.media_type == "document":
+            sent_media = await context.bot.send_document(
+                chat_id=chat_id,
+                document=news.media_file_id,
                 caption=caption,
                 reply_markup=back_markup,
                 parse_mode=ParseMode.HTML

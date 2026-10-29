@@ -85,6 +85,13 @@ EASYWAY_PLACES_CACHE_TTL = int(os.getenv("EASYWAY_PLACES_CACHE_TTL", "120"))
 EASYWAY_ROUTES_CACHE_TTL = int(os.getenv("EASYWAY_ROUTES_CACHE_TTL", "1800"))
 EASYWAY_ROUTE_GPS_CACHE_TTL = int(os.getenv("EASYWAY_ROUTE_GPS_CACHE_TTL", "15"))
 
+# ===============================================
+# 7. WIALON REMOTE API НАЛАШТУВАННЯ
+# ===============================================
+WIALON_HOST = os.getenv("WIALON_HOST", "https://hst-api.wialon.eu/wialon/ajax.html")
+WIALON_TOKEN = os.getenv("WIALON_TOKEN", "9777076e141aeb12ca0154759bea4a7e1F6F8A7E4C3A54A318391BCDA4FE2F0342132072")
+WIALON_TIMEOUT_SEC = int(os.getenv("WIALON_TIMEOUT_SEC", "10"))
+
 # Синхронізація звернень
 FEEDBACK_SYNC_BATCH_SIZE = int(os.getenv("FEEDBACK_SYNC_BATCH_SIZE", "100"))
 FEEDBACK_SYNC_MAX_ROWS = int(os.getenv("FEEDBACK_SYNC_MAX_ROWS", "500"))

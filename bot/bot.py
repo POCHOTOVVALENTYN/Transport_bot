@@ -69,6 +69,7 @@ from handlers.suggestion_handlers import (
 
 from handlers.admin_handlers import (
     admin_menu, admin_add_date_start, admin_add_date_save,
+    admin_add_date_capacity_save,
     admin_del_date_menu, admin_del_date_confirm, admin_menu_show,
     admin_show_bookings, admin_sync_db,
     admin_broadcast_start, admin_broadcast_preview,       # Нова функція прев'ю
@@ -76,6 +77,7 @@ from handlers.admin_handlers import (
     admin_broadcast_send_confirm,
     show_general_admin_menu, admin_museum_menu_show, admin_show_stats, # Нова функція зі списком
     admin_add_holiday_date_start, admin_add_holiday_date_save,
+    admin_add_holiday_date_capacity_save,
     admin_del_holiday_date_menu, admin_del_holiday_date_confirm,
     admin_show_holiday_bookings, admin_export_users,
     admin_export_doc_select, admin_export_doc_generate,
@@ -196,12 +198,22 @@ class TransportBot:
                     # Кнопка Назад
                     CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
                 ],
+                States.ADMIN_STATE_ADD_DATE_CAPACITY: [
+                    CallbackQueryHandler(admin_add_date_capacity_save, pattern="^admin_date_cap:"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_date_capacity_save),
+                    CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
+                ],
                 States.ADMIN_STATE_DEL_DATE_CONFIRM: [
                     CallbackQueryHandler(admin_del_date_confirm, pattern="^admin_del_confirm:"),
                     CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
                 ],
                 States.ADMIN_STATE_ADD_HOLIDAY_DATE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_holiday_date_save),
+                    CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
+                ],
+                States.ADMIN_STATE_ADD_HOLIDAY_DATE_CAPACITY: [
+                    CallbackQueryHandler(admin_add_holiday_date_capacity_save, pattern="^admin_holiday_cap:"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_holiday_date_capacity_save),
                     CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
                 ],
                 States.ADMIN_STATE_DEL_HOLIDAY_DATE_CONFIRM: [

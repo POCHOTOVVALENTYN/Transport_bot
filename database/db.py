@@ -85,6 +85,7 @@ async def init_db():
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_lost_items_created_at ON lost_items(created_at)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vacancies_category ON vacancies(category)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vacancies_is_active ON vacancies(is_active)"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_museum_date_capacities_lookup ON museum_date_capacities(excursion_type, excursion_date, is_active)"))
 
                 # Початкове наповнення знайдених документів, якщо таблиця порожня
                 try:
@@ -191,6 +192,17 @@ class MuseumHolidayBooking(Base):
     user_phone = Column(String, nullable=False)
     participants_details = Column(String, nullable=True)
     status = Column(String, default="new")
+
+
+class MuseumDateCapacity(Base):
+    __tablename__ = "museum_date_capacities"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=func.now())
+    excursion_type = Column(String, nullable=False)  # "regular" або "holiday"
+    excursion_date = Column(String, nullable=False)  # "ДД.ММ.РРРР ГГ:ХХ"
+    max_capacity = Column(Integer, nullable=False)   # Максимальна кількість місць
+    is_active = Column(Boolean, default=True)        # True = активна дата
 
 
 
@@ -302,6 +314,8 @@ Index("ix_lost_items_category", LostItem.category)
 Index("ix_lost_items_created_at", LostItem.created_at)
 Index("ix_vacancies_category", Vacancy.category)
 Index("ix_vacancies_is_active", Vacancy.is_active)
+Index("ix_museum_date_capacities_type_date", MuseumDateCapacity.excursion_type, MuseumDateCapacity.excursion_date)
+Index("ix_museum_date_capacities_is_active", MuseumDateCapacity.is_active)
 
 
 # ================= ГОЛОВНИЙ КЛАС DATABASE =================

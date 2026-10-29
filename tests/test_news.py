@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from database.db import init_db
 from services.news_service import NewsService, format_kyiv_time
 from handlers.command_handlers import get_main_menu_keyboard
+from handlers.news_handlers import build_news_broadcast_alert
+from config.messages import NEWS_BROADCAST_ALERT
 
 news_service = NewsService()
 
@@ -105,8 +107,37 @@ async def run_news_tests() -> None:
     assert "Оперативні новини" in news_btn.text
     print(f"   ✅ Кнопка знайдена: '{news_btn.text}' (callback_data='{news_btn.callback_data}')")
 
-    print("\n🎉 УСІ 8 ТЕСТІВ УСПІШНО ПРОЙДЕНО БЕЗ ПОМИЛОК!")
+    print("🧪 [TEST 9] Перевірка формування стандартного сповіщення (build_news_broadcast_alert)")
+    test_news_id = 42
+    alert_payload = build_news_broadcast_alert(news_id=test_news_id)
+    assert "text" in alert_payload
+    assert "reply_markup" in alert_payload
+    assert alert_payload["text"] == NEWS_BROADCAST_ALERT
+    assert "ОПЕРАТИВНА ІНФОРМАЦІЯ | КП «ОМЕТ»" in alert_payload["text"]
+
+    alert_buttons = [btn for row in alert_payload["reply_markup"].inline_keyboard for btn in row]
+    assert len(alert_buttons) == 3, "Сповіщення має містити рівно 3 кнопки (читати, всі новини, приховати)"
+
+    read_btn = alert_buttons[0]
+    assert read_btn.text == "📖 Читати новину"
+    assert read_btn.callback_data == f"news_client_view:{test_news_id}:0"
+
+    all_news_btn = alert_buttons[1]
+    assert all_news_btn.text == "📢 Всі оперативні новини"
+    assert all_news_btn.callback_data == "news_client_list:0"
+
+    dismiss_btn = alert_buttons[2]
+    assert dismiss_btn.text == "🗑 Зрозуміло (Приховати)"
+    assert dismiss_btn.callback_data == "delete_message"
+    print("   ✅ Текст та клавіатура стандартного сповіщення повністю відповідають специфікації")
+
+    print("\n🎉 УСІ 9 ТЕСТІВ УСПІШНО ПРОЙДЕНО БЕЗ ПОМИЛОК!")
+
+
+def test_news_suite():
+    asyncio.run(run_news_tests())
 
 
 if __name__ == "__main__":
     asyncio.run(run_news_tests())
+

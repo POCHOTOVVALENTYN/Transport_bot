@@ -1,6 +1,7 @@
 
-from sqlalchemy import select
-from database.db import AsyncSessionLocal, MuseumBooking, MuseumHolidayBooking
+from sqlalchemy import select, update
+from database.db import AsyncSessionLocal, MuseumBooking, MuseumHolidayBooking, MuseumDateCapacity
+from config.constants import MuseumLimits
 from integrations.google_sheets.client import GoogleSheetsClient
 
 from utils.logger import logger
@@ -440,6 +441,99 @@ class MuseumService:
                 return result.scalar_one_or_none() is not None
         except Exception as e:
             logger.error(f"❌ Error checking existing booking: {e}")
+            return False
+
+    async def get_date_max_capacity(self, excursion_date: str, excursion_type: str = "regular") -> int:
+        """
+        Повертає максимальну кількість місць на обрану дату.
+        Якщо для дати налаштовано індивідуальний ліміт у БД — повертає його.
+        Якщо ні — повертає стандартний ліміт (REGULAR_MAX_TOTAL / HOLIDAY_MAX_TOTAL).
+        """
+        default_capacity = (
+            MuseumLimits.HOLIDAY_MAX_TOTAL
+            if excursion_type == "holiday"
+            else MuseumLimits.REGULAR_MAX_TOTAL
+        )
+        if not excursion_date:
+            return default_capacity
+
+        cleaned_date = str(excursion_date).strip()
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(MuseumDateCapacity.max_capacity)
+                    .where(
+                        MuseumDateCapacity.excursion_date == cleaned_date,
+                        MuseumDateCapacity.excursion_type == excursion_type,
+                        MuseumDateCapacity.is_active == True
+                    )
+                    .order_by(MuseumDateCapacity.id.desc())
+                    .limit(1)
+                )
+                capacity = result.scalar_one_or_none()
+                if capacity is not None and capacity > 0:
+                    return int(capacity)
+        except Exception as e:
+            logger.error(f"❌ Error getting date max capacity for '{cleaned_date}' ({excursion_type}): {e}")
+
+        return default_capacity
+
+    async def set_date_max_capacity(self, excursion_date: str, capacity: int, excursion_type: str = "regular") -> bool:
+        """
+        Зберігає максимальну кількість місць на дату в локальну SQLite базу даних.
+        """
+        if not excursion_date or capacity <= 0:
+            return False
+
+        cleaned_date = str(excursion_date).strip()
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(MuseumDateCapacity)
+                    .where(
+                        MuseumDateCapacity.excursion_date == cleaned_date,
+                        MuseumDateCapacity.excursion_type == excursion_type
+                    )
+                    .values(is_active=False)
+                )
+
+                new_capacity = MuseumDateCapacity(
+                    excursion_type=excursion_type,
+                    excursion_date=cleaned_date,
+                    max_capacity=int(capacity),
+                    is_active=True
+                )
+                session.add(new_capacity)
+                await session.commit()
+                logger.info(f"✅ Saved date max capacity: {cleaned_date} ({excursion_type}) = {capacity} seats")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Error setting date max capacity for '{cleaned_date}': {e}")
+            return False
+
+    async def remove_date_capacity(self, excursion_date: str, excursion_type: str = "regular") -> bool:
+        """
+        Деактивує ліміт місць для видаленої дати.
+        """
+        if not excursion_date:
+            return False
+
+        cleaned_date = str(excursion_date).strip()
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(MuseumDateCapacity)
+                    .where(
+                        MuseumDateCapacity.excursion_date == cleaned_date,
+                        MuseumDateCapacity.excursion_type == excursion_type
+                    )
+                    .values(is_active=False)
+                )
+                await session.commit()
+                logger.info(f"✅ Removed date capacity for {cleaned_date} ({excursion_type})")
+                return True
+        except Exception as e:
+            logger.error(f"❌ Error removing date capacity for '{cleaned_date}': {e}")
             return False
 
     def _normalize_phone(self, phone: str) -> str:
