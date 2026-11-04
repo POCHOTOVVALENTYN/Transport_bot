@@ -3,6 +3,8 @@
 Provides authenticated access to live unit positions, vehicle telemetry,
 and zero-run / turnaround loop audit data using the RORO pattern.
 """
+from __future__ import annotations
+
 import asyncio
 import json
 import logging

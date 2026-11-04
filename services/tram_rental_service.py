@@ -7,6 +7,8 @@ detailed stop-by-stop itinerary with role annotations across all 630 platforms
 and 54 turnaround loops, and official PDF route sheet generation.
 Follows the RORO pattern with Pydantic v2 models.
 """
+from __future__ import annotations
+
 from collections import defaultdict
 from datetime import datetime
 import heapq
