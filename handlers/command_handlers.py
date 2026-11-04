@@ -3,6 +3,7 @@ from telegram.ext import ContextTypes
 from config.messages import MESSAGES
 from utils.logger import logger
 from config.settings import MUSEUM_ADMIN_IDS, GENERAL_ADMIN_IDS
+from handlers.rental_staff_handlers import is_rental_access_allowed
 from services.user_service import UserService
 
 # Ініціалізація
@@ -24,6 +25,12 @@ async def get_main_menu_keyboard(user_id: int):
         [InlineKeyboardButton("🏛️ Музей КП 'ОМЕТ'", callback_data="museum_menu")],
         [InlineKeyboardButton("🏢 Про підприємство", callback_data="company_menu")]
     ]
+    # 0. Розділ Оренди трамваїв і тролейбусів — видимий ЛИШЕ Валентину (830196453) на етапі закритого запуску
+    if is_rental_access_allowed(user_id):
+        keyboard.append(
+            [InlineKeyboardButton("🚋 Оренда та екскурсії (Wialon / Договори)", callback_data="rental_hub")]
+        )
+
     # 1. Якщо це Максим -> Додаємо кнопку Музею
     if user_id in MUSEUM_ADMIN_IDS:
         keyboard.append([InlineKeyboardButton("🏛️ Адмін-панель (Музей)", callback_data="admin_museum_menu")])

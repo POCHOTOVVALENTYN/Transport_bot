@@ -6,6 +6,7 @@ from handlers.common import get_back_keyboard
 from utils.logger import logger
 from telegram.constants import ParseMode
 from config.settings import RENTAL_SERVICE_IMAGE
+from handlers.rental_staff_handlers import is_rental_access_allowed
 from services.vacancy_service import VacancyService, encode_vacancy_url
 
 # Вакансії тепер керуються з адмін-панелі й зберігаються в таблиці `vacancies` (database/db.py).
@@ -95,11 +96,17 @@ async def show_services_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = update.effective_chat.id
     caption_text = MESSAGES.get("company_services")
 
-    keyboard = [
+    keyboard = []
+    if update.effective_user and is_rental_access_allowed(update.effective_user.id):
+        keyboard.extend([
+            [InlineKeyboardButton("🚋 Інтерактивний калькулятор оренди (Wialon)", callback_data="rental_hub")],
+            [InlineKeyboardButton("📂 Діючі договори та замовлення", callback_data="rental_my_contracts")],
+        ])
+    keyboard.extend([
         [InlineKeyboardButton("🔗 Детальніше на сайті", url="https://oget.od.ua/orenda-transportu/")],
         [InlineKeyboardButton("⬅️ Назад", callback_data="company_menu")],
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")]
-    ]
+    ])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     # 1. АНТИ-БЛИМАННЯ: Редагуємо текст на "Завантажую..." замість видалення

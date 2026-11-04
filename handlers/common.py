@@ -83,6 +83,8 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
     user_msg = update.message
     if not user_msg:
         return
+    if update.effective_chat and update.effective_chat.type != "private":
+        return
 
     # 1. Миттєво видаляємо повідомлення користувача
     try:

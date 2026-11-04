@@ -101,13 +101,83 @@ BROADCAST_BATCH_SIZE = int(os.getenv("BROADCAST_BATCH_SIZE", "50"))
 BROADCAST_PAUSE_SEC = float(os.getenv("BROADCAST_PAUSE_SEC", "0.2"))
 
 # ===============================================
-# 7. SMTP НАЛАШТУВАННЯ ДЛЯ EMAIL
+# 8. SMTP НАЛАШТУВАННЯ ДЛЯ EMAIL
 # ===============================================
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.ukr.net")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_TARGET_EMAIL = os.getenv("SMTP_TARGET_EMAIL", "omet@omr.gov.ua")
+SMTP_LEGAL_EMAIL = os.getenv("SMTP_LEGAL_EMAIL", SMTP_TARGET_EMAIL)
+
+# ===============================================
+# 9. МОДУЛЬ ОРЕНДИ ТРАМВАЇВ ТА ТРОЛЕЙБУСІВ
+# ===============================================
+VALENTIN_ADMIN_ID = 830196453
+# Поки RENTAL_PUBLIC_ENABLED = False, розділ оренди бачить виключно Валентин (830196453)
+RENTAL_PUBLIC_ENABLED = os.getenv("RENTAL_PUBLIC_ENABLED", "False") == "True"
+RENTAL_ALLOWED_USER_IDS = [
+    VALENTIN_ADMIN_ID,
+]
+
+# ID спільного службового чату 6 підрозділів КП (якщо 0 — картки дублюються Валентину в особисті для тестування)
+RENTAL_STAFF_CHAT_ID = int(os.getenv("RENTAL_STAFF_CHAT_ID", "-1004341305179"))
+
+# Рольова матриця підрозділів КП у службовому чаті
+RENTAL_STAFF_ROLES = {
+    "traffic_service": [VALENTIN_ADMIN_ID],
+    "legal_dept": [VALENTIN_ADMIN_ID],
+    "vuptap_dept": [VALENTIN_ADMIN_ID],
+    "accounting_dept": [VALENTIN_ADMIN_ID],
+    "depot_tram": [VALENTIN_ADMIN_ID],
+    "depot_trolley": [VALENTIN_ADMIN_ID],
+}
+
+# Банківські та юридичні реквізити КП «ОМЕТ» для генерації Договору та Інвойсу IBAN (QR НБУ)
+RENTAL_RECIPIENT_NAME = os.getenv("RENTAL_RECIPIENT_NAME", "КП «Одесміськелектротранс»")
+RENTAL_IBAN_COMPANY_NAME = RENTAL_RECIPIENT_NAME
+RENTAL_EDRPOU = os.getenv("RENTAL_EDRPOU", "03328497")
+RENTAL_IBAN_EDRPOU = RENTAL_EDRPOU
+RENTAL_IBAN_ACCOUNT = os.getenv("RENTAL_IBAN_ACCOUNT", "UA903281680000000026000122581")
+RENTAL_IBAN_ACCOUNT_SECONDARY = os.getenv("RENTAL_IBAN_ACCOUNT_SECONDARY", "UA533204780000026009924421337")
+RENTAL_BANK_NAME = os.getenv("RENTAL_BANK_NAME", "ПАТ «МТБ БАНК»")
+RENTAL_BANK_MFO = os.getenv("RENTAL_BANK_MFO", "328168")
+RENTAL_BANK_NAME_SECONDARY = os.getenv("RENTAL_BANK_NAME_SECONDARY", "АБ «УКРГАЗБАНК»")
+RENTAL_BANK_MFO_SECONDARY = os.getenv("RENTAL_BANK_MFO_SECONDARY", "320478")
+RENTAL_VAT_IPN = os.getenv("RENTAL_VAT_IPN", "033284915016")
+RENTAL_VAT_CERTIFICATE = os.getenv("RENTAL_VAT_CERTIFICATE", "100266021")
+RENTAL_COMPANY_PHONE = os.getenv("RENTAL_COMPANY_PHONE", "048 717 54 00")
+RENTAL_IBAN_BANK_NAME = RENTAL_BANK_NAME
+RENTAL_DIRECTOR_FULL_NAME = os.getenv("RENTAL_DIRECTOR_FULL_NAME", "Литовчук Микола Володимирович")
+RENTAL_DIRECTOR_NAME = os.getenv("RENTAL_DIRECTOR_NAME", "Микола ЛИТОВЧУК")
+RENTAL_IBAN_DIRECTOR_TITLE = "Директор КП «Одесміськелектротранс»"
+RENTAL_IBAN_DIRECTOR_NAME = os.getenv("RENTAL_IBAN_DIRECTOR_NAME", "Микола ЛИТОВЧУК")
+RENTAL_OFFICE_ADDRESS = os.getenv("RENTAL_OFFICE_ADDRESS", "вул. Водопровідна, 1, м. Одеса, 65007")
+RENTAL_IBAN_COMPANY_ADDRESS = RENTAL_OFFICE_ADDRESS
+
+# Офіційна затверджена тарифікація КП «ОМЕТ» (Діє з 01.01.2026 р.)
+# Вартість 1 години роботи трамвайного вагона РЕТРО з ПДВ 20%: 4 337,94 грн (без ПДВ 3 614,95 грн, ПДВ 722,99 грн)
+RENTAL_TARIFF_RETRO_HOUR_UAH = float(os.getenv("RENTAL_TARIFF_RETRO_HOUR_UAH", "4337.94"))
+RENTAL_MIN_ORDER_MINUTES = int(os.getenv("RENTAL_MIN_ORDER_MINUTES", "60"))
+
+# Допоміжні / зворотні тарифи для сумісності
+RENTAL_TARIFF_RETRO_KM = float(os.getenv("RENTAL_TARIFF_RETRO_KM", "180.0"))
+RENTAL_TARIFF_STANDARD_KM = float(os.getenv("RENTAL_TARIFF_STANDARD_KM", "145.0"))
+RENTAL_TARIFF_TROLLEY_KM = float(os.getenv("RENTAL_TARIFF_TROLLEY_KM", "135.0"))
+RENTAL_TARIFF_WAIT_MIN = float(os.getenv("RENTAL_TARIFF_WAIT_MIN", "15.0"))
+
+RENTAL_TARIFF_RETRO_TRAM_KM = RENTAL_TARIFF_RETRO_KM
+RENTAL_TARIFF_STANDARD_TRAM_KM = RENTAL_TARIFF_STANDARD_KM
+RENTAL_TARIFF_TROLLEYBUS_KM = RENTAL_TARIFF_TROLLEY_KM
+RENTAL_TARIFF_WAIT_MINUTE = RENTAL_TARIFF_WAIT_MIN
+
+RENTAL_EXTRA_DECORATION_UAH = float(os.getenv("RENTAL_EXTRA_DECORATION_UAH", "800.0"))
+RENTAL_EXTRA_MUSIC_UAH = float(os.getenv("RENTAL_EXTRA_MUSIC_UAH", "500.0"))
+RENTAL_EXTRA_GUIDE_UAH = float(os.getenv("RENTAL_EXTRA_GUIDE_UAH", "600.0"))
+RENTAL_PAPER_TIMEOUT_HOURS = int(os.getenv("RENTAL_PAPER_TIMEOUT_HOURS", "36"))
+RENTAL_PAPER_LOCK_HOURS = RENTAL_PAPER_TIMEOUT_HOURS
+RENTAL_MIN_DAYS_KEP = int(os.getenv("RENTAL_MIN_DAYS_KEP", "3"))
+RENTAL_MIN_DAYS_PAPER = int(os.getenv("RENTAL_MIN_DAYS_PAPER", "4"))
 
 # Іконки для джерел часу
 TIME_SOURCE_ICONS = {

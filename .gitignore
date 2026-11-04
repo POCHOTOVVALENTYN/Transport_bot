@@ -5,7 +5,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 venv/
+.venv/
 env/
+_to_delete/
+documents/route_sheets/*.pdf
 .idea/
 .vscode/
 *.log

@@ -104,6 +104,52 @@ from handlers.admin_handlers import (
 )
 from handlers.news_handlers import news_client_list, news_client_view
 from handlers.lost_items_handlers import show_lost_items_menu, show_lost_items_category
+from handlers.rental_client_handlers import (
+    handle_client_pick_order_slot,
+    handle_rental_redownload_pdfs,
+    rental_finalize_order,
+    rental_handle_customer_type_selected,
+    rental_handle_date_button,
+    rental_handle_date_text,
+    rental_handle_dropoff_loop_selected,
+    rental_handle_loop_pagination,
+    rental_handle_name_input,
+    rental_handle_phone_input,
+    rental_handle_pickup_loop_selected,
+    rental_handle_safety_accepted,
+    rental_handle_signing_selected,
+    rental_handle_slot_selected,
+    rental_handle_tax_input,
+    rental_handle_via_clear,
+    rental_handle_via_done,
+    rental_handle_via_loop_selected,
+    rental_handle_wait_selected,
+    rental_prompt_signing_scenario,
+    rental_receive_uploaded_document,
+    rental_select_preset,
+    rental_select_route_mode,
+    rental_select_wagon,
+    rental_start_upload_document,
+    rental_start_wizard,
+    rental_toggle_extra,
+    show_my_rental_contracts,
+    show_rental_contract_detail,
+    show_rental_hub,
+    show_rental_rules_info,
+    _prompt_route_mode,
+    _render_customer_type_selection,
+    _render_date_selection,
+    _render_slot_selection,
+    _render_wialon_calculation_and_extras,
+)
+from handlers.rental_staff_handlers import (
+    check_rental_timeouts_job,
+    cmd_add_rental_role,
+    cmd_chatid,
+    cmd_set_rental_chat,
+    handle_rental_staff_callback,
+    handle_staff_group_text_input,
+)
 
 from utils.logger import logger
 from config.settings import FEEDBACK_SYNC_INTERVAL_MIN
@@ -151,6 +197,13 @@ class TransportBot:
             first=news_check_seconds,
             name="auto_expire_news"
         )
+        rental_timeout_seconds = 15 * 60
+        self.app.job_queue.run_repeating(
+            check_rental_timeouts_job,
+            interval=rental_timeout_seconds,
+            first=120,
+            name="check_rental_timeouts_job",
+        )
 
     async def _auto_sync_feedbacks(self, context):
         try:
@@ -176,6 +229,9 @@ class TransportBot:
         # --- КОМАНДИ ---
         self.app.add_handler(CommandHandler("start", cmd_start))
         self.app.add_handler(CommandHandler("help", cmd_help))
+        self.app.add_handler(CommandHandler("chatid", cmd_chatid))
+        self.app.add_handler(CommandHandler("set_rental_chat", cmd_set_rental_chat))
+        self.app.add_handler(CommandHandler("add_rental_role", cmd_add_rental_role))
 
         admin_conv = ConversationHandler(
             entry_points=[
@@ -607,17 +663,140 @@ class TransportBot:
             block=False
         )
 
+        # --- ДІАЛОГ ОФОРМЛЕННЯ ОРЕНДИ ЕЛЕКТРОТРАНСПОРТУ (WIALON) ---
+        rental_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(rental_start_wizard, pattern="^rental_start_wizard$"),
+            ],
+            states={
+                States.RENTAL_SELECT_WAGON: [
+                    CallbackQueryHandler(rental_select_wagon, pattern="^rental_wagon:"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+                States.RENTAL_SELECT_ROUTE_MODE: [
+                    CallbackQueryHandler(rental_select_route_mode, pattern="^rental_rmode:"),
+                    CallbackQueryHandler(rental_start_wizard, pattern="^rental_start_wizard$"),
+                    CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
+                ],
+                States.RENTAL_SELECT_PRESET: [
+                    CallbackQueryHandler(rental_select_preset, pattern="^rental_preset:"),
+                    CallbackQueryHandler(rental_select_route_mode, pattern="^rental_rmode:"),
+                    CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
+                ],
+                States.RENTAL_SELECT_PICKUP_LOOP: [
+                    CallbackQueryHandler(rental_handle_pickup_loop_selected, pattern="^rental_loop_pick:"),
+                    CallbackQueryHandler(rental_handle_loop_pagination, pattern="^rental_loop_page:"),
+                    CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
+                ],
+                States.RENTAL_SELECT_VIA_LOOPS: [
+                    CallbackQueryHandler(rental_handle_via_loop_selected, pattern="^rental_loop_via:"),
+                    CallbackQueryHandler(rental_handle_loop_pagination, pattern="^rental_loop_page:"),
+                    CallbackQueryHandler(rental_handle_via_clear, pattern="^rental_via_clear$"),
+                    CallbackQueryHandler(rental_handle_via_done, pattern="^rental_via_done$"),
+                    CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
+                ],
+                States.RENTAL_SELECT_DROPOFF_LOOP: [
+                    CallbackQueryHandler(rental_handle_dropoff_loop_selected, pattern="^rental_loop_drop:"),
+                    CallbackQueryHandler(rental_handle_loop_pagination, pattern="^rental_loop_page:"),
+                    CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
+                ],
+                States.RENTAL_SELECT_WAIT_TIME: [
+                    CallbackQueryHandler(rental_handle_wait_selected, pattern="^rental_wait:"),
+                    CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
+                ],
+                States.RENTAL_SELECT_EXTRAS: [
+                    CallbackQueryHandler(rental_toggle_extra, pattern="^rental_extra:"),
+                    CallbackQueryHandler(rental_prompt_signing_scenario, pattern="^rental_extras_done$"),
+                    CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
+                ],
+                States.RENTAL_SELECT_SIGNING_SCENARIO: [
+                    CallbackQueryHandler(rental_handle_signing_selected, pattern="^rental_sign:"),
+                    CallbackQueryHandler(_render_wialon_calculation_and_extras, pattern="^rental_back_extras$"),
+                ],
+                States.RENTAL_SELECT_DATE: [
+                    CallbackQueryHandler(rental_handle_date_button, pattern="^rental_date:"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_date_text),
+                    CallbackQueryHandler(rental_prompt_signing_scenario, pattern="^rental_extras_done$"),
+                ],
+                States.RENTAL_SELECT_SLOT: [
+                    CallbackQueryHandler(rental_handle_slot_selected, pattern="^rental_slot:"),
+                    CallbackQueryHandler(_render_date_selection, pattern="^rental_back_date$"),
+                ],
+                States.RENTAL_SELECT_CUSTOMER_TYPE: [
+                    CallbackQueryHandler(rental_handle_customer_type_selected, pattern="^rental_cust_type:"),
+                    CallbackQueryHandler(_render_slot_selection, pattern="^rental_back_slot$"),
+                ],
+                States.RENTAL_ENTER_CUSTOMER_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_name_input),
+                    CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
+                ],
+                States.RENTAL_ENTER_CUSTOMER_PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_phone_input),
+                ],
+                States.RENTAL_ENTER_CUSTOMER_TAX_ID: [
+                    CallbackQueryHandler(rental_handle_tax_input, pattern="^rental_tax_skip$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_tax_input),
+                ],
+                States.RENTAL_SAFETY_BRIEFING: [
+                    CallbackQueryHandler(rental_handle_safety_accepted, pattern="^rental_safety_accept$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+                States.RENTAL_FINAL_CONFIRM: [
+                    CallbackQueryHandler(rental_finalize_order, pattern="^rental_confirm_create$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+            },
+            fallbacks=[
+                CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$"),
+            ],
+            allow_reentry=True,
+        )
+
+        # --- ДІАЛОГ ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ (.P7S / СКАН) ТА КВИТАНЦІЇ IBAN ---
+        rental_upload_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(rental_start_upload_document, pattern="^rental_upload_(signed|payment):\\d+$"),
+            ],
+            states={
+                States.RENTAL_UPLOAD_SIGNED_DOC: [
+                    MessageHandler(
+                        (filters.Document.ALL | filters.PHOTO) & ~filters.COMMAND,
+                        rental_receive_uploaded_document,
+                    ),
+                    CallbackQueryHandler(show_rental_contract_detail, pattern="^rental_contract_view:\\d+$"),
+                ],
+            },
+            fallbacks=[
+                CallbackQueryHandler(show_my_rental_contracts, pattern="^rental_my_contracts$"),
+                CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                CallbackQueryHandler(main_menu, pattern="^main_menu$"),
+            ],
+            allow_reentry=True,
+        )
+
         # Додавання всіх conversation handlers
         self.app.add_handler(complaint_conv)
         self.app.add_handler(thanks_conv)
         self.app.add_handler(suggestion_conv)
         self.app.add_handler(museum_conv)
         self.app.add_handler(accessible_conv)
+        self.app.add_handler(rental_conv)
+        self.app.add_handler(rental_upload_conv)
 
         logger.info("✅ All handlers configured")
 
         # --- ГОЛОВНЕ МЕНЮ ---
         self.app.add_handler(CallbackQueryHandler(main_menu, pattern="^main_menu$"))
+
+        # --- РОЗДІЛ ОРЕНДИ (КЛІЄНТСЬКИЙ ХАБ ТА ШТАБ КП ОМЕТ) ---
+        self.app.add_handler(CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"))
+        self.app.add_handler(CallbackQueryHandler(show_rental_rules_info, pattern="^rental_rules_info$"))
+        self.app.add_handler(CallbackQueryHandler(show_my_rental_contracts, pattern="^rental_my_contracts$"))
+        self.app.add_handler(CallbackQueryHandler(show_rental_contract_detail, pattern="^rental_contract_view:\\d+$"))
+        self.app.add_handler(CallbackQueryHandler(handle_rental_redownload_pdfs, pattern="^rental_redownload:\\d+$"))
+        self.app.add_handler(CallbackQueryHandler(handle_client_pick_order_slot, pattern="^rental_pick_order_slot:\\d+:.+$"))
+        self.app.add_handler(CallbackQueryHandler(handle_rental_staff_callback, pattern="^rental_staff:"))
 
         # --- ОБРОБНИКИ МЕНЮ 1-ГО РІВНЯ ---
         self.app.add_handler(CallbackQueryHandler(realtime_transport, pattern="^realtime_transport$"))
@@ -662,10 +841,15 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(show_lost_items_menu, pattern="^lost_items$"))
         self.app.add_handler(CallbackQueryHandler(show_lost_items_category, pattern="^lost_items_cat:"))
 
-        # === 👇 ГЛОБАЛЬНИЙ ПЕРЕХОПЛЮВАЧ (Anti-Spam / Cleaner) 👇 ===
-        # Він спрацює ТІЛЬКИ якщо жоден інший хендлер вище не зреагував.
-        # filters.ALL & ~filters.COMMAND означає "Все (текст, фото, відео), крім команд (/start)"
-        self.app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_unexpected_message))
+        # === 👇 ГЛОБАЛЬНИЙ ПЕРЕХОПЛЮВАЧ (Штабний ввід / Anti-Spam / Cleaner) 👇 ===
+        # Спочатку перевіряємо, чи це відповідь співробітника штабу оренди (слоти, борт/водій або 'Коментар: ...').
+        # Якщо ні — передаємо стандартному чистильнику для приватних чатів.
+        async def _staff_or_unexpected_router(update, context):
+            if await handle_staff_group_text_input(update, context):
+                return
+            await handle_unexpected_message(update, context)
+
+        self.app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, _staff_or_unexpected_router))
 
 
 

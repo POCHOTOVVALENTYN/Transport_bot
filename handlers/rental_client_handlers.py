@@ -1,0 +1,1619 @@
+"""
+Клієнтські обробники модуля «🚋 Оренда та екскурсії (Трамвай / Тролейбус)»
+для КП «Одесміськелектротранс».
+Доступ до розділу суворо контролюється функцією `is_rental_access_allowed`
+(наразі відкритий виключно для Валентина — ID 830196453).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import datetime
+import json
+import os
+import re
+import tempfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
+from telegram.ext import ContextTypes, ConversationHandler
+
+from bot.states import States
+from config.settings import (
+    RENTAL_IBAN_ACCOUNT,
+    RENTAL_IBAN_COMPANY_ADDRESS,
+    RENTAL_IBAN_COMPANY_NAME,
+    RENTAL_IBAN_EDRPOU,
+    RENTAL_MIN_DAYS_KEP,
+    RENTAL_MIN_DAYS_PAPER,
+    RENTAL_PAPER_LOCK_HOURS,
+)
+from database.db import Database, RentalOrder
+from handlers.rental_staff_handlers import (
+    STATUS_LABELS_UA,
+    get_active_staff_chat_id,
+    is_rental_access_allowed,
+    post_or_update_staff_order_card,
+)
+from services.rental_documents_service import (
+    RENTAL_EXTRA_SERVICES,
+    RENTAL_POPULAR_PRESETS,
+    RENTAL_WAGON_CATALOG,
+    RentalPriceInput,
+    build_nbu_iban_payment_purpose,
+    calculate_rental_price_breakdown,
+    generate_rental_boarding_pass_pdf,
+    generate_rental_contract_pdf,
+    generate_rental_iban_invoice_pdf,
+    send_legal_contract_email,
+)
+from services.tram_rental_service import (
+    RentalCalculationInput,
+    calculate_rental_route,
+    generate_rental_route_sheet_pdf,
+    get_available_turning_loops,
+)
+from utils.logger import logger
+
+db = Database()
+
+LOOPS_PAGE_SIZE = 10
+
+
+def _get_draft(context: ContextTypes.DEFAULT_TYPE) -> Dict[str, Any]:
+    return context.user_data.setdefault("rental_draft", {})
+
+
+def _reset_draft(context: ContextTypes.DEFAULT_TYPE) -> Dict[str, Any]:
+    context.user_data["rental_draft"] = {
+        "wagon_key": "retro_mtv",
+        "transport_type": "TRAM",
+        "engine_wagon_type": "retro",
+        "depot_code": "ВРМ",
+        "route_mode": "preset",
+        "preset_name": None,
+        "pickup_stop": "пл. Старосінна",
+        "via_loops": ["Аркадія"],
+        "dropoff_stop": "пл. Старосінна",
+        "wait_minutes": 20,
+        "extra_services": [],
+        "signing_scenario": "kep",
+        "rental_date": None,
+        "rental_time_slot": None,
+        "user_full_name": None,
+        "user_phone": None,
+        "user_tax_id": None,
+    }
+    return context.user_data["rental_draft"]
+
+
+async def _send_or_edit(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+) -> None:
+    query = update.callback_query
+    if query:
+        try:
+            await query.edit_message_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML,
+            )
+            return
+        except Exception:
+            pass
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML,
+    )
+
+
+# ================= 1. ГОЛОВНИЙ ХАБ РОЗДІЛУ ОРЕНДИ =================
+
+async def show_rental_hub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Головне меню розділу '🚋 Оренда та екскурсії' (доступне тільки Валентину)."""
+    user = update.effective_user
+    if not user or not is_rental_access_allowed(user.id):
+        if update.callback_query:
+            await update.callback_query.answer("🔒 Розділ перебуває в режимі закритого тестування.", show_alert=True)
+        return ConversationHandler.END
+
+    if update.callback_query:
+        await update.callback_query.answer()
+
+    active_orders = await db.get_user_active_rental_orders(user.id)
+    contracts_badge = f" ({len(active_orders)})" if active_orders else ""
+
+    text = (
+        "🚋 <b>ОРЕНДА ТРАМВАЇВ ТА ТРОЛЕЙБУСІВ КП «ОДЕСМІСЬКЕЛЕКТРОТРАНС»</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Вітаємо в офіційному сервісі індивідуального замовлення рухомого складу для екскурсій, "
+        "святкових подій, фотосесій та корпоративних заходів!\n\n"
+        "✅ <b>Точний розрахунок Wialon:</b> автоматичний обрахунок 3 фаз рейсу "
+        "(1️⃣ Подача з депо + 2️⃣ Ваш маршрут у загальному потоці + 3️⃣ Повернення в депо).\n"
+        "✅ <b>Безпека руху:</b> посадка, проміжні зупинки та висадка пасажирів виконуються "
+        "на офіційних розворотних кільцях міста без затримки лінійних маршрутів.\n"
+        "✅ <b>Два формати договору:</b> електронний (Дія.Підпис / КЕП за 3 дні) або паперовий "
+        "в Управлінні КП на вул. Водопровідна, 1 (за 4 дні, бронь слоту 36 годин).\n"
+        "✅ <b>Офіційна оплата IBAN (без РРО):</b> миттєвий рахунок із QR-кодом НБУ для Приват24 / Monobank."
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("🚋 Оформити замовлення (Калькулятор Wialon)", callback_data="rental_start_wizard")],
+        [
+            InlineKeyboardButton(
+                f"📂 Діючі договори та замовлення{contracts_badge}",
+                callback_data="rental_my_contracts",
+            )
+        ],
+        [InlineKeyboardButton("📋 Правила оренди та тарифи", callback_data="rental_rules_info")],
+        [InlineKeyboardButton("⬅️ Назад (Про підприємство)", callback_data="company_menu")],
+        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")],
+    ]
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
+    return ConversationHandler.END
+
+
+async def show_rental_rules_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Довідка про тарифи, правила розрахунку Wialon та два сценарії договору."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    if not update.effective_user or not is_rental_access_allowed(update.effective_user.id):
+        return
+
+    text = (
+        "📋 <b>ПРАВИЛА ОРЕНДИ ТА ТАРИФИ КП «ОМЕТ»</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "1️⃣ <b>Офіційно затверджена тарифікація (діє з 01.01.2026 р.):</b>\n"
+        "• Оренду відкрито виключно для історичного трамвайного вагона <b>РЕТРО (МТВ-82 / Відкритий №914, депо ВРМ)</b>.\n"
+        "• Вартість 1-єї години роботи вагона РЕТРО з ПДВ 20%: <b>4 337,94 грн</b> (собівартість 3 614,95 грн + ПДВ 722,99 грн).\n"
+        "• Вартість 1 хвилини роботи з ПДВ: <b>72,30 грн/хв</b>.\n"
+        "• Мінімальний час замовлення: <b>1 година (60 хвилин)</b>.\n\n"
+        "2️⃣ <b>Як розраховується орендний час за телеметрією Wialon:</b>\n"
+        "• <b>Фаза 1 (Подача):</b> виїзд вагона з депо ВРМ до розворотного кільця посадки.\n"
+        "• <b>Фаза 2 (Орендний рейс):</b> рух у загальному потоці трамвайної мережі Одеси + час узгодженої стоянки/фотосесії на кільцях.\n"
+        "• <b>Фаза 3 (Заїзд):</b> повернення вагона від кільця висадки у депо ВРМ.\n"
+        "• База нарахування — <b>загальний час зайнятості вагона від виїзду з депо до повернення</b>: max(60, Час Wialon) × 72,30 грн.\n\n"
+        "3️⃣ <b>Чому посадка здійснюється на розворотних кільцях:</b>\n"
+        "Щоб не затримувати регулярний рух міських трамваїв на лінійних зупинках, "
+        "посадка пасажирів, святкове оформлення, фотозупинки та висадка проводяться виключно на офіційних розворотних кільцях міста.\n\n"
+        "4️⃣ <b>Два варіанти підписання договору:</b>\n"
+        "• 📱 <b>Електронний договір (Дія.Підпис / КЕП .p7s):</b> замовлення щонайменше за <b>3 дні</b> до рейсу.\n"
+        "• 🏢 <b>Паперовий договір в Управлінні КП (вул. Водопровідна, 1):</b> замовлення щонайменше за <b>4 дні</b> до рейсу (бронь слоту діє <b>36 годин</b>).\n\n"
+        "5️⃣ <b>Офіційна безготівкова оплата IBAN:</b>\n"
+        "Оплата на рахунок КП «ОМЕТ» за офіційним стандартом QR-коду НБУ з обов'язковим призначенням платежу «у т.ч. ПДВ 20%»."
+    )
+    keyboard = [
+        [InlineKeyboardButton("🚋 Перейти до оформлення", callback_data="rental_start_wizard")],
+        [InlineKeyboardButton("⬅️ Назад у меню оренди", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
+
+
+# ================= 2. КРОК 1: ВИБІР РУХОМОГО СКЛАДУ =================
+
+async def rental_start_wizard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+    if not update.effective_user or not is_rental_access_allowed(update.effective_user.id):
+        return ConversationHandler.END
+
+    _reset_draft(context)
+    w_info = RENTAL_WAGON_CATALOG["retro_mtv"]
+    draft = _get_draft(context)
+    draft["wagon_key"] = "retro_mtv"
+    draft["wagon_title"] = w_info["short_title"]
+    draft["transport_type"] = w_info["transport_type"]
+    draft["engine_wagon_type"] = w_info["engine_wagon_type"]
+    draft["depot_code"] = w_info["default_depot"]
+
+    text = (
+        "🚊 <b>КРОК 1 із 6 — РУХОМИЙ СКЛАД</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Оренду відкрито для офіційного історичного трамвайного вагона КП «ОМЕТ»:\n\n"
+        f"• <b>{w_info['title']}</b>\n"
+        f"  Місць: до {w_info['capacity_seats']} | База приписки: <b>{w_info['default_depot']}</b> (ВРМ)\n"
+        f"  Затверджений тариф: <b>{w_info['hour_tariff_uah']:.2f} грн/год</b> (72,30 грн/хв з ПДВ 20%)\n"
+        f"  Мінімальне замовлення: <b>1 година (60 хв)</b>\n"
+        f"  <i>{w_info['description']}</i>\n\n"
+        "Натисніть кнопку нижче, щоб перейти до вибору екскурсійного маршруту:"
+    )
+    buttons = [
+        [InlineKeyboardButton("🗺️ Перейти до вибору маршруту", callback_data="rental_wagon:retro_mtv")],
+        [InlineKeyboardButton("⬅️ Скасувати / Назад", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
+    return States.RENTAL_SELECT_WAGON
+
+
+async def rental_select_wagon(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    w_key = query.data.split(":", 1)[1]
+    w_info = RENTAL_WAGON_CATALOG.get(w_key) or RENTAL_WAGON_CATALOG["retro_mtv"]
+
+    draft = _get_draft(context)
+    draft["wagon_key"] = w_key
+    draft["wagon_title"] = w_info["short_title"]
+    draft["transport_type"] = w_info["transport_type"]
+    draft["engine_wagon_type"] = w_info["engine_wagon_type"]
+    draft["depot_code"] = w_info["default_depot"]
+
+    return await _prompt_route_mode(update, context)
+
+
+async def _prompt_route_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    draft = _get_draft(context)
+    text = (
+        f"🗺️ <b>КРОК 2 із 6 — ВИБІР МАРШРУТУ (Трамвайна мережа)</b>\n"
+        f"Обраний транспорт: <b>{draft.get('wagon_title')}</b> (Депо: <b>{draft.get('depot_code')}</b>)\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Оберіть спосіб побудови маршруту:\n\n"
+        f"🌟 <b>Режим А — Популярні готові ретро-маршрути:</b> перевірені екскурсійні маршрути Одесою "
+        f"(Аркадія, Парк Шевченка, Великий Фонтан, Хаджибейський лиман).\n"
+        f"🛠️ <b>Режим Б — Конструктор за розворотними кільцями:</b> самостійно оберіть розворотне кільце посадки, "
+        f"будь-яку кількість проміжних розворотних кілець та кільце висадки пасажирів."
+    )
+    keyboard = [
+        [InlineKeyboardButton("🌟 Режим А: Популярні готові маршрути", callback_data="rental_rmode:preset")],
+        [InlineKeyboardButton("🛠️ Режим Б: Власний маршрут по кільцях", callback_data="rental_rmode:custom")],
+        [InlineKeyboardButton("⬅️ Назад до вибору вагона", callback_data="rental_start_wizard")],
+    ]
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_SELECT_ROUTE_MODE
+
+
+# ================= 3. КРОК 2А / 2Б: ПОПУЛЯРНІ МАРШРУТИ АБО КОНСТРУКТОР КІЛЕЦЬ =================
+
+async def rental_select_route_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    mode = query.data.split(":", 1)[1]
+    draft = _get_draft(context)
+    draft["route_mode"] = mode
+
+    if mode == "preset":
+        vt = draft["transport_type"]
+        matching_presets = [
+            p for p in RENTAL_POPULAR_PRESETS.values() if p["transport_type"] == vt
+        ]
+        if not matching_presets:
+            matching_presets = list(RENTAL_POPULAR_PRESETS.values())
+
+        text = (
+            "🌟 <b>ПОПУЛЯРНІ ЕКСКУРСІЙНІ МАРШРУТИ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Оберіть готовий маршрут (посадка, розвороти та висадка відбуваються на офіційних розворотних кільцях):\n"
+        )
+        buttons: List[List[InlineKeyboardButton]] = []
+        for p in matching_presets:
+            buttons.append(
+                [InlineKeyboardButton(p["title"], callback_data=f"rental_preset:{p['key']}")]
+            )
+        buttons.append([InlineKeyboardButton("🛠️ Перейти у власний конструктор кілець", callback_data="rental_rmode:custom")])
+        buttons.append([InlineKeyboardButton("⬅️ Назад", callback_data="rental_back_rmode")])
+        await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
+        return States.RENTAL_SELECT_PRESET
+
+    # Режим Б: Власний конструктор розворотних кілець
+    draft["via_loops"] = []
+    return await _render_loop_picker(update, context, step="pickup", page=0)
+
+
+async def rental_select_preset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    p_key = query.data.split(":", 1)[1]
+    preset = RENTAL_POPULAR_PRESETS.get(p_key)
+    if not preset:
+        return await _prompt_route_mode(update, context)
+
+    draft = _get_draft(context)
+    draft["preset_name"] = preset["title"]
+    draft["pickup_stop"] = preset["pickup_stop"]
+    draft["via_loops"] = list(preset["via_loops"])
+    draft["dropoff_stop"] = preset["dropoff_stop"]
+    draft["wait_minutes"] = int(preset["recommended_wait_min"])
+
+    return await _prompt_wait_time(update, context)
+
+
+async def _render_loop_picker(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    step: str,
+    page: int = 0,
+) -> int:
+    """
+    Відображає пагінований список офіційних розворотних кілець (36 трамвайних або 18 тролейбусних)
+    для вибору кільця посадки (pickup), проміжних кілець (via) або кільця висадки (dropoff).
+    """
+    draft = _get_draft(context)
+    vt = draft["transport_type"]
+    loops = get_available_turning_loops(vt)
+    total_pages = max(1, (len(loops) + LOOPS_PAGE_SIZE - 1) // LOOPS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start_idx = page * LOOPS_PAGE_SIZE
+    page_loops = loops[start_idx : start_idx + LOOPS_PAGE_SIZE]
+
+    if step == "pickup":
+        header = (
+            "🟢 <b>КОНСТРУКТОР МАРШРУТУ: ОБЕРІТЬ РОЗВОРОТНЕ КІЛЬЦЕ ПОСАДКИ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "<i>Посадка пасажирів дозволена виключно на розворотних кільцях, щоб не затримувати лінійний рух.</i>\n"
+            f"Сторінка {page + 1}/{total_pages}. Оберіть початкове кільце:"
+        )
+        prefix = "rental_loop_pick"
+        target_state = States.RENTAL_SELECT_PICKUP_LOOP
+    elif step == "via":
+        chosen_via = draft.get("via_loops", [])
+        via_chain = " ➡️ ".join([draft["pickup_stop"]] + chosen_via)
+        header = (
+            "🔄 <b>КОНСТРУКТОР МАРШРУТУ: ПРОМІЖНІ РОЗВОРОТНІ КІЛЬЦЯ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"Поточна нитка маршруту:\n<b>{via_chain}</b>\n\n"
+            "Оберіть наступне проміжне розворотне кільце (можна додати декілька кілець поспіль) "
+            "або натисніть <b>«✅ Перейти до вибору кільця висадки»</b>:"
+        )
+        prefix = "rental_loop_via"
+        target_state = States.RENTAL_SELECT_VIA_LOOPS
+    else:
+        chosen_via = draft.get("via_loops", [])
+        via_chain = " ➡️ ".join([draft["pickup_stop"]] + chosen_via)
+        header = (
+            "🏁 <b>КОНСТРУКТОР МАРШРУТУ: ОБЕРІТЬ РОЗВОРОТНЕ КІЛЬЦЕ ВИСАДКИ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"Поточна нитка маршруту:\n<b>{via_chain} ➡️ [Кільце висадки]</b>\n\n"
+            "Оберіть фінальне розворотне кільце висадки пасажирів:"
+        )
+        prefix = "rental_loop_drop"
+        target_state = States.RENTAL_SELECT_DROPOFF_LOOP
+
+    buttons: List[List[InlineKeyboardButton]] = []
+    for idx in range(0, len(page_loops), 2):
+        row: List[InlineKeyboardButton] = []
+        for j in range(2):
+            if idx + j < len(page_loops):
+                global_i = start_idx + idx + j
+                loop_name = page_loops[idx + j]
+                row.append(
+                    InlineKeyboardButton(
+                        f"🔄 {loop_name}",
+                        callback_data=f"{prefix}:{global_i}",
+                    )
+                )
+        buttons.append(row)
+
+    # Навігація сторінками
+    nav_row: List[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Попер.", callback_data=f"rental_loop_page:{step}:{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Наст. ➡️", callback_data=f"rental_loop_page:{step}:{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+
+    if step == "via":
+        buttons.append(
+            [InlineKeyboardButton("✅ Перейти до вибору кільця висадки", callback_data="rental_via_done")]
+        )
+        if draft.get("via_loops"):
+            buttons.append(
+                [InlineKeyboardButton("🗑️ Очистити проміжні кільця", callback_data="rental_via_clear")]
+            )
+
+    buttons.append([InlineKeyboardButton("⬅️ Назад до режиму маршруту", callback_data="rental_back_rmode")])
+    await _send_or_edit(update, context, header, InlineKeyboardMarkup(buttons))
+    return target_state
+
+
+async def rental_handle_loop_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    _, step, page_str = query.data.split(":")
+    return await _render_loop_picker(update, context, step=step, page=int(page_str))
+
+
+async def rental_handle_pickup_loop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    draft = _get_draft(context)
+    loops = get_available_turning_loops(draft["transport_type"])
+    if 0 <= idx < len(loops):
+        draft["pickup_stop"] = loops[idx]
+    draft["via_loops"] = []
+    return await _render_loop_picker(update, context, step="via", page=0)
+
+
+async def rental_handle_via_loop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    draft = _get_draft(context)
+    loops = get_available_turning_loops(draft["transport_type"])
+    if 0 <= idx < len(loops):
+        chosen = loops[idx]
+        via_list = draft.setdefault("via_loops", [])
+        if not via_list or via_list[-1] != chosen:
+            via_list.append(chosen)
+    return await _render_loop_picker(update, context, step="via", page=0)
+
+
+async def rental_handle_via_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer("Проміжні кільця очищено")
+    draft = _get_draft(context)
+    draft["via_loops"] = []
+    return await _render_loop_picker(update, context, step="via", page=0)
+
+
+async def rental_handle_via_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    return await _render_loop_picker(update, context, step="dropoff", page=0)
+
+
+async def rental_handle_dropoff_loop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    draft = _get_draft(context)
+    loops = get_available_turning_loops(draft["transport_type"])
+    if 0 <= idx < len(loops):
+        draft["dropoff_stop"] = loops[idx]
+
+    # Якщо клієнт обрав однакову початкову і кінцеву точку без проміжних кілець — просимо додати хоча б одне кільце розвороту
+    if draft["pickup_stop"] == draft["dropoff_stop"] and not draft.get("via_loops"):
+        await query.answer(
+            "Для кільцевого маршруту (посадка і висадка на одному кільці) оберіть хоча б одне проміжне розворотне кільце!",
+            show_alert=True,
+        )
+        return await _render_loop_picker(update, context, step="via", page=0)
+
+    return await _prompt_wait_time(update, context)
+
+
+async def _prompt_wait_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    draft = _get_draft(context)
+    via_str = " ➡️ ".join(draft.get("via_loops") or []) or "прямий рейс"
+    text = (
+        "⏱️ <b>ЧАС ТЕХНОЛОГІЧНОЇ / ЕКСКУРСІЙНОЇ СТОЯНКИ НА РОЗВОРОТНИХ КІЛЬЦЯХ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"Обраний маршрут:\n<b>{draft['pickup_stop']} ➡️ [{via_str}] ➡️ {draft['dropoff_stop']}</b>\n\n"
+        "Оберіть загальний час стоянки на розворотних кільцях (для фотосесії, відпочинку або святкування):"
+    )
+    wait_options = [0, 15, 20, 30, 45, 60]
+    rows: List[List[InlineKeyboardButton]] = []
+    for i in range(0, len(wait_options), 3):
+        row = [
+            InlineKeyboardButton(
+                f"⏱️ {w} хв",
+                callback_data=f"rental_wait:{w}",
+            )
+            for w in wait_options[i : i + 3]
+        ]
+        rows.append(row)
+    rows.append([InlineKeyboardButton("⬅️ Змінити маршрут", callback_data="rental_back_rmode")])
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(rows))
+    return States.RENTAL_SELECT_WAIT_TIME
+
+
+async def rental_handle_wait_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    wait_min = int(query.data.split(":")[1])
+    draft = _get_draft(context)
+    draft["wait_minutes"] = wait_min
+    return await _render_wialon_calculation_and_extras(update, context)
+
+
+# ================= 4. КРОК 3: ТОЧНИЙ РОЗРАХУНОК WIALON ТА ДОДАТКОВІ ПОСЛУГИ =================
+
+def _compute_draft_wialon_and_price(draft: Dict[str, Any]) -> None:
+    via_loops = list(draft.get("via_loops") or [])
+    calc_input = RentalCalculationInput(
+        transport_type=draft["transport_type"],
+        wagon_type=draft["engine_wagon_type"],
+        depot_base=draft["depot_code"],
+        pickup_stop=draft["pickup_stop"],
+        dropoff_stop=draft["dropoff_stop"],
+        via_loops=via_loops,
+        intermediate_turning_loop=via_loops[0] if via_loops else None,
+        wait_minutes_at_loop=int(draft.get("wait_minutes", 0)),
+        day_type="WEEKEND",
+        departure_time="12:00",
+    )
+    calc_out = calculate_rental_route(calc_input)
+
+    draft["depot_code"] = calc_out.depot_base
+    draft["distance_pull_out_km"] = calc_out.phase_1_dispatch.distance_km
+    draft["distance_route_km"] = calc_out.phase_2_rental.distance_km
+    draft["distance_pull_in_km"] = calc_out.phase_3_return.distance_km
+    draft["total_distance_km"] = calc_out.total_billable_km
+
+    draft["duration_pull_out_min"] = calc_out.phase_1_dispatch.motion_minutes
+    draft["duration_route_min"] = calc_out.phase_2_rental.motion_minutes
+    draft["duration_pull_in_min"] = calc_out.phase_3_return.motion_minutes
+    draft["total_duration_min"] = calc_out.total_duration_minutes
+    draft["formatted_duration"] = calc_out.formatted_total_duration
+
+    price_bd = calculate_rental_price_breakdown(
+        RentalPriceInput(
+            wagon_key=draft["wagon_key"],
+            total_billable_km=calc_out.total_billable_km,
+            total_duration_minutes=calc_out.total_duration_minutes,
+            wait_minutes=int(draft.get("wait_minutes", 0)),
+            extra_service_keys=list(draft.get("extra_services") or []),
+        )
+    )
+    draft["billable_minutes"] = price_bd.billable_minutes
+    draft["time_price_uah"] = price_bd.time_price_uah
+    draft["without_vat_uah"] = price_bd.without_vat_uah
+    draft["vat_20_uah"] = price_bd.vat_20_uah
+    draft["km_price_uah"] = price_bd.time_price_uah
+    draft["wait_price_uah"] = 0.0
+    draft["extras_price_uah"] = price_bd.extras_price_uah
+    draft["total_price_uah"] = price_bd.total_price_uah
+    draft["selected_extras_titles"] = price_bd.selected_extras_titles
+
+
+async def _render_wialon_calculation_and_extras(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    draft = _get_draft(context)
+    try:
+        _compute_draft_wialon_and_price(draft)
+    except Exception as exc:
+        logger.error(f"Помилка розрахунку маршруту Wialon: {exc}")
+        await _send_or_edit(
+            update,
+            context,
+            f"⚠️ Не вдалося побудувати маршрут між обраними точками: {exc}\nСпробуйте обрати іншу комбінацію кілець.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Обрати інший маршрут", callback_data="rental_back_rmode")]]),
+        )
+        return States.RENTAL_SELECT_ROUTE_MODE
+
+    via_str = " ➡️ ".join(draft.get("via_loops") or []) or "прямий рейс"
+    selected_extras = set(draft.get("extra_services") or [])
+
+    h_part = draft["billable_minutes"] // 60
+    m_part = draft["billable_minutes"] % 60
+    billable_label = f"{draft['billable_minutes']} хв ({h_part} год {m_part:02d} хв)" if m_part else f"{h_part} год ({draft['billable_minutes']} хв)"
+    min_note = " <i>(застосовано мін. замовлення 1 год)</i>" if draft["total_duration_min"] < 60 else ""
+
+    text = (
+        "📊 <b>КРОК 3 із 6 — КАЛЬКУЛЯЦІЯ МАРШРУТУ ЗА ДАНИМИ WIALON</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"🚊 <b>Транспорт:</b> {draft['wagon_title']} (Депо: <b>{draft['depot_code']}</b>)\n"
+        f"🗺️ <b>Маршрут за розворотними кільцями:</b>\n"
+        f"   <b>{draft['pickup_stop']} ➡️ [{via_str}] ➡️ {draft['dropoff_stop']}</b>\n\n"
+        f"📏 <b>Пофазний баланс руху та часу за Wialon:</b>\n"
+        f"1️⃣ <b>Подача з депо ({draft['depot_code']} -> {draft['pickup_stop']}):</b> "
+        f"{draft['distance_pull_out_km']:.2f} км ({draft['duration_pull_out_min']} хв)\n"
+        f"2️⃣ <b>Орендний маршрут у потоці транспорту:</b> "
+        f"{draft['distance_route_km']:.2f} км ({draft['duration_route_min']} хв руху + {draft['wait_minutes']} хв стоянки)\n"
+        f"3️⃣ <b>Повернення у депо ({draft['dropoff_stop']} -> {draft['depot_code']}):</b> "
+        f"{draft['distance_pull_in_km']:.2f} км ({draft['duration_pull_in_min']} хв)\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏱️ <b>Фактичний час за Wialon:</b> <b>{draft['formatted_duration']} ({draft['total_duration_min']} хв)</b>\n"
+        f"⏳ <b>Розрахунковий час до оплати:</b> <b>{billable_label}</b>{min_note}\n"
+        f"🛣️ <b>Загальний пробіг вагона:</b> {draft['total_distance_km']:.2f} км\n\n"
+        f"💰 <b>Фінансовий розрахунок за калькуляцією КП «ОМЕТ» (з ПДВ 20%):</b>\n"
+        f"• Оренда вагона РЕТРО ({billable_label} × 72,30 грн/хв): <b>{draft['time_price_uah']:.2f} грн</b>\n"
+        f"• Додаткові послуги: <b>{draft['extras_price_uah']:.2f} грн</b>\n"
+        f"• Сума без ПДВ: <b>{draft['without_vat_uah']:.2f} грн</b>\n"
+        f"• ПДВ, 20%: <b>{draft['vat_20_uah']:.2f} грн</b>\n"
+        f"💳 <b>РАЗОМ ДО СПЛАТИ З ПДВ: {draft['total_price_uah']:.2f} грн</b>\n\n"
+        f"👇 <i>За бажанням додайте сервісні опції та натисніть «Продовжити»:</i>"
+    )
+
+    buttons: List[List[InlineKeyboardButton]] = []
+    for svc_key, svc_info in RENTAL_EXTRA_SERVICES.items():
+        mark = "☑️" if svc_key in selected_extras else "⬜"
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    f"{mark} {svc_info['title']} (+{svc_info['price_uah']:.0f} грн)",
+                    callback_data=f"rental_extra:{svc_key}",
+                )
+            ]
+        )
+
+    buttons.append([InlineKeyboardButton("✅ Продовжити -> Вибір формату договору", callback_data="rental_extras_done")])
+    buttons.append([InlineKeyboardButton("⬅️ Змінити маршрут або час стоянки", callback_data="rental_back_rmode")])
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
+    return States.RENTAL_SELECT_EXTRAS
+
+
+async def rental_toggle_extra(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    svc_key = query.data.split(":", 1)[1]
+    draft = _get_draft(context)
+    extras_list: List[str] = list(draft.get("extra_services") or [])
+    if svc_key in extras_list:
+        extras_list.remove(svc_key)
+    else:
+        extras_list.append(svc_key)
+    draft["extra_services"] = extras_list
+    return await _render_wialon_calculation_and_extras(update, context)
+
+
+# ================= 5. КРОК 4: ВИБІР СЦЕНАРІЮ ПІДПИСАННЯ ДОГОВОРУ (КЕП vs ПАПЕРОВИЙ) =================
+
+async def rental_prompt_signing_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    text = (
+        "✍️ <b>КРОК 4 із 6 — ОБЕРІТЬ СЦЕНАРІЙ ПІДПИСАННЯ ДОГОВОРУ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Договір укладається офіційно з КП «Одесміськелектротранс» (підписант з боку КП — <b>Директор</b>).\n\n"
+        "📱 <b>Варіант А — Електронний договір (Дія.Підпис / КЕП .p7s):</b>\n"
+        f"• Мінімальний запас часу до дати поїздки: <b>+{RENTAL_MIN_DAYS_KEP} дні</b>;\n"
+        "• Ви підписуєте PDF-договір у додатку «Дія» або сервісі «Вчасно» та завантажуєте файл <code>.p7s</code> прямо в бот.\n\n"
+        "🏢 <b>Варіант Б — Паперовий договір в Управлінні КП:</b>\n"
+        f"• Мінімальний запас часу до дати поїздки: <b>+{RENTAL_MIN_DAYS_PAPER} дні</b>;\n"
+        "• Особисте підписання за адресою: <b>м. Одеса, вул. Водопровідна, 1</b> (пн–пт, 09:00–17:00);\n"
+        f"• ⏳ На підписання та завантаження скан-копії в розділі «📂 Діючі договори та замовлення» діє ліміт <b>{RENTAL_PAPER_LOCK_HOURS} годин</b>."
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                f"📱 Електронний КЕП / Дія.Підпис (+{RENTAL_MIN_DAYS_KEP} дні)",
+                callback_data="rental_sign:kep",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"🏢 Паперовий в Управлінні КП (+{RENTAL_MIN_DAYS_PAPER} дні, бронь {RENTAL_PAPER_LOCK_HOURS} год)",
+                callback_data="rental_sign:paper",
+            )
+        ],
+        [InlineKeyboardButton("⬅️ Назад до калькуляції", callback_data="rental_back_extras")],
+    ]
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_SELECT_SIGNING_SCENARIO
+
+
+# ================= 6. КРОК 5: КАЛЕНДАР ТА ДИНАМІЧНИЙ ПУЛ СЛОТІВ =================
+
+async def rental_handle_signing_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    scenario = query.data.split(":", 1)[1]
+    draft = _get_draft(context)
+    draft["signing_scenario"] = scenario
+    return await _render_date_selection(update, context)
+
+
+async def _render_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    draft = _get_draft(context)
+    scenario = draft.get("signing_scenario", "kep")
+    min_days = RENTAL_MIN_DAYS_KEP if scenario == "kep" else RENTAL_MIN_DAYS_PAPER
+    min_date = datetime.date.today() + datetime.timedelta(days=min_days)
+
+    weekdays_ua = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]
+    buttons: List[List[InlineKeyboardButton]] = []
+    row: List[InlineKeyboardButton] = []
+    for offset in range(12):
+        d = min_date + datetime.timedelta(days=offset)
+        d_str = d.strftime("%d.%m.%Y")
+        wd = weekdays_ua[d.weekday()]
+        free_slots = await db.get_available_rental_slots(d_str, draft["transport_type"])
+        badge = f"🟢({len(free_slots)})" if free_slots else "🗓️"
+        row.append(
+            InlineKeyboardButton(
+                f"{badge} {d.strftime('%d.%m')} ({wd})",
+                callback_data=f"rental_date:{d_str}",
+            )
+        )
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    buttons.append([InlineKeyboardButton("⬅️ Змінити сценарій підписання", callback_data="rental_extras_done")])
+
+    text = (
+        "📅 <b>КРОК 5 із 6 — ОБЕРІТЬ ДАТУ ПОЇЗДКИ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"Відповідно до обраного сценарію підписання, найближча доступна дата замовлення — "
+        f"<b>{min_date.strftime('%d.%m.%Y')} (+{min_days} дні)</b>.\n\n"
+        "• Позначка 🟢 означає, що Служба руху вже додала вільні часові слоти на цю дату (можна обрати миттєво).\n"
+        "• Ви можете натиснути на кнопку дати нижче або <b>написати будь-яку пізнішу дату повідомленням</b> у форматі <code>ДД.ММ.РРРР</code>:"
+    )
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
+    return States.RENTAL_SELECT_DATE
+
+
+async def rental_handle_date_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    date_str = query.data.split(":", 1)[1]
+    draft = _get_draft(context)
+    draft["rental_date"] = date_str
+    return await _render_slot_selection(update, context)
+
+
+async def rental_handle_date_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_SELECT_DATE
+
+    raw = msg.text.strip()
+    try:
+        parsed_date = datetime.datetime.strptime(raw, "%d.%m.%Y").date()
+    except ValueError:
+        await msg.reply_text(
+            "⚠️ Будь ласка, введіть дату у форматі <code>ДД.ММ.РРРР</code> (наприклад, <code>25.05.2026</code>).",
+            parse_mode=ParseMode.HTML,
+        )
+        return States.RENTAL_SELECT_DATE
+
+    draft = _get_draft(context)
+    min_days = RENTAL_MIN_DAYS_KEP if draft.get("signing_scenario") == "kep" else RENTAL_MIN_DAYS_PAPER
+    min_date = datetime.date.today() + datetime.timedelta(days=min_days)
+    if parsed_date < min_date:
+        await msg.reply_text(
+            f"⚠️ Для обраного сценарію договору мінімальна дата замовлення — <b>{min_date.strftime('%d.%m.%Y')}</b> (+{min_days} дні).",
+            parse_mode=ParseMode.HTML,
+        )
+        return States.RENTAL_SELECT_DATE
+
+    draft["rental_date"] = parsed_date.strftime("%d.%m.%Y")
+    return await _render_slot_selection(update, context)
+
+
+async def _render_slot_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    draft = _get_draft(context)
+    date_str = draft["rental_date"]
+    free_slots = await db.get_available_rental_slots(date_str, draft["transport_type"])
+
+    buttons: List[List[InlineKeyboardButton]] = []
+    if free_slots:
+        text = (
+            f"🕒 <b>ВИБІР ЧАСОВОГО СЛОТУ НА {date_str}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"У динамічному пулі Служби руху на дату <b>{date_str}</b> доступні такі вільні години подачі:\n\n"
+            f"Оберіть потрібний слот (обраний Вами слот буде заброньовано за Вашим договором, "
+            f"а решта слотів залишаться відкритими для інших клієнтів):"
+        )
+        for sl in free_slots:
+            buttons.append([InlineKeyboardButton(f"🕒 Подача о {sl}", callback_data=f"rental_slot:{sl}")])
+        buttons.append(
+            [InlineKeyboardButton("🚦 Запитати інший час у Служби руху", callback_data="rental_slot:REQUEST")]
+        )
+    else:
+        text = (
+            f"🕒 <b>ПОГОДЖЕННЯ ЧАСУ ПОДАЧІ НА {date_str}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"На дату <b>{date_str}</b> попередній пул слотів ще не сформовано або оберіть стандартне вікно.\n\n"
+            f"Ви можете обрати бажаний орієнтовний час подачі або надіслати запит вільних слотів у Службу руху КП «ОМЕТ»:"
+        )
+        for default_sl in ("10:00", "12:00", "14:00", "16:00", "18:00"):
+            buttons.append(
+                [InlineKeyboardButton(f"🕒 Бажаний час: {default_sl}", callback_data=f"rental_slot:{default_sl}")]
+            )
+        buttons.append(
+            [InlineKeyboardButton("🚦 Запитати вільні слоти у Служби руху", callback_data="rental_slot:REQUEST")]
+        )
+
+    buttons.append([InlineKeyboardButton("⬅️ Обрати іншу дату", callback_data="rental_back_date")])
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
+    return States.RENTAL_SELECT_SLOT
+
+
+async def rental_handle_slot_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    chosen = query.data.split(":", 1)[1]
+    draft = _get_draft(context)
+    draft["rental_time_slot"] = None if chosen == "REQUEST" else chosen
+    return await _render_customer_type_selection(update, context)
+
+
+async def _render_customer_type_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = (
+        "👤 <b>КРОК 6 із 6 — СТАТУС ТА РЕКВІЗИТИ ЗАМОВНИКА</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Оберіть правовий статус платника для формування офіційного Договору перевезення:\n\n"
+        "• <b>Фізична особа</b> — звичайний громадянин (паспорт / ID-картка та РНОКПП);\n"
+        "• <b>ФОП</b> — підприємець (Виписка з ЄДР та РНОКПП);\n"
+        "• <b>Юридична особа</b> — компанія / організація (ТОВ, ПП, код ЄДРПОУ 8 цифр)."
+    )
+    keyboard = [
+        [InlineKeyboardButton("🚶 Фізична особа (громадянин)", callback_data="rental_cust_type:individual")],
+        [InlineKeyboardButton("💼 ФОП (Підприємець)", callback_data="rental_cust_type:fop")],
+        [InlineKeyboardButton("🏢 Юридична особа (ТОВ тощо)", callback_data="rental_cust_type:legal_entity")],
+        [InlineKeyboardButton("⬅️ Назад до вибору часу", callback_data="rental_back_slot")],
+    ]
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_SELECT_CUSTOMER_TYPE
+
+
+async def rental_handle_customer_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    chosen_type = query.data.split(":", 1)[1]
+    draft = _get_draft(context)
+    draft["customer_type"] = chosen_type
+
+    if chosen_type == "legal_entity":
+        prompt_text = (
+            "🏢 <b>ЮРИДИЧНА ОСОБА</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Введіть <b>повне найменування організації та ПІБ підписанта</b>\n"
+            "(наприклад: <code>ТОВ «Одеса Тур», в особі директора Коваленка І.І.</code>):"
+        )
+    elif chosen_type == "fop":
+        prompt_text = (
+            "💼 <b>ФОП (ПІДПРИЄМЕЦЬ)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Введіть <b>ПІБ підприємця повністю</b>\n"
+            "(наприклад: <code>Коваленко Іван Іванович</code>):"
+        )
+    else:
+        prompt_text = (
+            "🚶 <b>ФІЗИЧНА ОСОБА</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Введіть <b>Ваше ПІБ повністю</b>\n"
+            "(наприклад: <code>Перепелиця Олег Олександрович</code>):"
+        )
+
+    keyboard = [[InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")]]
+    await _send_or_edit(update, context, prompt_text, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_CUSTOMER_NAME
+
+
+# ================= 7. КРОК 6: ДАНІ КЛІЄНТА, ОБОВ'ЯЗКОВИЙ ІНСТРУКТАЖ ТА ФІНАЛІЗАЦІЯ =================
+
+async def rental_handle_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_CUSTOMER_NAME
+
+    name_val = msg.text.strip()
+    if len(name_val) < 3:
+        await msg.reply_text("⚠️ Будь ласка, введіть коректну назву або ПІБ (мінімум 3 символи).")
+        return States.RENTAL_ENTER_CUSTOMER_NAME
+
+    draft = _get_draft(context)
+    draft["user_full_name"] = name_val
+    cust_type = draft.get("customer_type", "individual")
+
+    phone_prompt = (
+        "📞 Введіть <b>контактний номер телефону</b> уповноваженої особи (наприклад, <code>+380501234567</code>):"
+        if cust_type == "legal_entity"
+        else "📞 Введіть Ваш <b>контактний номер телефону</b> (наприклад, <code>+380501234567</code>):"
+    )
+    await msg.reply_text(phone_prompt, parse_mode=ParseMode.HTML)
+    return States.RENTAL_ENTER_CUSTOMER_PHONE
+
+
+async def rental_handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_CUSTOMER_PHONE
+
+    phone_val = msg.text.strip()
+    digits = re.sub(r"\D", "", phone_val)
+    if len(digits) < 9:
+        await msg.reply_text("⚠️ Некоректний номер телефону. Введіть номер у форматі <code>+380XXXXXXXXX</code>.", parse_mode=ParseMode.HTML)
+        return States.RENTAL_ENTER_CUSTOMER_PHONE
+
+    draft = _get_draft(context)
+    draft["user_phone"] = phone_val
+    cust_type = draft.get("customer_type", "individual")
+
+    if cust_type == "legal_entity":
+        tax_prompt = (
+            "🏢 Введіть <b>код ЄДРПОУ підприємства</b> (8 цифр) для формування Рахунку IBAN та Договору "
+            "(або натисніть кнопку нижче, щоб заповнити при підписанні):"
+        )
+    elif cust_type == "fop":
+        tax_prompt = (
+            "🪪 Введіть <b>РНОКПП (ІПН ФОП)</b> (10 цифр) для зазначення в Договорі та Рахунку "
+            "(або натисніть кнопку нижче, щоб заповнити при підписанні):"
+        )
+    else:
+        tax_prompt = (
+            "🪪 Введіть <b>РНОКПП (ІПН)</b> (10 цифр) для реквізитів Договору перевезення "
+            "(або натисніть кнопку нижче, щоб заповнити при підписанні):"
+        )
+
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("⏭️ Вказати під час підписання", callback_data="rental_tax_skip")]]
+    )
+    await msg.reply_text(tax_prompt, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+    return States.RENTAL_ENTER_CUSTOMER_TAX_ID
+
+
+async def rental_handle_tax_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    draft = _get_draft(context)
+    if update.callback_query:
+        await update.callback_query.answer()
+        draft["user_tax_id"] = "Заповнюється при підписанні"
+    elif update.message and update.message.text:
+        draft["user_tax_id"] = update.message.text.strip()
+
+    return await _render_safety_briefing(update, context)
+
+
+async def _render_safety_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    text = (
+        "🛡️ <b>ОБОВ'ЯЗКОВИЙ ІНСТРУКТАЖ ІЗ ПОЖЕЖНОЇ, ЕЛЕКТРО- ТА ТЕХНІЧНОЇ БЕЗПЕКИ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Перед формуванням Договору оренди №XXXX-О Замовник зобов'язаний ознайомитися та погодитися з правилами безпеки КП «ОМЕТ»:\n\n"
+        "1️⃣ <b>Посадка та висадка:</b> дозволяються виключно на погоджених розворотних кільцях після повної зупинки вагона та дозволу водія.\n"
+        "2️⃣ <b>Пожежна та електробезпека:</b> у салоні категорично заборонено куріння (включно з вейпами/IQOS), використання свічок, "
+        "бенгальських вогнів, піротехніки та відкритого вогню.\n"
+        "3️⃣ <b>Безпека під час руху:</b> забороняється висовуватися з вікон, спиратися на двері, відволікати водія під час руху "
+        "та перевищувати паспортну місткість салону.\n\n"
+        "Натискаючи кнопку нижче, Ви підтверджуєте проходження інструктажу та приймаєте умови Договору:"
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "✅ Ознайомлений(а) із правилами безпеки — Сформувати Договір",
+                callback_data="rental_safety_accept",
+            )
+        ],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_SAFETY_BRIEFING
+
+
+async def rental_handle_safety_accepted(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    draft = _get_draft(context)
+    via_str = " ➡️ ".join(draft.get("via_loops") or []) or "прямий рейс"
+    scenario_ua = (
+        "📱 Електронний КЕП / Дія.Підпис"
+        if draft["signing_scenario"] == "kep"
+        else f"🏢 Паперовий в Управлінні КП (вул. Водопровідна, 1 — ліміт {RENTAL_PAPER_LOCK_HOURS} год)"
+    )
+
+    min_note = " (застосовано мін. замовлення 1 год)" if draft.get("is_minimum_applied") else ""
+    cust_type_label = {
+        "individual": "🚶 Фізична особа",
+        "fop": "💼 ФОП",
+        "legal_entity": "🏢 Юридична особа",
+    }.get(draft.get("customer_type", "individual"), "🚶 Фізична особа")
+
+    text = (
+        "📑 <b>ПЕРЕВІРКА ТА ПІДТВЕРДЖЕННЯ ЗАМОВЛЕННЯ ОРЕНДИ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>Замовник ({cust_type_label}):</b> {draft['user_full_name']}\n"
+        f"📞 <b>Телефон:</b> {draft['user_phone']} | <b>РНОКПП/ЄДРПОУ:</b> {draft.get('user_tax_id')}\n"
+        f"🚊 <b>Транспорт:</b> {draft['wagon_title']} (Депо: {draft['depot_code']})\n"
+        f"📅 <b>Дата та час:</b> <b>{draft['rental_date']}</b> | Слот: <b>{draft.get('rental_time_slot') or 'Запит у Службу руху'}</b>\n"
+        f"🗺️ <b>Маршрут:</b> {draft['pickup_stop']} ➡️ [{via_str}] ➡️ {draft['dropoff_stop']}\n"
+        f"📏 <b>Телеметрія Wialon:</b> {draft['total_distance_km']:.2f} км | {draft['total_duration_min']} хв "
+        f"(оплачуваний час: {draft.get('billable_minutes', draft['total_duration_min'])} хв{min_note})\n"
+        f"📝 <b>Формат договору:</b> {scenario_ua}\n"
+        f"💳 <b>Загальна сума до оплати:</b> <b>{draft['total_price_uah']:.2f} грн</b> "
+        f"(у т.ч. ПДВ 20%: {draft.get('vat_20_uah', 0.0):.2f} грн)\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Після натискання кнопки бот миттєво згенерує для Вас:\n"
+        "1. <b>Договір оренди №XXXX-О (PDF)</b>;\n"
+        "2. <b>Рахунок-фактуру IBAN із QR-кодом НБУ (PDF)</b>;\n"
+        "3. <b>Маршрутний лист Служби руху Wialon (PDF)</b>."
+    )
+    keyboard = [
+        [InlineKeyboardButton("🚀 Підтвердити та отримати Договір і Рахунок IBAN", callback_data="rental_confirm_create")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_FINAL_CONFIRM
+
+
+async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Створює замовлення в БД, генерує 3 PDF-документи та публікує картку в оперативному штабі."""
+    query = update.callback_query
+    await query.answer("Формуємо Договір №XXXX-О та IBAN-рахунок...")
+    user = update.effective_user
+    draft = _get_draft(context)
+
+    order = await db.create_rental_order(
+        {
+            "user_id": user.id,
+            "user_full_name": draft["user_full_name"],
+            "user_phone": draft["user_phone"],
+            "user_tax_id": draft.get("user_tax_id"),
+            "customer_type": draft.get("customer_type", "individual"),
+            "transport_type": draft["transport_type"],
+            "wagon_type": draft["wagon_title"],
+            "depot_code": draft["depot_code"],
+            "route_mode": draft["route_mode"],
+            "preset_name": draft.get("preset_name"),
+            "pickup_stop": draft["pickup_stop"],
+            "via_loops": draft.get("via_loops", []),
+            "dropoff_stop": draft["dropoff_stop"],
+            "wait_minutes": draft.get("wait_minutes", 0),
+            "extra_services": draft.get("selected_extras_titles", []),
+            "distance_pull_out_km": draft["distance_pull_out_km"],
+            "distance_route_km": draft["distance_route_km"],
+            "distance_pull_in_km": draft["distance_pull_in_km"],
+            "total_distance_km": draft["total_distance_km"],
+            "duration_pull_out_min": draft["duration_pull_out_min"],
+            "duration_route_min": draft["duration_route_min"],
+            "duration_pull_in_min": draft["duration_pull_in_min"],
+            "total_duration_min": draft["total_duration_min"],
+            "km_price_uah": draft["km_price_uah"],
+            "wait_price_uah": draft["wait_price_uah"],
+            "extras_price_uah": draft["extras_price_uah"],
+            "total_price_uah": draft["total_price_uah"],
+            "signing_scenario": draft["signing_scenario"],
+            "rental_date": draft["rental_date"],
+            "rental_time_slot": draft.get("rental_time_slot"),
+            "safety_accepted": True,
+        }
+    )
+
+    # Генеруємо та надсилаємо пакет із 3 офіційних PDF-документів
+    await _send_order_pdf_package(context, user.id, order)
+
+    # Публікуємо живу картку в штабному чаті 6 підрозділів
+    await post_or_update_staff_order_card(context, order.id)
+
+    deadline_str = (
+        order.slot_lock_expires_at.strftime("%d.%m.%Y %H:%M")
+        if order.slot_lock_expires_at
+        else "після вибору слоту"
+    )
+    if order.signing_scenario == "paper":
+        next_step_hint = (
+            f"🏢 <b>Паперовий договір:</b> роздрукуйте або підпишіть примірник в Управлінні КП «ОМЕТ» "
+            f"(<b>вул. Водопровідна, 1</b>, 09:00–17:00) та завантажте скан-копію в розділі "
+            f"<b>«📂 Діючі договори та замовлення»</b> до <b>{deadline_str}</b> (протягом 36 годин)."
+        )
+    else:
+        next_step_hint = (
+            "📱 <b>Електронний договір (КЕП / Дія.Підпис):</b> підпишіть отриманий файл Договору "
+            "у «Дії» або «Вчасно» та завантажте підписаний файл (<code>.p7s</code> або PDF з КЕП) "
+            "у розділі <b>«📂 Діючі договори та замовлення»</b>."
+        )
+
+    summary_text = (
+        f"✅ <b>ЗАМОВЛЕННЯ УСПІШНО ОФОРМЛЕНО! ДОГОВІР № {order.contract_number}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Вище Вам надіслано 3 офіційні документи:\n"
+        f"1️⃣ Договір оренди № {order.contract_number};\n"
+        f"2️⃣ Рахунок IBAN із QR-кодом НБУ на суму <b>{order.total_price_uah:.2f} грн</b>;\n"
+        f"3️⃣ Маршрутний лист Служби руху Wialon.\n\n"
+        f"{next_step_hint}"
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                f"📤 Завантажити підписаний договір №{order.contract_number}",
+                callback_data=f"rental_upload_signed:{order.id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                f"💳 Завантажити квитанцію оплати IBAN",
+                callback_data=f"rental_upload_payment:{order.id}",
+            )
+        ],
+        [InlineKeyboardButton("📂 Діючі договори та замовлення", callback_data="rental_my_contracts")],
+        [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")],
+    ]
+    await _send_or_edit(update, context, summary_text, InlineKeyboardMarkup(keyboard))
+    return ConversationHandler.END
+
+
+async def _send_order_pdf_package(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    order: RentalOrder,
+) -> None:
+    """Генерує та надсилає клієнту 3 PDF-файли: Договір №XXXX-О, Рахунок IBAN з QR НБУ та Маршрутний лист Wialon."""
+    via_loops: List[str] = []
+    try:
+        via_loops = json.loads(order.via_loops_json or "[]")
+    except Exception:
+        via_loops = []
+
+    order_dict = {
+        "contract_number": order.contract_number,
+        "contract_date": order.created_at.strftime("%d.%m.%Y") if order.created_at else datetime.datetime.now().strftime("%d.%m.%Y"),
+        "order_uid": order.order_uid,
+        "user_full_name": order.user_full_name,
+        "user_phone": order.user_phone,
+        "user_tax_id": order.user_tax_id,
+        "user_email": order.user_email,
+        "transport_type": order.transport_type,
+        "wagon_type": order.wagon_type,
+        "depot_code": order.depot_code,
+        "pickup_stop": order.pickup_stop,
+        "via_loops": via_loops,
+        "dropoff_stop": order.dropoff_stop,
+        "wait_minutes": order.wait_minutes,
+        "distance_pull_out_km": order.distance_pull_out_km,
+        "distance_route_km": order.distance_route_km,
+        "distance_pull_in_km": order.distance_pull_in_km,
+        "total_distance_km": order.total_distance_km,
+        "duration_pull_out_min": order.duration_pull_out_min,
+        "duration_route_min": order.duration_route_min,
+        "duration_pull_in_min": order.duration_pull_in_min,
+        "total_duration_min": order.total_duration_min,
+        "km_price_uah": order.km_price_uah,
+        "wait_price_uah": order.wait_price_uah,
+        "extras_price_uah": order.extras_price_uah,
+        "total_price_uah": order.total_price_uah,
+        "signing_scenario": order.signing_scenario,
+        "rental_date": order.rental_date,
+        "rental_time_slot": order.rental_time_slot,
+    }
+
+    try:
+        contract_pdf = generate_rental_contract_pdf(order_dict)
+        invoice_pdf = generate_rental_iban_invoice_pdf(order_dict)
+
+        engine_w_type = "retro" if "Ретро" in order.wagon_type or "МТВ" in order.wagon_type else "standard"
+        calc_out = calculate_rental_route(
+            RentalCalculationInput(
+                order_id=order.contract_number,
+                transport_type=order.transport_type,
+                wagon_type=engine_w_type,
+                depot_base=order.depot_code,
+                pickup_stop=order.pickup_stop,
+                dropoff_stop=order.dropoff_stop,
+                via_loops=via_loops,
+                intermediate_turning_loop=via_loops[0] if via_loops else None,
+                wait_minutes_at_loop=order.wait_minutes,
+            )
+        )
+        route_pdf = generate_rental_route_sheet_pdf(calc_out)
+
+        for path_str, caption_str in [
+            (contract_pdf, f"📄 Договір оренди № {order.contract_number}"),
+            (invoice_pdf, f"💳 Рахунок IBAN з QR-кодом НБУ (Договір № {order.contract_number})"),
+            (route_pdf, f"🗺️ Маршрутний лист Служби руху Wialon (№ {order.contract_number})"),
+        ]:
+            if os.path.exists(path_str):
+                with open(path_str, "rb") as f_doc:
+                    await context.bot.send_document(
+                        chat_id=chat_id,
+                        document=f_doc,
+                        filename=os.path.basename(path_str),
+                        caption=caption_str,
+                    )
+    except Exception as exc:
+        logger.error(f"Помилка генерації/відправки PDF-пакета для замовлення #{order.id}: {exc}")
+
+
+# ================= 8. КАБІНЕТ КЛІЄНТА: «📂 ДІЮЧІ ДОГОВОРИ ТА ЗАМОВЛЕННЯ» =================
+
+async def show_my_rental_contracts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Відображає список діючих договорів та замовлень клієнта."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    user = update.effective_user
+    if not user or not is_rental_access_allowed(user.id):
+        return
+
+    orders = await db.get_user_active_rental_orders(user.id)
+    if not orders:
+        text = (
+            "📂 <b>ДІЮЧІ ДОГОВОРИ ТА ЗАМОВЛЕННЯ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "У Вас наразі немає активних договорів оренди.\n"
+            "Натисніть кнопку нижче, щоб розрахувати маршрут та оформити замовлення:"
+        )
+        keyboard = [
+            [InlineKeyboardButton("🚋 Оформити нове замовлення", callback_data="rental_start_wizard")],
+            [InlineKeyboardButton("⬅️ Назад у меню оренди", callback_data="rental_hub")],
+        ]
+        await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
+        return
+
+    text = (
+        "📂 <b>ВАШІ ДІЮЧІ ДОГОВОРИ ТА ЗАМОВЛЕННЯ ОРЕНДИ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Оберіть договір зі списку нижче, щоб завантажити PDF-документи, обрати час подачі "
+        "або прикріпити підписаний договір (.p7s / скан) та квитанцію IBAN:\n\n"
+    )
+    buttons: List[List[InlineKeyboardButton]] = []
+    now_dt = datetime.datetime.now()
+    for o in orders:
+        timer_str = ""
+        if o.status == "awaiting_signature" and o.slot_lock_expires_at:
+            rem_sec = (o.slot_lock_expires_at - now_dt).total_seconds()
+            if rem_sec > 0:
+                rem_h = int(rem_sec // 3600)
+                rem_m = int((rem_sec % 3600) // 60)
+                timer_str = f" | ⏳ залишилось {rem_h} год {rem_m} хв"
+        text += (
+            f"• <b>Договір № {o.contract_number}</b> ({o.wagon_type})\n"
+            f"  📅 {o.rental_date} ({o.rental_time_slot or 'очікує слоту'}) | 💰 {o.total_price_uah:.2f} грн\n"
+            f"  Статус: {STATUS_LABELS_UA.get(o.status, o.status)}{timer_str}\n\n"
+        )
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    f"📄 Договір № {o.contract_number} ({o.rental_date})",
+                    callback_data=f"rental_contract_view:{o.id}",
+                )
+            ]
+        )
+
+    buttons.append([InlineKeyboardButton("➕ Оформити ще одне замовлення", callback_data="rental_start_wizard")])
+    buttons.append([InlineKeyboardButton("⬅️ Назад у меню оренди", callback_data="rental_hub")])
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
+
+
+async def show_rental_contract_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Детальна картка конкретного договору в кабінеті клієнта."""
+    query = update.callback_query
+    await query.answer()
+    order_id = int(query.data.split(":")[1])
+    order = await db.get_rental_order(order_id)
+    if not order or order.user_id != update.effective_user.id:
+        await query.answer("Договір не знайдено.", show_alert=True)
+        return
+
+    via_loops: List[str] = []
+    try:
+        via_loops = json.loads(order.via_loops_json or "[]")
+    except Exception:
+        via_loops = []
+    via_str = " ➡️ ".join(via_loops) if via_loops else "прямий рейс"
+
+    purpose = build_nbu_iban_payment_purpose(
+        order.contract_number,
+        order.created_at.strftime("%d.%m.%Y") if order.created_at else datetime.datetime.now().strftime("%d.%m.%Y"),
+    )
+
+    deadline_info = ""
+    if order.status == "awaiting_signature" and order.slot_lock_expires_at:
+        deadline_info = (
+            f"\n⏳ <b>Ліміт часу на завантаження підписаного договору (36 год):</b> "
+            f"до <b>{order.slot_lock_expires_at.strftime('%d.%m.%Y %H:%M')}</b>\n"
+        )
+
+    vehicle_info = ""
+    if order.assigned_board_number:
+        vehicle_info = (
+            f"\n🚋 <b>Призначений борт:</b> № {order.assigned_board_number} | "
+            f"Водій: {order.assigned_driver_name or '—'} ({order.assigned_driver_phone or '—'})\n"
+        )
+
+    text = (
+        f"📄 <b>ДОГОВІР ОРЕНДИ № {order.contract_number}</b>\n"
+        f"Статус: <b>{STATUS_LABELS_UA.get(order.status, order.status)}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🚊 <b>Транспорт:</b> {order.wagon_type} (Депо: {order.depot_code})\n"
+        f"📅 <b>Дата та час подачі:</b> {order.rental_date} о <b>{order.rental_time_slot or 'очікує вибору слоту'}</b>\n"
+        f"🗺️ <b>Маршрут:</b> {order.pickup_stop} ➡️ [{via_str}] ➡️ {order.dropoff_stop}\n"
+        f"📏 <b>Кілометраж Wialon:</b> {order.total_distance_km:.2f} км ({order.total_duration_min} хв)"
+        f"{deadline_info}{vehicle_info}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💳 <b>РЕКВІЗИТИ ОПЛАТИ IBAN (З ПДВ 20%):</b>\n"
+        f"• Отримувач: <code>{RENTAL_IBAN_COMPANY_NAME}</code>\n"
+        f"• ЄДРПОУ: <code>{RENTAL_IBAN_EDRPOU}</code>\n"
+        f"• Рахунок IBAN: <code>{RENTAL_IBAN_ACCOUNT}</code>\n"
+        f"• Сума до сплати: <b>{order.total_price_uah:.2f} грн</b> (у т.ч. ПДВ 20%: {order.total_price_uah / 6.0:.2f} грн)\n"
+        f"• Призначення платежу:\n<code>{purpose}</code>"
+    )
+
+    buttons: List[List[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton(
+                "📤 Завантажити підписаний договір (.p7s / скан)",
+                callback_data=f"rental_upload_signed:{order.id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "💳 Завантажити квитанцію оплати IBAN",
+                callback_data=f"rental_upload_payment:{order.id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "📥 Повторно отримати PDF (Договір + Рахунок + Маршрут)",
+                callback_data=f"rental_redownload:{order.id}",
+            )
+        ],
+        [InlineKeyboardButton("⬅️ До списку договорів", callback_data="rental_my_contracts")],
+    ]
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
+
+
+async def handle_rental_redownload_pdfs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer("Генеруємо PDF-документи...")
+    order_id = int(query.data.split(":")[1])
+    order = await db.get_rental_order(order_id)
+    if not order or order.user_id != update.effective_user.id:
+        return
+    await _send_order_pdf_package(context, update.effective_chat.id, order)
+
+
+async def handle_client_pick_order_slot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Коли Служба руху додає вільні слоти у пул на дату, клієнт натискає кнопку
+    `rental_pick_order_slot:<order_id>:<slot_time>`.
+    Обраний слот бронюється за цим замовленням, а інші слоти залишаються вільними!
+    """
+    query = update.callback_query
+    parts = query.data.split(":", 2)
+    order_id = int(parts[1])
+    slot_time = parts[2]
+
+    order = await db.get_rental_order(order_id)
+    if not order or order.user_id != update.effective_user.id:
+        await query.answer("Замовлення не знайдено.", show_alert=True)
+        return
+
+    locked_ok = await db.lock_rental_slot(
+        rental_date=order.rental_date,
+        slot_time=slot_time,
+        transport_type=order.transport_type,
+        order_id=order.id,
+    )
+    if not locked_ok:
+        free_left = await db.get_available_rental_slots(order.rental_date, order.transport_type)
+        await query.answer(
+            "⚠️ Цей слот щойно забронював інший замовник! Оберіть інший вільний час зі списку.",
+            show_alert=True,
+        )
+        if free_left:
+            kb = [
+                [InlineKeyboardButton(f"🕒 Обрати {sl}", callback_data=f"rental_pick_order_slot:{order.id}:{sl}")]
+                for sl in free_left
+            ]
+            await _send_or_edit(
+                update,
+                context,
+                f"Оберіть доступний слот на <b>{order.rental_date}</b>:",
+                InlineKeyboardMarkup(kb),
+            )
+        return
+
+    lock_hours = RENTAL_PAPER_LOCK_HOURS if order.signing_scenario == "paper" else 24
+    expires_at = datetime.datetime.now() + datetime.timedelta(hours=lock_hours)
+    updated = await db.update_rental_order_fields(
+        order.id,
+        {
+            "rental_time_slot": slot_time,
+            "slot_lock_expires_at": expires_at,
+            "status": "awaiting_signature",
+        },
+    )
+    await db.add_rental_audit_log(
+        order_id=order.id,
+        actor_id=order.user_id,
+        actor_name=order.user_full_name,
+        actor_role="Клієнт",
+        action="SLOT_LOCKED",
+        details=f"Клієнт обрав слот {slot_time} на {order.rental_date} (бронь до {expires_at.strftime('%d.%m %H:%M')})",
+    )
+    await post_or_update_staff_order_card(context, order.id)
+    await query.answer(f"✅ Слот {slot_time} успішно заброньовано!")
+
+    if updated:
+        await _send_order_pdf_package(context, order.user_id, updated)
+        await _send_or_edit(
+            update,
+            context,
+            f"✅ <b>Часовий слот {slot_time} на {order.rental_date} закріплено за Договором № {order.contract_number}!</b>\n"
+            f"Оновлений пакет документів (Договір + Рахунок IBAN з QR-кодом) надіслано вище.",
+            InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "📤 Завантажити підписаний договір (.p7s / скан)",
+                            callback_data=f"rental_upload_signed:{order.id}",
+                        )
+                    ],
+                    [InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")],
+                ]
+            ),
+        )
+
+
+# ================= 9. ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ (.P7S / СКАН) ТА КВИТАНЦІЇ IBAN =================
+
+async def rental_start_upload_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Переводить клієнта в режим завантаження підписаного договору або квитанції IBAN."""
+    query = update.callback_query
+    await query.answer()
+    action, order_id_str = query.data.split(":", 1)
+    order_id = int(order_id_str)
+    order = await db.get_rental_order(order_id)
+    if not order or order.user_id != update.effective_user.id:
+        await query.answer("Договір не знайдено.", show_alert=True)
+        return ConversationHandler.END
+
+    upload_kind = "signed_contract" if action == "rental_upload_signed" else "payment_receipt"
+    context.user_data["rental_upload_target"] = {
+        "order_id": order.id,
+        "kind": upload_kind,
+    }
+
+    if upload_kind == "signed_contract":
+        prompt_text = (
+            f"📤 <b>ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ № {order.contract_number}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Надішліть у відповідь файл або фото:\n"
+            f"• Для електронного підпису (Дія.Підпис / Вчасно): файл із розширенням <code>.p7s</code> або підписаний <code>.pdf</code>;\n"
+            f"• Для паперового договору (підписаного в Управлінні КП на вул. Водопровідна, 1): скан-копію або чітке фото підписаного примірника."
+        )
+    else:
+        prompt_text = (
+            f"💳 <b>ЗАВАНТАЖЕННЯ КВИТАНЦІЇ ОПЛАТИ IBAN ЗА ДОГОВОРОМ № {order.contract_number}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Надішліть у відповідь PDF-квитанцію або скріншот оплати з Приват24 / Monobank на суму <b>{order.total_price_uah:.2f} грн</b>."
+        )
+
+    keyboard = [[InlineKeyboardButton("⬅️ Скасувати завантаження", callback_data=f"rental_contract_view:{order.id}")]]
+    await _send_or_edit(update, context, prompt_text, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_UPLOAD_SIGNED_DOC
+
+
+async def rental_receive_uploaded_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Приймає файл або фото від клієнта, пересилає в штабний чат, на email Юрвідділу та оновлює статус."""
+    msg = update.message
+    target = context.user_data.get("rental_upload_target")
+    if not msg or not target:
+        return ConversationHandler.END
+
+    order_id = int(target["order_id"])
+    kind = target["kind"]
+    order = await db.get_rental_order(order_id)
+    if not order:
+        await msg.reply_text("❌ Замовлення не знайдено.")
+        return ConversationHandler.END
+
+    file_id: Optional[str] = None
+    file_name: str = f"Contract_{order.contract_number}.pdf"
+    is_photo = False
+
+    if msg.document:
+        file_id = msg.document.file_id
+        file_name = msg.document.file_name or file_name
+    elif msg.photo:
+        file_id = msg.photo[-1].file_id
+        file_name = f"Scan_{order.contract_number}.jpg"
+        is_photo = True
+    else:
+        await msg.reply_text("⚠️ Будь ласка, надішліть документ (файл .p7s / .pdf) або фотографію.")
+        return States.RENTAL_UPLOAD_SIGNED_DOC
+
+    staff_chat_id = order.staff_chat_id or get_active_staff_chat_id()
+
+    if kind == "signed_contract":
+        new_status = "signed_uploaded" if order.status in ("awaiting_signature", "pending_slots", "awaiting_slot_choice") else order.status
+        await db.update_rental_order_fields(
+            order.id,
+            {
+                "signed_file_id": file_id,
+                "signed_file_name": file_name,
+                "status": new_status,
+            },
+        )
+        await db.add_rental_audit_log(
+            order_id=order.id,
+            actor_id=order.user_id,
+            actor_name=order.user_full_name,
+            actor_role="Клієнт",
+            action="SIGNED_DOC_UPLOADED",
+            details=f"Завантажено підписаний договір: {file_name}",
+        )
+
+        # Завантажуємо файл у тимчасову папку для відправки на email Юридичного відділу
+        try:
+            tg_file = await context.bot.get_file(file_id)
+            tmp_dir = Path(tempfile.gettempdir()) / "transport_bot_rentals"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            local_path = str(tmp_dir / f"signed_{order.id}_{file_name}")
+            await tg_file.download_to_drive(custom_path=local_path)
+            asyncio.get_running_loop().run_in_executor(
+                None,
+                send_legal_contract_email,
+                local_path,
+                order.contract_number,
+                order.user_full_name,
+                order.signing_scenario,
+            )
+        except Exception as email_err:
+            logger.warning(f"Не вдалося надіслати файл договору на email Юрвідділу: {email_err}")
+
+        # Дублюємо файл у спільний штабний чат
+        caption_staff = (
+            f"✍️ <b>ОТРИМАНО ПІДПИСАНИЙ ДОГОВІР № {order.contract_number}</b>\n"
+            f"👤 Замовник: {order.user_full_name} ({order.user_phone})\n"
+            f"📎 Файл: <code>{file_name}</code>\n"
+            f"⚖️ Для погодження натисніть <b>«⚖️ Юрвідділ: Договір ОК»</b> на картці замовлення."
+        )
+        try:
+            if is_photo:
+                await context.bot.send_photo(chat_id=staff_chat_id, photo=file_id, caption=caption_staff, parse_mode=ParseMode.HTML)
+            else:
+                await context.bot.send_document(chat_id=staff_chat_id, document=file_id, caption=caption_staff, parse_mode=ParseMode.HTML)
+        except Exception as st_err:
+            logger.warning(f"Не вдалося переслати підписаний договір у штабний чат: {st_err}")
+
+        await post_or_update_staff_order_card(context, order.id)
+        del context.user_data["rental_upload_target"]
+
+        await msg.reply_text(
+            f"✅ <b>Підписаний договір № {order.contract_number} ({file_name}) успішно отримано!</b>\n\n"
+            f"Документ передано до Відділу правового супроводу КП «ОМЕТ» та зафіксовано в системі.",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            "💳 Завантажити квитанцію оплати IBAN",
+                            callback_data=f"rental_upload_payment:{order.id}",
+                        )
+                    ],
+                    [InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")],
+                ]
+            ),
+            parse_mode=ParseMode.HTML,
+        )
+        return ConversationHandler.END
+
+    # kind == "payment_receipt"
+    await db.update_rental_order_fields(order.id, {"payment_file_id": file_id})
+    await db.add_rental_audit_log(
+        order_id=order.id,
+        actor_id=order.user_id,
+        actor_name=order.user_full_name,
+        actor_role="Клієнт",
+        action="PAYMENT_RECEIPT_UPLOADED",
+        details=f"Завантажено квитанцію оплати IBAN ({file_name}) на суму {order.total_price_uah:.2f} грн",
+    )
+
+    caption_acc = (
+        f"💳 <b>ОТРИМАНО КВИТАНЦІЮ ОПЛАТИ IBAN ЗА ДОГОВОРОМ № {order.contract_number}</b>\n"
+        f"👤 Замовник: {order.user_full_name} ({order.user_phone})\n"
+        f"💰 Сума за договором: <b>{order.total_price_uah:.2f} грн</b>\n"
+        f"Для підтвердження зарахування коштів натисніть <b>«💳 Бухгалтерія: IBAN оплачено»</b> на картці замовлення."
+    )
+    try:
+        if is_photo:
+            await context.bot.send_photo(chat_id=staff_chat_id, photo=file_id, caption=caption_acc, parse_mode=ParseMode.HTML)
+        else:
+            await context.bot.send_document(chat_id=staff_chat_id, document=file_id, caption=caption_acc, parse_mode=ParseMode.HTML)
+    except Exception as st_err:
+        logger.warning(f"Не вдалося переслати квитанцію у штабний чат: {st_err}")
+
+    await post_or_update_staff_order_card(context, order.id)
+    del context.user_data["rental_upload_target"]
+
+    await msg.reply_text(
+        f"✅ <b>Квитанцію оплати IBAN за Договором № {order.contract_number} успішно отримано!</b>\n\n"
+        f"Документ передано до Бухгалтерії КП «ОМЕТ». Після підтвердження оплати та призначення вагона в депо "
+        f"Ви отримаєте електронний посадковий талон із QR-кодом.",
+        reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")]]
+        ),
+        parse_mode=ParseMode.HTML,
+    )
+    return ConversationHandler.END
