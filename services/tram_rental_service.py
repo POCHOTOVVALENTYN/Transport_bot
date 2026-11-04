@@ -1607,3 +1607,8 @@ def generate_rental_route_sheet_pdf(calc_output: RentalCalculationOutput, output
     pdf.output(target_path)
     calc_output.pdf_route_sheet_path = target_path
     return target_path
+
+
+# Alias for compatibility with rental handlers
+calculate_rental_route = calculate_tram_rental_trip
+
