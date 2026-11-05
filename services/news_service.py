@@ -9,10 +9,26 @@ from utils.logger import logger
 KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
 
 
+def _split_into_sentences(text_fragment: str) -> list[str]:
+    """Розбиває фрагмент тексту на речення, захищаючи типові скорочення від хибного розриву."""
+    # Маскуємо крапку у типових скороченнях (включаючи лапки або дужки перед ними)
+    masked = re.sub(
+        r'([«"\'(\s]|^)(вул|просп|пров|бульв|ім|пл|м|с|р|№)\.',
+        r'\1\2@',
+        text_fragment,
+        flags=re.IGNORECASE
+    )
+    return [s.replace('@', '.').strip() for s in re.split(r'(?<=[.!?…])\s+', masked) if s.strip()]
+
+
 def extract_news_title(text: Optional[str], max_chars: int = 140) -> str:
     """
-    Автоматично вилучає заголовок з першого (та другого за необхідності) речення тексту.
-    Враховує скорочення (вул., просп., пров., тощо), щоб не розривати речення всередині адреси.
+    Автоматично вилучає заголовок для оперативного сповіщення.
+    Пріоритет:
+    1. Перший рядок (абзац), якщо він є самостійною назвою (20..max_chars).
+    2. Якщо перший рядок занадто короткий (< 20 симв., наприклад "Увага!"), поєднує його з 1-м реченням наступного рядка.
+    3. Якщо рядок або текст довгий, бере перше речення з маскуванням скорочень (вул., просп., тощо).
+    4. Якщо заголовок все одно перевищує max_chars, м'яко скорочує по межі слів з '...'.
     """
     if not text:
         return "Оперативні зміни в роботі електротранспорту"
@@ -21,33 +37,45 @@ def extract_news_title(text: Optional[str], max_chars: int = 140) -> str:
     if not clean:
         return "Оперативні зміни в роботі електротранспорту"
 
-    normalized = " ".join(clean.split())
-    if len(normalized) <= max_chars:
-        return normalized
+    # Розбиваємо на непорожні рядки
+    lines = [line.strip() for line in clean.split('\n') if line.strip()]
+    if not lines:
+        return "Оперативні зміни в роботі електротранспорту"
 
-    # Патерн розділення на речення: знак пунктуації (. ! ? …), за яким слідує пробіл або новий рядок,
-    # але НЕ після типових скорочень.
-    abbrev_lookbehind = r'(?<!\bвул)(?<!\bпросп)(?<!\bпров)(?<!\bбульв)(?<!\bім)(?<!\bм)(?<!\bр)(?<!\b№)(?<=[.!?…])\s+'
-    sentences = [s.strip() for s in re.split(abbrev_lookbehind, clean) if s.strip()]
+    first_line = lines[0]
 
-    if not sentences:
-        return normalized[:max_chars - 3].rstrip() + "..."
+    # ПРАВИЛО 1: Перший рядок є готовим заголовком нормальної довжини (20..max_chars)
+    if 20 <= len(first_line) <= max_chars:
+        line_sentences = _split_into_sentences(first_line)
+        if len(line_sentences) > 1 and len(line_sentences[0]) >= 20:
+            return line_sentences[0]
+        return first_line
 
-    first_sentence = sentences[0]
+    # ПРАВИЛО 2: Перший рядок занадто короткий (< 20 симв., наприклад "Увага!" або "❗️ ВАЖЛИВО")
+    if len(first_line) < 20 and len(lines) > 1:
+        second_line = lines[1]
+        second_sentences = _split_into_sentences(second_line)
+        first_sentence = second_sentences[0] if second_sentences else second_line
 
-    # Якщо є друге речення і перше коротке (< 35 символів) або обидва вміщуються в ліміт:
-    if len(sentences) > 1:
-        combined = f"{first_sentence} {sentences[1]}"
+        combined = f"{first_line} {first_sentence}"
         if len(combined) <= max_chars:
             return combined
-        if len(first_sentence) < 35:
-            return combined[:max_chars - 3].rstrip() + "..."
+        first_line = combined
 
-    if len(first_sentence) <= max_chars:
-        return first_sentence
+    # ПРАВИЛО 3: Перший рядок довший за max_chars — беремо перше речення
+    sentences = _split_into_sentences(first_line)
+    target = sentences[0] if sentences else first_line
 
-    # Якщо навіть перше речення довше за ліміт, обрізаємо акуратно по межі слів
-    truncated = first_sentence[:max_chars - 3]
+    if len(sentences) > 1 and len(target) < 20:
+        combined = f"{target} {sentences[1]}"
+        if len(combined) <= max_chars:
+            target = combined
+
+    if len(target) <= max_chars:
+        return target
+
+    # ПРАВИЛО 4: Обрізання по межі цілих слів
+    truncated = target[:max_chars - 3]
     last_space = truncated.rfind(' ')
     if last_space > 30:
         truncated = truncated[:last_space]
