@@ -22,7 +22,7 @@ import sqlite3
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from config.settings import BASE_DIR
 
@@ -123,6 +123,7 @@ def _canonical_stop_key(name: str) -> str:
     s = name.strip().lower()
     s = re.sub(r"[«»\"'ʼ’`]", "", s)
     s = s.replace("іі", "ii").replace("і", "i") if "застава" in s else s
+    s = re.sub(r"(\d+)-[а-яіїє]+", r"\1", s)
     s = re.sub(r"\bст\.\s*", "станція ", s)
     s = re.sub(r"\bпл\.\s*", "площа ", s)
     s = re.sub(r"\bпросп\.\s*", "проспект ", s)
@@ -553,10 +554,17 @@ class RentalCalculationInput(BaseModel):
     intermediate_loop: Optional[str] = None
     via_loops: List[str] = Field(default_factory=list)
     loop_wait_minutes: int = Field(default=10, ge=0, le=120)
+    wait_minutes_at_loop: Optional[int] = None
     departure_time: Optional[str] = None
     day_type: DayType = "WORKDAY"
     customer_name: Optional[str] = "Служба руху КП «ОМЕТ»"
     order_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _sync_wait_minutes(self) -> "RentalCalculationInput":
+        if self.wait_minutes_at_loop is not None:
+            self.loop_wait_minutes = self.wait_minutes_at_loop
+        return self
 
 
 class RentalCalculationOutput(BaseModel):
