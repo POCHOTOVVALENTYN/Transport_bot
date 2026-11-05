@@ -372,3 +372,27 @@ def test_official_contract_formulations_and_helpers():
         order["signer_name"] = "Сидоренко П.В."
         pdf_corp = generate_rental_contract_pdf(order, target_dir=td)
         assert os.path.exists(pdf_corp)
+
+        # 7. Генерація Word .docx для всіх типів замовників
+        from services.rental_documents_service import (
+            format_money_ua,
+            generate_rental_contract_docx,
+            RENTAL_WAGON_CATALOG,
+        )
+        from services.tram_rental_service import normalize_stop_name
+
+        docx_ind = generate_rental_contract_docx(order, target_dir=td)
+        assert os.path.exists(docx_ind) and os.path.getsize(docx_ind) > 5000
+
+        # Перевірка форматування валюти
+        assert format_money_ua(10627.95) == "10 627.95"
+        assert format_money_ua(8856.63) == "8 856.63"
+        assert format_money_ua(1771.32) == "1 771.32"
+
+        # Перевірка місткості до 40 місць
+        assert RENTAL_WAGON_CATALOG["retro_mtv"]["capacity_seats"] == 40
+        assert RENTAL_WAGON_CATALOG["retro_914"]["capacity_seats"] == 40
+
+        # Перевірка аліасів кінцевих кілець (Парк ім. Т. Г. Шевченка)
+        assert normalize_stop_name("Парк ім. Т. Г. Шевченка") == "Парк ім. Тараса Шевченка"
+        assert normalize_stop_name("парк ім. т.г. шевченка") == "Парк ім. Тараса Шевченка"

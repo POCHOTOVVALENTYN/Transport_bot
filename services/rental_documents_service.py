@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import qrcode
+import docx
+from docx.shared import Pt, Cm, Inches, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import qn, nsdecls
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from pydantic import BaseModel, Field
@@ -69,24 +75,53 @@ BOLD_FONT_PATH = str(
     if (_ROOT_DIR / "assets" / "fonts" / "DejaVuSans-Bold.ttf").exists()
     else Path(FONT_PATH)
 )
+TNR_FONT_PATH = str(
+    (_ROOT_DIR / "assets" / "fonts" / "TimesNewRoman.ttf")
+    if (_ROOT_DIR / "assets" / "fonts" / "TimesNewRoman.ttf").exists()
+    else FONT_PATH
+)
+TNR_BOLD_FONT_PATH = str(
+    (_ROOT_DIR / "assets" / "fonts" / "TimesNewRoman-Bold.ttf")
+    if (_ROOT_DIR / "assets" / "fonts" / "TimesNewRoman-Bold.ttf").exists()
+    else BOLD_FONT_PATH
+)
 DEFAULT_DOC_DIR = Path(tempfile.gettempdir()) / "transport_bot_rentals"
+
+
+def format_money_ua(val: float) -> str:
+    """Форматує суму з розділенням тисяч пробілом: 10 627.95."""
+    return f"{val:,.2f}".replace(",", " ")
 
 
 # ================= КАТАЛОГ РУХОМОГО СКЛАДУ, ПОПУЛЯРНИХ МАРШРУТІВ ТА ПОСЛУГ =================
 
-# Наразі оренду відкрито виключно для трамвайного вагона РЕТРО згідно з офіційною калькуляцією КП «ОМЕТ»
+# Наразі оренду відкрито виключно для історичних ретро-вагонів КП «ОМЕТ» (депо ВРМ)
 RENTAL_WAGON_CATALOG: Dict[str, Dict[str, Any]] = {
     "retro_mtv": {
         "key": "retro_mtv",
-        "title": "🚋 Ретро-трамвай МТВ-82 / Відкритий №914",
+        "title": "🚋 Ретро-трамвай МТВ-82 (закритий салон)",
         "short_title": "Ретро-трамвай МТВ-82",
         "transport_type": "TRAM",
         "engine_wagon_type": "retro",
         "default_depot": "ВРМ",
-        "capacity_seats": 28,
+        "capacity_seats": 40,
         "hour_tariff_uah": RENTAL_TARIFF_RETRO_HOUR_UAH,
         "km_tariff": RENTAL_TARIFF_RETRO_TRAM_KM,
-        "description": "Історичний екскурсійний трамвай для свят, фотосесій та прогулянок Одесою.",
+        "is_open": False,
+        "description": "Історичний екскурсійний закритий трамвай МТВ-82 для свят, фотосесій та прогулянок Одесою.",
+    },
+    "retro_914": {
+        "key": "retro_914",
+        "title": "☀️ Відкритий ретро-вагон №914 (літній)",
+        "short_title": "Відкритий ретро-вагон №914",
+        "transport_type": "TRAM",
+        "engine_wagon_type": "retro",
+        "default_depot": "ВРМ",
+        "capacity_seats": 40,
+        "hour_tariff_uah": RENTAL_TARIFF_RETRO_HOUR_UAH,
+        "km_tariff": RENTAL_TARIFF_RETRO_TRAM_KM,
+        "is_open": True,
+        "description": "Автентичний відкритий літній трамвайний вагон №914. Не має бокового засклення та опалення (рекомендується для теплої пори року).",
     },
 }
 
@@ -117,16 +152,16 @@ RENTAL_POPULAR_PRESETS: Dict[str, Dict[str, Any]] = {
         "pickup_stop": "пл. Старосінна",
         "via_loops": ["Аркадія"],
         "dropoff_stop": "пл. Старосінна",
-        "recommended_wait_min": 20,
+        "recommended_wait_min": 10,
     },
     "tram_park_shevchenka": {
         "key": "tram_park_shevchenka",
         "transport_type": "TRAM",
         "title": "🌳 Стара Одеса та Парк Шевченка (Старосінна -> Парк Шевченка -> Тираспольська -> Старосінна)",
         "pickup_stop": "пл. Старосінна",
-        "via_loops": ["Парк ім. Т. Г. Шевченка", "пл. Тираспольська"],
+        "via_loops": ["Парк ім. Тараса Шевченка", "пл. Тираспольська"],
         "dropoff_stop": "пл. Старосінна",
-        "recommended_wait_min": 20,
+        "recommended_wait_min": 10,
     },
     "tram_fontan": {
         "key": "tram_fontan",
@@ -135,7 +170,7 @@ RENTAL_POPULAR_PRESETS: Dict[str, Dict[str, Any]] = {
         "pickup_stop": "пл. Старосінна",
         "via_loops": ["16-а ст. Великого Фонтану"],
         "dropoff_stop": "пл. Старосінна",
-        "recommended_wait_min": 30,
+        "recommended_wait_min": 10,
     },
     "tram_khadzhybei": {
         "key": "tram_khadzhybei",
@@ -144,7 +179,7 @@ RENTAL_POPULAR_PRESETS: Dict[str, Dict[str, Any]] = {
         "pickup_stop": "Херсонський сквер",
         "via_loops": ["Хаджибейський лиман"],
         "dropoff_stop": "Херсонський сквер",
-        "recommended_wait_min": 20,
+        "recommended_wait_min": 10,
     },
 }
 
@@ -337,8 +372,8 @@ def generate_rental_iban_invoice_pdf(
 
     # Блок реквізитів Отримувача та QR-код праворуч
     top_y = pdf.get_y()
-    pdf.set_fill_color(245, 248, 255)
-    pdf.set_draw_color(60, 100, 180)
+    pdf.set_fill_color(255, 255, 255)
+    pdf.set_draw_color(80, 80, 80)
     pdf.rect(10, top_y, 132, 46, "DF")
 
     pdf.set_xy(13, top_y + 2)
@@ -382,27 +417,32 @@ def generate_rental_iban_invoice_pdf(
     # QR-код НБУ праворуч
     if os.path.exists(qr_path):
         pdf.image(qr_path, x=148, y=top_y, w=46, h=46)
-    pdf.set_xy(145, top_y + 46)
-    pdf.set_font("DejaVu", "B", 7.5)
-    pdf.cell(52, 4, "Скануйте у Приват24 / Monobank", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_xy(144, top_y + 46)
+    pdf.set_font("DejaVu", "B", 6.8)
+    pdf.multi_cell(
+        50,
+        3.2,
+        "Для швидкої оплати відкрийте сканер QR у додатку банку\n(Приват24 / Monobank / Ощад24)",
+        align="C",
+    )
 
-    pdf.set_y(top_y + 53)
+    pdf.set_y(top_y + 54)
 
     # Призначення платежу (обов'язковий блок)
-    pdf.set_fill_color(255, 250, 230)
-    pdf.set_draw_color(210, 160, 40)
+    pdf.set_fill_color(255, 255, 255)
+    pdf.set_draw_color(80, 80, 80)
     pdf.rect(10, pdf.get_y(), 190, 16, "DF")
     pdf.set_xy(13, pdf.get_y() + 2)
-    pdf.set_font("DejaVu", "B", 9)
+    pdf.set_font("DejaVu", "B", 8.5)
     pdf.cell(0, 5, "ОБОВ'ЯЗКОВЕ ПРИЗНАЧЕННЯ ПЛАТЕЖУ (копіюється автоматично з QR-коду):", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(13)
-    pdf.set_font("DejaVu", "B", 8.5)
+    pdf.set_font("DejaVu", "B", 8.2)
     pdf.cell(0, 6, purpose, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(5)
 
-    # Таблиця послуг
-    pdf.set_fill_color(230, 235, 245)
-    pdf.set_draw_color(160, 160, 160)
+    # Таблиця послуг (суворий монохром)
+    pdf.set_fill_color(245, 245, 245)
+    pdf.set_draw_color(120, 120, 120)
     pdf.set_font("DejaVu", "B", 8.5)
     pdf.cell(10, 7, "№", border=1, fill=True, align="C")
     pdf.cell(105, 7, "Найменування послуги згідно з Договором №" + contract_number, border=1, fill=True)
@@ -422,17 +462,23 @@ def generate_rental_iban_invoice_pdf(
     m_part = billable_minutes % 60
     time_qty_label = f"{billable_minutes} хв ({h_part}г {m_part:02d}хв)" if m_part else f"{h_part} год"
 
+    wagon_title_raw = str(order_data.get("wagon_type") or "")
+    if "914" in wagon_title_raw or "відкритий" in wagon_title_raw.lower():
+        service_name = "Оренда відкритого ретро-вагона №914 (подача з ВРМ + маршрут + заїзд)"
+    else:
+        service_name = "Оренда ретро-вагона МТВ-82 (подача з ВРМ + маршрут + заїзд)"
+
     # Рядок 1: Орендний час вагона РЕТРО
     pdf.cell(10, 6, "1", border=1, align="C")
     pdf.cell(
         105,
         6,
-        "Оренда трамвайного вагона РЕТРО (подача з ВРМ + маршрут + заїзд)",
+        service_name,
         border=1,
     )
     pdf.cell(25, 6, time_qty_label, border=1, align="C")
-    pdf.cell(25, 6, f"{RENTAL_TARIFF_RETRO_HOUR_UAH:.2f}/год", border=1, align="C")
-    pdf.cell(25, 6, f"{time_price:.2f}", border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(25, 6, f"{format_money_ua(RENTAL_TARIFF_RETRO_HOUR_UAH)}/год", border=1, align="C")
+    pdf.cell(25, 6, format_money_ua(time_price), border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # Рядок 2: Додаткові послуги (якщо обрано)
     row_no = 2
@@ -440,22 +486,22 @@ def generate_rental_iban_invoice_pdf(
         pdf.cell(10, 6, str(row_no), border=1, align="C")
         pdf.cell(105, 6, "Додаткові сервісні послуги (прикрашання / аудіо / екскурсовод)", border=1)
         pdf.cell(25, 6, "1 компл.", border=1, align="C")
-        pdf.cell(25, 6, f"{extras_price:.2f}", border=1, align="C")
-        pdf.cell(25, 6, f"{extras_price:.2f}", border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(25, 6, format_money_ua(extras_price), border=1, align="C")
+        pdf.cell(25, 6, format_money_ua(extras_price), border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         row_no += 1
 
     # Підсумок з виділенням ПДВ 20%
     pdf.set_font("DejaVu", "", 8.5)
     pdf.cell(165, 6, "Разом без ПДВ:", border=1, align="R")
-    pdf.cell(25, 6, f"{without_vat:.2f} грн", border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(25, 6, f"{format_money_ua(without_vat)} грн", border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     pdf.cell(165, 6, "ПДВ, 20%:", border=1, align="R")
-    pdf.cell(25, 6, f"{vat_20:.2f} грн", border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(25, 6, f"{format_money_ua(vat_20)} грн", border=1, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     pdf.set_font("DejaVu", "B", 9.5)
-    pdf.set_fill_color(235, 242, 250)
+    pdf.set_fill_color(240, 240, 240)
     pdf.cell(165, 7, "ВСЬОГО ДО СПЛАТИ З ПДВ:", border=1, fill=True, align="R")
-    pdf.cell(25, 7, f"{total_price:.2f} грн", border=1, fill=True, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(25, 7, f"{format_money_ua(total_price)} грн", border=1, fill=True, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(5)
 
     pdf.set_font("DejaVu", "", 8.5)
@@ -463,7 +509,7 @@ def generate_rental_iban_invoice_pdf(
         0,
         4.5,
         "Примітка: Після здійснення оплати за реквізитами IBAN надішліть квитанцію (PDF або скріншот) у розділі "
-        "«📂 Діючі договори та замовлення» офіційного Telegram-бота КП «Одесміськелектротранс». "
+        "«Діючі договори та замовлення» офіційного Telegram-бота КП «Одесміськелектротранс». "
         "Бухгалтерія підприємства перевіряє зарахування коштів та активує наряд на випуск вагона з депо.",
     )
     pdf.ln(6)
@@ -758,7 +804,7 @@ def format_official_contract_number(raw_num: Optional[str]) -> str:
     return f"У-У/{raw}"
 
 
-# ================= ГЕНЕРАЦІЯ ДОГОВОРУ ОРЕНДИ ТА ПЕРЕВЕЗЕННЯ (PDF) =================
+# ================= ГЕНЕРАЦІЯ ДОГОВОРУ ОРЕНДИ ТА ПЕРЕВЕЗЕННЯ (PDF & DOCX) =================
 
 def generate_rental_contract_pdf(
     order_data: Dict[str, Any],
@@ -767,15 +813,11 @@ def generate_rental_contract_pdf(
 ) -> str:
     """
     Генерує офіційний Договір надання послуг по перевезенню (№ У-У/2026/____) у форматі PDF.
-    Текст повністю відповідає типовому договору КП «Одесміськелектротранс».
+    Текст повністю відповідає типовому договору КП «Одесміськелектротранс» (Перепелиця_31.10.docx).
     Включає заборону перевищення шуму (п. 2.4), штраф за затримку (п. 2.3),
     правило неповернення 50% при скасуванні (п. 4.2–4.3) та двоколонкову таблицю реквізитів.
-    Внутрішній блок узгодження (ПОГОДЖЕНО) виключено, оскільки він реалізований
-    в оперативному Telegram-штабі КП «ОМЕТ».
+    Внутрішній лист погодження (ПОГОДЖЕНО) виключено.
     """
-    if not os.path.exists(FONT_PATH):
-        raise FileNotFoundError(f"Шрифт DejaVuSans.ttf не знайдено: {FONT_PATH}")
-
     out_dir = Path(target_dir) if target_dir else DEFAULT_DOC_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -798,21 +840,33 @@ def generate_rental_contract_pdf(
     vat_20 = round(total_price - without_vat, 2)
     total_words = format_uah_amount_in_words(total_price)
 
+    w_type_str = str(order_data.get("wagon_type", "")).lower()
+    if "914" in w_type_str or "відкритий" in w_type_str:
+        wagon_contract_label = "трамвай «Ретро» (відкритий вагон №914)"
+    else:
+        wagon_contract_label = "трамвай «Ретро» (МТВ-82)"
+
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
-    pdf.add_font("DejaVu", "", FONT_PATH)
-    pdf.add_font("DejaVu", "B", BOLD_FONT_PATH)
+
+    fn = "TimesNewRoman" if os.path.exists(TNR_FONT_PATH) else "DejaVu"
+    if fn == "TimesNewRoman":
+        pdf.add_font("TimesNewRoman", "", TNR_FONT_PATH)
+        pdf.add_font("TimesNewRoman", "B", TNR_BOLD_FONT_PATH)
+    else:
+        pdf.add_font("DejaVu", "", FONT_PATH)
+        pdf.add_font("DejaVu", "B", BOLD_FONT_PATH)
 
     # 1. Шапка Договору
-    pdf.set_font("DejaVu", "B", 12)
+    pdf.set_font(fn, "B", 12)
     pdf.cell(0, 6, f"ДОГОВІР № {official_contract_number}", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("DejaVu", "", 10)
+    pdf.set_font(fn, "", 10)
     pdf.cell(0, 5, "надання послуг по перевезенню", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
     # Місто та дата
-    pdf.set_font("DejaVu", "", 9)
+    pdf.set_font(fn, "", 9)
     pdf.cell(95, 5, "м. Одеса")
     pdf.cell(95, 5, contract_date_str, align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
@@ -824,27 +878,27 @@ def generate_rental_contract_pdf(
         f"{customer['preamble_customer']}, з другої сторони, уклали цей "
         f"Договір надання послуг по перевезенню (далі — Договір) про таке:"
     )
-    pdf.set_font("DejaVu", "", 8.5)
+    pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(0, 4.3, preamble)
     pdf.ln(2)
 
     # 3. Розділ 1
-    pdf.set_font("DejaVu", "B", 9)
+    pdf.set_font(fn, "B", 9)
     pdf.cell(0, 4.8, "1. ПРЕДМЕТ ТА ЗАГАЛЬНІ УМОВИ ДОГОВОРУ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("DejaVu", "", 8.5)
+    pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
         4.1,
         f"1.1. Замовник оплачує, а Виконавець зобов’язується надати послугу по перевезенню "
-        f"електричним транспортом – а саме: транспортний засіб – трамвай «Ретро», по маршруту: {route_str}.\n"
+        f"електричним транспортом – а саме: транспортний засіб – {wagon_contract_label}, по маршруту: {route_str}.\n"
         f"1.2. Надання послуг підтверджується складанням актів надання послуг.",
     )
     pdf.ln(2)
 
     # 4. Розділ 2
-    pdf.set_font("DejaVu", "B", 9)
+    pdf.set_font(fn, "B", 9)
     pdf.cell(0, 4.8, "2. ОБОВ'ЯЗКИ ТА ПРАВА СТОРІН", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("DejaVu", "", 8.5)
+    pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
         4.1,
@@ -859,15 +913,15 @@ def generate_rental_contract_pdf(
     pdf.ln(2)
 
     # 5. Розділ 3
-    pdf.set_font("DejaVu", "B", 9)
+    pdf.set_font(fn, "B", 9)
     pdf.cell(0, 4.8, "3. ОПЛАТА ПОСЛУГ І ПОРЯДОК ЇХ ПРИЙМАННЯ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("DejaVu", "", 8.5)
+    pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
         4.1,
         f"3.1. Засобом платежу є національна валюта – гривня.\n"
         f"3.2. Розмір плати за надання послуг, що є предметом цього договору складає "
-        f"{total_price:.2f} грн. ({total_words}), з урахуванням ПДВ {vat_20:.2f} грн. "
+        f"{format_money_ua(total_price)} грн. ({total_words}), з урахуванням ПДВ {format_money_ua(vat_20)} грн. "
         f"(розраховується з урахуванням виїзду та заїзду в депо).\n"
         f"3.3. Плата за надання послуг по перевезенню здійснюється Замовником в безготівковій формі у розмірі "
         f"100% передоплати шляхом перерахування коштів відповідно до встановленого рахунку протягом трьох "
@@ -876,9 +930,9 @@ def generate_rental_contract_pdf(
     pdf.ln(2)
 
     # 6. Розділ 4
-    pdf.set_font("DejaVu", "B", 9)
+    pdf.set_font(fn, "B", 9)
     pdf.cell(0, 4.8, "4. ВІДПОВІДАЛЬНІСТЬ СТОРІН", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("DejaVu", "", 8.5)
+    pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
         4.1,
@@ -899,9 +953,9 @@ def generate_rental_contract_pdf(
     pdf.ln(2)
 
     # 7. Розділ 5
-    pdf.set_font("DejaVu", "B", 9)
+    pdf.set_font(fn, "B", 9)
     pdf.cell(0, 4.8, "5. ОБСТАВИНИ НЕПЕРЕБОРНОЇ СИЛИ (ФОРС-МАЖОР)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("DejaVu", "", 8.5)
+    pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
         4.1,
@@ -911,9 +965,9 @@ def generate_rental_contract_pdf(
     pdf.ln(2)
 
     # 8. Розділ 6
-    pdf.set_font("DejaVu", "B", 9)
+    pdf.set_font(fn, "B", 9)
     pdf.cell(0, 4.8, "6. СТРОК ДІЇ ДОГОВОРУ ТА ІНШІ УМОВИ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("DejaVu", "", 8.5)
+    pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
         4.1,
@@ -928,7 +982,7 @@ def generate_rental_contract_pdf(
     pdf.ln(3)
 
     # 9. Розділ 7: Двоколонкова таблиця реквізитів
-    pdf.set_font("DejaVu", "B", 9)
+    pdf.set_font(fn, "B", 9)
     pdf.cell(0, 4.8, "7. ЮРИДИЧНІ АДРЕСИ СТОРІН:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
@@ -946,8 +1000,8 @@ def generate_rental_contract_pdf(
         customer["short_name"],
         customer["address"],
         customer["passport"],
-        f"РНОКПП {customer['tax_id']}",
-        f"Тел.: {customer['phone']}",
+        f"РНОКПП {customer.get('tax_id', '—')}",
+        f"Тел.: {customer.get('phone', '—')}",
         "",
         "Фізична особа",
         f"_____________ {customer['signature_name']}",
@@ -973,19 +1027,19 @@ def generate_rental_contract_pdf(
 
     # Ліва колонка (ЗАМОВНИК)
     pdf.set_xy(x_left, y_pos)
-    pdf.set_font("DejaVu", "B", 8.5)
+    pdf.set_font(fn, "B", 8.5)
     pdf.cell(w_left, 4.5, "ЗАМОВНИК", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(x_left)
-    pdf.set_font("DejaVu", "", 8)
+    pdf.set_font(fn, "", 8)
     pdf.multi_cell(w_left, 3.8, customer_text)
     y_left_end = pdf.get_y()
 
     # Права колонка (ВИКОНАВЕЦЬ)
     pdf.set_xy(x_right, y_pos)
-    pdf.set_font("DejaVu", "B", 8.5)
+    pdf.set_font(fn, "B", 8.5)
     pdf.cell(w_right, 4.5, "ВИКОНАВЕЦЬ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(x_right)
-    pdf.set_font("DejaVu", "", 8)
+    pdf.set_font(fn, "", 8)
     pdf.multi_cell(w_right, 3.8, omet_text)
     y_right_end = pdf.get_y()
 
@@ -993,6 +1047,250 @@ def generate_rental_contract_pdf(
 
     pdf.output(pdf_path)
     return pdf_path
+
+
+def generate_rental_contract_docx(
+    order_data: Dict[str, Any],
+    calc_output: Optional[Any] = None,
+    target_dir: Optional[str] = None,
+) -> str:
+    """
+    Генерує офіційний Договір надання послуг по перевезенню (DOCX)
+    у точній відповідності до Перепелиця_31.10.docx:
+    - Times New Roman 14 pt, 1.15 інтервал, відступ першого рядка 1.25 см
+    - Двоколонкова таблиця реквізитів у розділі 7 без рамок
+    - Без аркуша внутрішнього погодження (ПОГОДЖЕНО)
+    """
+    out_dir = Path(target_dir) if target_dir else DEFAULT_DOC_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    raw_contract_number = str(order_data.get("contract_number", "2026-0001-О"))
+    official_contract_number = format_official_contract_number(raw_contract_number)
+    safe_num = official_contract_number.replace("/", "_").replace(" ", "_")
+    docx_path = str(out_dir / f"Contract_{safe_num}.docx")
+
+    contract_date_str = format_contract_date(order_data.get("contract_date") or order_data.get("rental_date"))
+    departure_str = format_departure_datetime(order_data.get("rental_date"), order_data.get("rental_time_slot"))
+    customer = parse_customer_details(order_data)
+    route_str = build_contract_route_string(
+        order_data.get("pickup_stop"),
+        order_data.get("dropoff_stop"),
+        order_data.get("via_loops"),
+    )
+
+    total_price = float(order_data.get("total_price_uah", 0.0))
+    without_vat = round(total_price / 1.20, 2)
+    vat_20 = round(total_price - without_vat, 2)
+    total_words = format_uah_amount_in_words(total_price)
+
+    w_type_str = str(order_data.get("wagon_type", "")).lower()
+    if "914" in w_type_str or "відкритий" in w_type_str:
+        wagon_contract_label = "трамвай «Ретро» (відкритий вагон №914)"
+    else:
+        wagon_contract_label = "трамвай «Ретро» (МТВ-82)"
+
+    doc = docx.Document()
+
+    # Налаштовуємо поля
+    for section in doc.sections:
+        section.top_margin = Cm(1.5)
+        section.bottom_margin = Cm(1.5)
+        section.left_margin = Cm(2.0)
+        section.right_margin = Cm(1.5)
+
+    style = doc.styles["Normal"]
+    style.font.name = "Times New Roman"
+    style.font.size = Pt(14)
+    style.font.color.rgb = RGBColor(0, 0, 0)
+
+    # 1. Заголовок
+    p_title = doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_title.paragraph_format.space_after = Pt(2)
+    p_title.paragraph_format.line_spacing = 1.15
+    r_title = p_title.add_run(f"ДОГОВІР № {official_contract_number}")
+    r_title.bold = True
+
+    p_sub = doc.add_paragraph()
+    p_sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_sub.paragraph_format.space_after = Pt(12)
+    p_sub.paragraph_format.line_spacing = 1.15
+    p_sub.add_run("надання послуг по перевезенню")
+
+    # 2. Місто та дата
+    p_date = doc.add_paragraph()
+    p_date.paragraph_format.space_after = Pt(12)
+    p_date.paragraph_format.line_spacing = 1.15
+    p_date.add_run(f"м. Одеса{' ' * 68}{contract_date_str}")
+
+    # 3. Преамбула
+    preamble_text = (
+        f"КОМУНАЛЬНЕ ПІДПРИЄМСТВО «ОДЕСМІСЬКЕЛЕКТРОТРАНС», в особі директора "
+        f"{RENTAL_DIRECTOR_FULL_NAME}, який діє на підставі Статуту, далі – Виконавець, з однієї сторони, та "
+        f"{customer['preamble_customer']}, з другої сторони, уклали цей "
+        f"Договір надання послуг по перевезенню (далі — Договір) про таке:"
+    )
+    p_pre = doc.add_paragraph()
+    p_pre.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p_pre.paragraph_format.first_line_indent = Cm(1.25)
+    p_pre.paragraph_format.line_spacing = 1.15
+    p_pre.paragraph_format.space_after = Pt(6)
+    p_pre.add_run(preamble_text)
+
+    def _add_section_header(title_str: str) -> None:
+        p_h = doc.add_paragraph()
+        p_h.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_h.paragraph_format.space_before = Pt(8)
+        p_h.paragraph_format.space_after = Pt(4)
+        p_h.paragraph_format.line_spacing = 1.15
+        r = p_h.add_run(title_str)
+        r.bold = True
+
+    def _add_clause(clause_text: str) -> None:
+        p_c = doc.add_paragraph()
+        p_c.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p_c.paragraph_format.first_line_indent = Cm(1.25)
+        p_c.paragraph_format.line_spacing = 1.15
+        p_c.paragraph_format.space_after = Pt(4)
+        p_c.add_run(clause_text)
+
+    # 1. ПРЕДМЕТ ТА ЗАГАЛЬНІ УМОВИ ДОГОВОРУ
+    _add_section_header("1. ПРЕДМЕТ ТА ЗАГАЛЬНІ УМОВИ ДОГОВОРУ")
+    _add_clause(
+        f"1.1. Замовник оплачує, а Виконавець зобов’язується надати послугу по перевезенню "
+        f"електричним транспортом – а саме: транспортний засіб – {wagon_contract_label}, по маршруту: {route_str}."
+    )
+    _add_clause("1.2. Надання послуг підтверджується складанням актів надання послуг.")
+
+    # 2. ОБОВ'ЯЗКИ ТА ПРАВА СТОРІН
+    _add_section_header("2. ОБОВ'ЯЗКИ ТА ПРАВА СТОРІН")
+    _add_clause(f"2.1. Виконавець зобов’язаний надати транспортний засіб в повністю справному технічному стані {departure_str}.")
+    _add_clause("2.2. Замовник зобов’язаний дотримуватися Правил користування міським пасажирським автомобільним та електричним транспортом у м. Одесі.")
+    _add_clause("2.3. У разі затримки руху з вини Замовника, Виконавець має право провести перерахунок вартості послуги з урахуванням часу затримки руху транспортного засобу.")
+    _add_clause("2.4. Замовнику забороняється при користуванні трамваєм перевищення рівнів шуму, установлених санітарними нормами на захищених об’єктах, для відповідного часу доби.")
+
+    # 3. ОПЛАТА ПОСЛУГ І ПОРЯДОК ЇХ ПРИЙМАННЯ
+    _add_section_header("3. ОПЛАТА ПОСЛУГ І ПОРЯДОК ЇХ ПРИЙМАННЯ")
+    _add_clause("3.1. Засобом платежу є національна валюта – гривня.")
+    _add_clause(
+        f"3.2. Розмір плати за надання послуг, що є предметом цього договору складає "
+        f"{format_money_ua(total_price)} грн. ({total_words}), з урахуванням ПДВ {format_money_ua(vat_20)} грн. "
+        f"(розраховується з урахуванням виїзду та заїзду в депо)."
+    )
+    _add_clause(
+        "3.3. Плата за надання послуг по перевезенню здійснюється Замовником в безготівковій формі "
+        "у розмірі 100% передоплати шляхом перерахування коштів відповідно до встановленого рахунку "
+        "протягом трьох банківських днів з моменту підписання Договору на розрахунковий рахунок Виконавця "
+        "згідно розділу 7 даного Договору."
+    )
+
+    # 4. ВІДПОВІДАЛЬНІСТЬ СТОРІН
+    _add_section_header("4. ВІДПОВІДАЛЬНІСТЬ СТОРІН")
+    _add_clause(
+        "4.1. Усі спори, пов’язані із цим Договором, його укладанням або такі, що виникають у процесі "
+        "виконання умов цього Договору, вирішуються шляхом переговорів між представниками Сторін. "
+        "Якщо спір не можливо вирішити шляхом переговорів, він вирішується в судовому порядку "
+        "за встановленою підвідомчістю та підсудністю такого спору в порядку, визначеному відповідним чинним в Україні законодавством."
+    )
+    _add_clause(
+        "4.2. У разі відмови Замовника від надання послуг, з незалежних від Виконавця причин, "
+        "якщо ним вже здійснено передоплату, 50% сплачених грошових коштів не повертається та залишаються у Виконавця. "
+        "У випадку, коли Виконавець вже провів підготовчі роботи для надання послуг, із 50% суми, "
+        "що може бути повернута Замовнику, вираховуються витрати, що були понесені Виконавцем та Замовнику "
+        "повертається відповідно зменшена сума."
+    )
+    _add_clause(
+        "4.3. У разі ненадання послуг з незалежних від Виконавця причин, якщо трамвай вже здійснив виїзд з депо, "
+        "50% грошових коштів сплачених відповідно до цього Договору не повертається та залишаються у Виконавця."
+    )
+    _add_clause(
+        "4.4. Сторони погодили, що у разі ненадання послуг Виконавцем з його вини чи надання послуг не у повному обсязі, "
+        "розмір відповідальності Виконавця не може перевищувати розміру плати за надання послуг встановленого цим Договором."
+    )
+
+    # 5. ОБСТАВИНИ НЕПЕРЕБОРНОЇ СИЛИ (ФОРС-МАЖОР)
+    _add_section_header("5. ОБСТАВИНИ НЕПЕРЕБОРНОЇ СИЛИ (ФОРС-МАЖОР)")
+    _add_clause(
+        "5.1. Сторони звільняються від відповідальності за цим Договором, якщо невиконання або неналежне виконання "
+        "зобов'язань було обумовлено настанням форс-мажорних обставин, що мають бути документально підтверджені."
+    )
+
+    # 6. СТРОК ДІЇ ДОГОВОРУ ТА ІНШІ УМОВИ
+    _add_section_header("6. СТРОК ДІЇ ДОГОВОРУ ТА ІНШІ УМОВИ")
+    _add_clause("6.1. Цей Договір набирає чинності з моменту його підписання і дійсний до повного виконання зобов’язань Сторонами.")
+    _add_clause("6.2. Зміни в цей Договір можуть бути внесені за взаємною згодою Сторін, що оформляється додатковою угодою до цього Договору.")
+    _add_clause(
+        "6.3. Зміни та доповнення, додаткові угоди та додатки до цього Договору є його невід'ємною частиною "
+        "і мають юридичну силу в разі, якщо вони викладені в письмовій формі та підписані уповноваженими на те представниками Сторін."
+    )
+    _add_clause(
+        "6.4. Усі правовідносини, що виникають у зв'язку з виконанням умов цього Договору і не врегульовані ним, "
+        "регламентуються нормами чинного в Україні законодавства."
+    )
+    _add_clause("6.5. Цей Договір складений українською мовою, у 2-х примірниках, кожний з яких має однакову юридичну силу.")
+
+    # 7. ЮРИДИЧНІ АДРЕСИ СТОРІН
+    _add_section_header("7. ЮРИДИЧНІ АДРЕСИ СТОРІН:")
+
+    table = doc.add_table(rows=1, cols=2)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    cell_cust, cell_omet = table.rows[0].cells
+    cell_cust.width = Cm(8.5)
+    cell_omet.width = Cm(8.5)
+
+    p_c = cell_cust.paragraphs[0]
+    p_c.paragraph_format.line_spacing = 1.0
+    p_c.paragraph_format.space_after = Pt(2)
+    r = p_c.add_run("ЗАМОВНИК\n")
+    r.bold = True
+    cust_lines = customer.get("section7_lines") or []
+    for line in cust_lines:
+        if line == "":
+            p_c.add_run("\n")
+        elif "Фізична особа" in line or "Підприємець" in line or "директор" in line.lower():
+            p_c.add_run(f"\n{line}\n")
+        else:
+            p_c.add_run(f"{line}\n")
+
+    p_o = cell_omet.paragraphs[0]
+    p_o.paragraph_format.line_spacing = 1.0
+    p_o.paragraph_format.space_after = Pt(2)
+    r2 = p_o.add_run("ВИКОНАВЕЦЬ\n")
+    r2.bold = True
+    omet_text_block = (
+        "КП «ОМЕТ»\n"
+        f"{RENTAL_IBAN_COMPANY_ADDRESS},\n"
+        f"IBAN {RENTAL_IBAN_ACCOUNT};\n"
+        f"в {RENTAL_BANK_NAME}; МФО {RENTAL_BANK_MFO};\n"
+        f"IBAN {RENTAL_IBAN_ACCOUNT_SECONDARY};\n"
+        f"в {RENTAL_BANK_NAME_SECONDARY};\n"
+        f"МФО {RENTAL_BANK_MFO_SECONDARY}\n"
+        f"Код ЄДРПОУ {RENTAL_EDRPOU};\n"
+        f"ІПН {RENTAL_VAT_IPN};\n"
+        f"Свід. № {RENTAL_VAT_CERTIFICATE};\n"
+        f"Тел.: {RENTAL_COMPANY_PHONE}\n\n"
+        "Директор\n\n"
+        f"____________________ {RENTAL_IBAN_DIRECTOR_NAME}"
+    )
+    p_o.add_run(omet_text_block)
+
+    # Прибираємо видимі межі таблиці
+    for row in table.rows:
+        for cell in row.cells:
+            tcPr = cell._element.get_or_add_tcPr()
+            tcBorders = parse_xml(
+                f'<w:tcBorders {nsdecls("w")}>\n'
+                f'<w:top w:val="none"/>\n'
+                f'<w:left w:val="none"/>\n'
+                f'<w:bottom w:val="none"/>\n'
+                f'<w:right w:val="none"/>\n'
+                f'</w:tcBorders>'
+            )
+            tcPr.append(tcBorders)
+
+    doc.save(docx_path)
+    return docx_path
 
 
 # ================= ГЕНЕРАЦІЯ ЕЛЕКТРОННОГО ПОСАДКОВОГО ТАЛОНА (BOARDING PASS) =================
@@ -1031,47 +1329,47 @@ def generate_rental_boarding_pass_pdf(
     pdf.add_font("DejaVu", "", FONT_PATH)
     pdf.add_font("DejaVu", "B", BOLD_FONT_PATH)
 
-    pdf.set_fill_color(235, 244, 255)
-    pdf.set_draw_color(40, 90, 170)
-    pdf.rect(10, 12, 190, 92, "DF")
+    pdf.set_fill_color(255, 255, 255)
+    pdf.set_draw_color(80, 80, 80)
+    pdf.rect(10, 12, 190, 96, "DF")
 
     pdf.set_xy(15, 16)
-    pdf.set_font("DejaVu", "B", 14)
-    pdf.cell(130, 8, "ЕЛЕКТРОННИЙ ПОСАДКОВИЙ ТАЛОН (НАРЯД-ДОПУСК)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("DejaVu", "B", 13)
+    pdf.cell(130, 7, "ЕЛЕКТРОННИЙ ПОСАДКОВИЙ ТАЛОН (НАРЯД-ДОПУСК)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(15)
-    pdf.set_font("DejaVu", "B", 11)
-    pdf.cell(130, 6, f"Договір № {contract_number} | Замовлення {order_data.get('order_uid', '')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
+    pdf.set_font("DejaVu", "B", 10.5)
+    pdf.cell(130, 5.5, f"Договір № {contract_number} | Замовлення {order_data.get('order_uid', '')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
 
     pdf.set_x(15)
-    pdf.set_font("DejaVu", "", 9.5)
-    pdf.cell(130, 6, f"Замовник: {order_data.get('user_full_name', '')} ({order_data.get('user_phone', '')})", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("DejaVu", "", 9)
+    pdf.cell(130, 5, f"Замовник: {order_data.get('user_full_name', '')} ({order_data.get('user_phone', '')})", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(15)
-    pdf.cell(130, 6, f"Дата та час подачі: {order_data.get('rental_date', '')} о {order_data.get('rental_time_slot', '')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(130, 5, f"Дата та час подачі: {order_data.get('rental_date', '')} о {order_data.get('rental_time_slot', '')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(15)
-    pdf.cell(130, 6, f"Кільце посадки: {order_data.get('pickup_stop', '')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(130, 5, f"Кільце посадки: {order_data.get('pickup_stop', '')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(15)
-    pdf.cell(130, 6, f"Кільце висадки: {order_data.get('dropoff_stop', '')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(130, 5, f"Кільце висадки: {order_data.get('dropoff_stop', '')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(15)
-    pdf.set_font("DejaVu", "B", 10)
+    pdf.set_font("DejaVu", "B", 9.5)
     pdf.cell(
         130,
-        6,
-        f"Рухомий склад: {order_data.get('wagon_type', '')} | Бортовий № {order_data.get('assigned_board_number', '—')}",
+        5,
+        f"Рухомий склад: {order_data.get('wagon_type', '')} (до 40 місць) | Бортовий № {order_data.get('assigned_board_number', '—')}",
         new_x=XPos.LMARGIN,
         new_y=YPos.NEXT,
     )
     pdf.set_x(15)
     pdf.cell(
         130,
-        6,
+        5,
         f"Водій: {order_data.get('assigned_driver_name', '—')} (тел.: {order_data.get('assigned_driver_phone', '—')})",
         new_x=XPos.LMARGIN,
         new_y=YPos.NEXT,
     )
     pdf.set_x(15)
     pdf.set_font("DejaVu", "", 8.5)
-    pdf.cell(130, 6, "Статус: ПОВНІСТЮ ПОГОДЖЕНО ТА ОПЛАЧЕНО (IBAN)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(130, 5, "Статус: ПОВНІСТЮ ПОГОДЖЕНО ТА ОПЛАЧЕНО (IBAN)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     if os.path.exists(qr_path):
         pdf.image(qr_path, x=152, y=22, w=42, h=42)

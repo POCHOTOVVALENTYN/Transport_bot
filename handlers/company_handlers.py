@@ -99,7 +99,7 @@ async def show_services_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     keyboard = []
     if update.effective_user and is_rental_access_allowed(update.effective_user.id):
         keyboard.extend([
-            [InlineKeyboardButton("🚋 Інтерактивний калькулятор оренди (Wialon)", callback_data="rental_hub")],
+            [InlineKeyboardButton("🚋 Електронна оренда ретро-трамвая", callback_data="rental_hub")],
             [InlineKeyboardButton("📂 Діючі договори та замовлення", callback_data="rental_my_contracts")],
         ])
     keyboard.extend([

@@ -53,6 +53,13 @@ STOP_ALIASES: Dict[str, str] = {
     "привоз": "ринок \"Привоз\"",
     "ринок привоз": "ринок \"Привоз\"",
     "парк шевченка": "Парк ім. Тараса Шевченка",
+    "парк ім. т. г. шевченка": "Парк ім. Тараса Шевченка",
+    "парк ім. т.г. шевченка": "Парк ім. Тараса Шевченка",
+    "парк ім. тараса шевченка": "Парк ім. Тараса Шевченка",
+    "парк т. г. шевченка": "Парк ім. Тараса Шевченка",
+    "парк т.г. шевченка": "Парк ім. Тараса Шевченка",
+    "парк шевченко": "Парк ім. Тараса Шевченка",
+    "парк ім. шевченка": "Парк ім. Тараса Шевченка",
     "цпків ім. тараса шевченка": "Парк ім. Тараса Шевченка",
     "вокзал": "Залізничний вокзал",
     "залізничний вокзал (куликове поле)": "Залізничний вокзал",
@@ -135,6 +142,12 @@ def normalize_stop_name(raw_name: str) -> str:
     low = cleaned.lower()
     if low in STOP_ALIASES:
         return STOP_ALIASES[low]
+    canon = _canonical_stop_key(cleaned)
+    if canon in STOP_ALIASES:
+        return STOP_ALIASES[canon]
+    for loop in OFFICIAL_TURNING_LOOPS:
+        if _canonical_stop_key(loop) == canon:
+            return loop
     return cleaned
 
 
@@ -1465,7 +1478,11 @@ def calculate_tram_rental_trip(calc_input: RentalCalculationInput) -> RentalCalc
     )
 
 
-def generate_rental_route_sheet_pdf(calc_output: RentalCalculationOutput, output_pdf_path: Optional[str] = None) -> str:
+def generate_rental_route_sheet_pdf(
+    calc_output: RentalCalculationOutput,
+    output_pdf_path: Optional[str] = None,
+    wagon_title: Optional[str] = None,
+) -> str:
     """Generate official Route Sheet PDF for КП «Одесміськелектротранс» Служба руху."""
     os.makedirs(ROUTE_SHEETS_DIR, exist_ok=True)
     target_path = output_pdf_path or str(ROUTE_SHEETS_DIR / f"{calc_output.order_id}_route_sheet.pdf")
@@ -1497,10 +1514,14 @@ def generate_rental_route_sheet_pdf(calc_output: RentalCalculationOutput, output
     pdf.cell(95, 5, f"Номер замовлення: {calc_output.order_id}")
     pdf.cell(95, 5, f"Дата формування: {calc_output.calculation_timestamp}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    if calc_output.transport_type == "TROLLEYBUS":
+    if wagon_title:
+        wagon_label = wagon_title
+    elif calc_output.transport_type == "TROLLEYBUS":
         wagon_label = "Тролейбус (БКМ / Богдан Т701)"
-    elif calc_output.wagon_type == "retro":
-        wagon_label = "Ретро-вагон (відкритий №914)"
+    elif "914" in str(calc_output.wagon_type) or "відкритий" in str(calc_output.wagon_type).lower():
+        wagon_label = "Відкритий ретро-вагон №914"
+    elif "мтв" in str(calc_output.wagon_type).lower() or calc_output.wagon_type == "retro" or "ретро" in str(calc_output.wagon_type).lower():
+        wagon_label = "Ретро-трамвай МТВ-82"
     else:
         wagon_label = "Стандартний (Tatra / Odissey)"
     pdf.cell(95, 5, f"Рухомий склад: {wagon_label}")

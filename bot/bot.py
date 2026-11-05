@@ -109,13 +109,16 @@ from handlers.rental_client_handlers import (
     handle_rental_redownload_pdfs,
     rental_finalize_order,
     rental_handle_customer_type_selected,
+    rental_handle_custom_time_input,
     rental_handle_date_button,
     rental_handle_date_text,
+    rental_handle_delete_file,
     rental_handle_dropoff_loop_selected,
     rental_handle_loop_pagination,
     rental_handle_name_input,
     rental_handle_phone_input,
     rental_handle_pickup_loop_selected,
+    rental_handle_resend_docs,
     rental_handle_safety_accepted,
     rental_handle_signing_selected,
     rental_handle_slot_selected,
@@ -139,6 +142,7 @@ from handlers.rental_client_handlers import (
     _prompt_route_mode,
     _render_customer_type_selection,
     _render_date_selection,
+    _render_safety_briefing,
     _render_slot_selection,
     _render_wialon_calculation_and_extras,
 )
@@ -708,27 +712,35 @@ class TransportBot:
                     CallbackQueryHandler(rental_handle_wait_selected, pattern="^rental_wait:"),
                     CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
                 ],
-                States.RENTAL_SELECT_EXTRAS: [
-                    CallbackQueryHandler(rental_toggle_extra, pattern="^rental_extra:"),
-                    CallbackQueryHandler(rental_prompt_signing_scenario, pattern="^rental_extras_done$"),
-                    CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
-                ],
-                States.RENTAL_SELECT_SIGNING_SCENARIO: [
-                    CallbackQueryHandler(rental_handle_signing_selected, pattern="^rental_sign:"),
-                    CallbackQueryHandler(_render_wialon_calculation_and_extras, pattern="^rental_back_extras$"),
-                ],
                 States.RENTAL_SELECT_DATE: [
                     CallbackQueryHandler(rental_handle_date_button, pattern="^rental_date:"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_date_text),
-                    CallbackQueryHandler(rental_prompt_signing_scenario, pattern="^rental_extras_done$"),
+                    CallbackQueryHandler(_prompt_route_mode, pattern="^rental_back_rmode$"),
                 ],
                 States.RENTAL_SELECT_SLOT: [
                     CallbackQueryHandler(rental_handle_slot_selected, pattern="^rental_slot:"),
                     CallbackQueryHandler(_render_date_selection, pattern="^rental_back_date$"),
                 ],
+                States.RENTAL_ENTER_CUSTOM_TIME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_custom_time_input),
+                    CallbackQueryHandler(_render_slot_selection, pattern="^rental_back_slot$"),
+                ],
+                States.RENTAL_SELECT_EXTRAS: [
+                    CallbackQueryHandler(rental_toggle_extra, pattern="^rental_extra:"),
+                    CallbackQueryHandler(rental_prompt_signing_scenario, pattern="^rental_extras_done$"),
+                    CallbackQueryHandler(_render_slot_selection, pattern="^rental_back_slot$"),
+                ],
+                States.RENTAL_SELECT_SIGNING_SCENARIO: [
+                    CallbackQueryHandler(rental_handle_signing_selected, pattern="^rental_sign:"),
+                    CallbackQueryHandler(_render_wialon_calculation_and_extras, pattern="^rental_back_extras$"),
+                ],
+                States.RENTAL_SAFETY_BRIEFING: [
+                    CallbackQueryHandler(rental_handle_safety_accepted, pattern="^rental_safety_accept$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
                 States.RENTAL_SELECT_CUSTOMER_TYPE: [
                     CallbackQueryHandler(rental_handle_customer_type_selected, pattern="^rental_cust_type:"),
-                    CallbackQueryHandler(_render_slot_selection, pattern="^rental_back_slot$"),
+                    CallbackQueryHandler(_render_safety_briefing, pattern="^rental_back_safety$"),
                 ],
                 States.RENTAL_ENTER_CUSTOMER_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_name_input),
@@ -740,10 +752,6 @@ class TransportBot:
                 States.RENTAL_ENTER_CUSTOMER_TAX_ID: [
                     CallbackQueryHandler(rental_handle_tax_input, pattern="^rental_tax_skip$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_tax_input),
-                ],
-                States.RENTAL_SAFETY_BRIEFING: [
-                    CallbackQueryHandler(rental_handle_safety_accepted, pattern="^rental_safety_accept$"),
-                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
                 States.RENTAL_FINAL_CONFIRM: [
                     CallbackQueryHandler(rental_finalize_order, pattern="^rental_confirm_create$"),
@@ -799,6 +807,8 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(show_my_rental_contracts, pattern="^rental_my_contracts$"))
         self.app.add_handler(CallbackQueryHandler(show_rental_contract_detail, pattern="^rental_contract_view:\\d+$"))
         self.app.add_handler(CallbackQueryHandler(handle_rental_redownload_pdfs, pattern="^rental_redownload:\\d+$"))
+        self.app.add_handler(CallbackQueryHandler(rental_handle_resend_docs, pattern="^rental_resend_docs:\\d+$"))
+        self.app.add_handler(CallbackQueryHandler(rental_handle_delete_file, pattern="^rental_del_file$"))
         self.app.add_handler(CallbackQueryHandler(handle_client_pick_order_slot, pattern="^rental_pick_order_slot:\\d+:.+$"))
         self.app.add_handler(CallbackQueryHandler(handle_rental_staff_callback, pattern="^rental_staff:"))
 
