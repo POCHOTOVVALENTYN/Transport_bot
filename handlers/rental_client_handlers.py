@@ -29,6 +29,7 @@ from config.settings import (
     RENTAL_MIN_DAYS_KEP,
     RENTAL_MIN_DAYS_PAPER,
     RENTAL_PAPER_LOCK_HOURS,
+    RENTAL_RETRO_HUB_IMAGE,
 )
 from database.db import Database, RentalOrder
 from handlers.rental_staff_handlers import (
@@ -122,6 +123,49 @@ async def _send_or_edit(
     )
 
 
+async def _send_or_edit_photo(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    photo_path: str | Path,
+    caption: str,
+    reply_markup: InlineKeyboardMarkup,
+) -> None:
+    """Надсилає або оновлює фотографію з підписом та клавіатурою для титульних розділів."""
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+
+    if os.path.exists(str(photo_path)):
+        if query and query.message:
+            if query.message.photo:
+                try:
+                    await query.edit_message_caption(
+                        caption=caption,
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.HTML,
+                    )
+                    context.user_data["media_message_ids"] = [query.message.message_id]
+                    return
+                except Exception:
+                    pass
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+
+        with open(str(photo_path), "rb") as f_photo:
+            sent_msg = await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=f_photo,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML,
+            )
+            context.user_data["media_message_ids"] = [sent_msg.message_id]
+        return
+
+    await _send_or_edit(update, context, caption, reply_markup)
+
+
 # ================= 1. ГОЛОВНИЙ ХАБ РОЗДІЛУ ОРЕНДИ =================
 
 async def show_rental_hub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -141,13 +185,10 @@ async def show_rental_hub(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     text = (
         "🚋 <b>ЕЛЕКТРОННА ОРЕНДА РЕТРО-ТРАМВАЯ КП «ОМЕТ»</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "✅ <b>Точний розрахунок Wialon:</b> автоматичний обрахунок 3 фаз рейсу "
-        "(1️⃣ Подача з депо + 2️⃣ Ваш маршрут у загальному потоці + 3️⃣ Повернення в депо).\n"
-        "✅ <b>Безпека руху:</b> посадка, проміжні зупинки та висадка пасажирів виконуються "
-        "на офіційних розворотних кільцях міста без затримки лінійних маршрутів.\n"
-        "✅ <b>Два формати договору:</b> електронний (Дія.Підпис / КЕП за 3 дні) або паперовий "
-        "в Управлінні КП на вул. Водопровідна, 1 (за 4 дні, бронь слоту 36 годин).\n"
-        "✅ <b>Офіційна оплата IBAN (без РРО):</b> миттєвий рахунок із QR-кодом НБУ для Приват24 / Monobank."
+        "✅ Точний розрахунок.\n"
+        "✅ Безпека руху.\n"
+        "✅ Доступні формати договору: електронний (Дія.Підпис / КЕП за 3 дні) або паперовий в Управлінні КП.\n"
+        "✅ Офіційна та зручна оплата IBAN."
     )
 
     keyboard = [
@@ -162,7 +203,7 @@ async def show_rental_hub(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         [InlineKeyboardButton("⬅️ Назад (Про підприємство)", callback_data="company_menu")],
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")],
     ]
-    await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
+    await _send_or_edit_photo(update, context, RENTAL_RETRO_HUB_IMAGE, text, InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
 
 

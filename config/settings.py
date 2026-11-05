@@ -69,6 +69,7 @@ TICKET_PASSES_FILE_ID_2 = "AgACAgIAAxkBAAIEMWkMn4t4dEJ9rOyVA-95XzsgsewJAAKSDWsbL
 RULES_PDF_PATH = DOCUMENTS_PATH / "rules_of_use.pdf"
 MUSEUM_LOGO_IMAGE = IMAGES_PATH / "museum_logo.png"
 RENTAL_SERVICE_IMAGE = IMAGES_PATH / "rental_service.jpg"
+RENTAL_RETRO_HUB_IMAGE = IMAGES_PATH / "rental_retro_hub.jpg"
 
 # ===============================================
 # 6. EASYWAY API НАЛАШТУВАННЯ
