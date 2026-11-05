@@ -1063,7 +1063,7 @@ async def _render_final_confirmation(update: Update, context: ContextTypes.DEFAU
         f"(у т.ч. ПДВ 20%: {format_money_ua(draft.get('vat_20_uah', 0.0))} грн)\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "Після підтвердження бот миттєво згенерує для Вас:\n"
-        "1. <b>Договір оренди (DOCX та PDF)</b>;\n"
+        "1. <b>Договір оренди (PDF)</b>;\n"
         "2. <b>Рахунок-фактуру IBAN із QR-кодом НБУ (PDF)</b>;\n"
         "3. <b>Маршрутний лист Служби руху Wialon (PDF)</b>."
     )
@@ -1145,8 +1145,8 @@ async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TY
     summary_text = (
         f"✅ <b>ЗАМОВЛЕННЯ УСПІШНО ОФОРМЛЕНО! ДОГОВІР № {order.contract_number}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Вище Вам надіслано офіційні документи:\n"
-        f"1️⃣ Договір оренди № {order.contract_number} (Word .docx та PDF);\n"
+        f"Вище Вам надіслано офіційні документи (PDF):\n"
+        f"1️⃣ Договір оренди № {order.contract_number} (PDF);\n"
         f"2️⃣ Рахунок IBAN із QR-кодом НБУ на суму <b>{format_money_ua(order.total_price_uah)} грн</b>;\n"
         f"3️⃣ Маршрутний лист Служби руху Wialon (PDF).\n\n"
         f"{next_step_hint}"
@@ -1166,7 +1166,7 @@ async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TY
         ],
         [
             InlineKeyboardButton(
-                "📥 Отримати мої документи повторно",
+                "📥 Отримати мої документи повторно (PDF)",
                 callback_data=f"rental_resend_docs:{order.id}",
             )
         ],
@@ -1248,7 +1248,6 @@ async def _send_order_pdf_package(
         )
 
         for path_str, caption_str in [
-            (contract_docx, f"📄 Договір оренди № {order.contract_number} (Word .docx)"),
             (contract_pdf, f"📄 Договір оренди № {order.contract_number} (Adobe PDF)"),
             (invoice_pdf, f"💳 Рахунок IBAN з QR-кодом НБУ (Договір № {order.contract_number})"),
             (route_pdf, f"🗺️ Маршрутний лист Служби руху Wialon (№ {order.contract_number})"),
@@ -1450,7 +1449,7 @@ async def show_rental_contract_detail(update: Update, context: ContextTypes.DEFA
         ],
         [
             InlineKeyboardButton(
-                "📥 Отримати мої документи повторно (Word + PDF)",
+                "📥 Отримати мої документи повторно (PDF)",
                 callback_data=f"rental_resend_docs:{order.id}",
             )
         ],

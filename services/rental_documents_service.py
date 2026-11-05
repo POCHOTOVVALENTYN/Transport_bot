@@ -281,23 +281,24 @@ def build_nbu_iban_qr_payload(
     amount_uah: float,
 ) -> str:
     """
-    Формує офіційний рядок QR-коду за Постановою Правління НБУ № 68 (формат BCD / UCT)
-    для миттєвої оплати у Приват24 / Monobank / Ощад 24 без РРО.
+    Формує офіційний рядок QR-коду за стандартом НБУ (Постанова Правління № 68,
+    правила UCT версії 002) для миттєвої безготівкової оплати за реквізитами IBAN
+    через мобільні застосунки українських банків (Приват24, monobank, Ощад 24/7 тощо).
     """
     purpose = build_nbu_iban_payment_purpose(contract_number, contract_date)
+    # Згідно з рекомендаціями НБУ та банківськими стандартами лапки мають бути класичними ASCII або відсутніми
+    company_name = RENTAL_IBAN_COMPANY_NAME.replace("«", '"').replace("»", '"').strip()
     lines = [
         "BCD",
         "002",
         "1",
         "UCT",
-        "",
-        RENTAL_IBAN_COMPANY_NAME,
-        RENTAL_IBAN_ACCOUNT,
+        company_name,
+        RENTAL_IBAN_ACCOUNT.strip(),
         f"UAH{amount_uah:.2f}",
-        RENTAL_IBAN_EDRPOU,
+        RENTAL_IBAN_EDRPOU.strip(),
         "",
-        "",
-        purpose,
+        purpose.strip(),
     ]
     return "\n".join(lines)
 
@@ -306,8 +307,8 @@ def _create_qr_png(payload_text: str, out_png_path: str) -> str:
     qr = qrcode.QRCode(
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=8,
-        border=2,
+        box_size=10,
+        border=4,
     )
     qr.add_data(payload_text)
     qr.make(fit=True)
@@ -683,8 +684,12 @@ def parse_customer_details(order_data: Dict[str, Any]) -> Dict[str, Any]:
     full_name = str(order_data.get("user_full_name") or "Замовник").strip()
     tax_id = str(order_data.get("user_tax_id") or "заповнюється при підписанні").strip()
     phone = str(order_data.get("user_phone") or "—").strip()
-    addr = str(order_data.get("user_address") or "65000, м. Одеса (заповнюється при підписанні)").strip()
-    passp = str(order_data.get("user_passport") or "паспорт / ID-картка (заповнюється при підписанні)").strip()
+
+    raw_addr = str(order_data.get("user_address") or "").strip()
+    addr = raw_addr if (raw_addr and raw_addr != "заповнюється при підписанні") else "65000, м. Одеса (заповнюється при підписанні)"
+
+    raw_passp = str(order_data.get("user_passport") or "").strip()
+    passp = raw_passp if (raw_passp and raw_passp != "заповнюється при підписанні") else "паспорт / ID-картка (заповнюється при підписанні)"
 
     tokens = full_name.split()
 
@@ -704,11 +709,10 @@ def parse_customer_details(order_data: Dict[str, Any]) -> Dict[str, Any]:
             addr,
             f"Код ЄДРПОУ {tax_id}",
             f"Тел.: {phone}",
-            "",
-            signer_title.capitalize(),
-            f"_____________ {signer_name}",
-            f"(діє на підставі {foundation_doc})",
         ]
+        signature_title = signer_title.capitalize()
+        signature_line = f"_____________ {signer_name}"
+        foundation_line = f"(діє на підставі {foundation_doc})"
         short_name = company_name
         sig_name = signer_name
 
@@ -723,10 +727,10 @@ def parse_customer_details(order_data: Dict[str, Any]) -> Dict[str, Any]:
             addr,
             f"РНОКПП (ІПН) {tax_id}",
             f"Тел.: {phone}",
-            "",
-            "Фізична особа-підприємець",
-            f"_____________ {sig_name}",
         ]
+        signature_title = "Фізична особа-підприємець"
+        signature_line = f"_____________ {sig_name}"
+        foundation_line = ""
         short_name = f"ФОП {full_name}"
 
     else:  # individual
@@ -750,16 +754,19 @@ def parse_customer_details(order_data: Dict[str, Any]) -> Dict[str, Any]:
             passp,
             f"РНОКПП {tax_id}",
             f"Тел.: {phone}",
-            "",
-            "Фізична особа",
-            f"_____________ {sig_name}",
         ]
+        signature_title = "Фізична особа"
+        signature_line = f"_____________ {sig_name}"
+        foundation_line = ""
 
     return {
         "customer_type": cust_type,
         "full_uppercase": full_upper,
         "preamble_customer": preamble_cust,
         "section7_lines": section7_lines,
+        "signature_title": signature_title,
+        "signature_line": signature_line,
+        "foundation_line": foundation_line,
         "short_name": short_name,
         "signature_name": sig_name,
         "address": addr,
@@ -876,7 +883,7 @@ def generate_rental_contract_pdf(
         f"КОМУНАЛЬНЕ ПІДПРИЄМСТВО «ОДЕСМІСЬКЕЛЕКТРОТРАНС», в особі директора "
         f"{RENTAL_DIRECTOR_FULL_NAME}, який діє на підставі Статуту, далі – Виконавець, з однієї сторони, та "
         f"{customer['preamble_customer']}, з другої сторони, уклали цей "
-        f"Договір надання послуг по перевезенню (далі — Договір) про таке:"
+        f"Договір надання послуг по перевезенню (далі – Договір) про таке:"
     )
     pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(0, 4.3, preamble)
@@ -987,7 +994,7 @@ def generate_rental_contract_pdf(
     pdf.ln(1)
 
     y_pos = pdf.get_y()
-    if y_pos > 230:
+    if y_pos > 220:
         pdf.add_page()
         y_pos = pdf.get_y()
 
@@ -996,19 +1003,16 @@ def generate_rental_contract_pdf(
     x_left = pdf.get_x()
     x_right = x_left + w_left + 4
 
-    customer_lines = customer.get("section7_lines") or [
+    customer_req_lines = customer.get("section7_lines") or [
         customer["short_name"],
         customer["address"],
         customer["passport"],
         f"РНОКПП {customer.get('tax_id', '—')}",
         f"Тел.: {customer.get('phone', '—')}",
-        "",
-        "Фізична особа",
-        f"_____________ {customer['signature_name']}",
     ]
-    customer_text = "\n".join(customer_lines)
+    customer_req_text = "\n".join(customer_req_lines)
 
-    omet_lines = [
+    omet_req_lines = [
         "КП «ОМЕТ»",
         f"{RENTAL_IBAN_COMPANY_ADDRESS},",
         f"IBAN {RENTAL_IBAN_ACCOUNT};",
@@ -1019,31 +1023,58 @@ def generate_rental_contract_pdf(
         f"ІПН {RENTAL_VAT_IPN};",
         f"Свід. № {RENTAL_VAT_CERTIFICATE};",
         f"Тел.: {RENTAL_COMPANY_PHONE}",
-        "",
-        "Директор",
-        f"____________________ {RENTAL_IBAN_DIRECTOR_NAME}",
     ]
-    omet_text = "\n".join(omet_lines)
+    omet_req_text = "\n".join(omet_req_lines)
 
-    # Ліва колонка (ЗАМОВНИК)
+    # Ліва колонка: ЗАМОВНИК (реквізити)
     pdf.set_xy(x_left, y_pos)
     pdf.set_font(fn, "B", 8.5)
     pdf.cell(w_left, 4.5, "ЗАМОВНИК", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(x_left)
     pdf.set_font(fn, "", 8)
-    pdf.multi_cell(w_left, 3.8, customer_text)
+    pdf.multi_cell(w_left, 3.8, customer_req_text)
     y_left_end = pdf.get_y()
 
-    # Права колонка (ВИКОНАВЕЦЬ)
+    # Права колонка: ВИКОНАВЕЦЬ (реквізити)
     pdf.set_xy(x_right, y_pos)
     pdf.set_font(fn, "B", 8.5)
     pdf.cell(w_right, 4.5, "ВИКОНАВЕЦЬ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(x_right)
     pdf.set_font(fn, "", 8)
-    pdf.multi_cell(w_right, 3.8, omet_text)
+    pdf.multi_cell(w_right, 3.8, omet_req_text)
     y_right_end = pdf.get_y()
 
-    pdf.set_y(max(y_left_end, y_right_end) + 4)
+    # Місце підписання замовника має бути на одному рівні з місцем підписання директора КП ОМЕТ
+    y_sig = max(y_left_end, y_right_end) + 4
+    if y_sig > 270:
+        pdf.add_page()
+        y_sig = pdf.get_y() + 4
+
+    # Підпис Замовника (зліва)
+    pdf.set_xy(x_left, y_sig)
+    pdf.set_font(fn, "B", 8)
+    cust_sig_title = str(customer.get("signature_title") or "Фізична особа")
+    pdf.cell(w_left, 4, cust_sig_title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_x(x_left)
+    pdf.set_font(fn, "", 8)
+    cust_sig_line = str(customer.get("signature_line") or f"_____________ {customer['signature_name']}")
+    pdf.cell(w_left, 4.5, cust_sig_line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if customer.get("foundation_line"):
+        pdf.set_x(x_left)
+        pdf.set_font(fn, "", 7.5)
+        pdf.cell(w_left, 3.5, customer["foundation_line"], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    y_cust_sig_end = pdf.get_y()
+
+    # Підпис Директора КП ОМЕТ (справа на тій же висоті y_sig)
+    pdf.set_xy(x_right, y_sig)
+    pdf.set_font(fn, "B", 8)
+    pdf.cell(w_right, 4, "Директор КП «ОМЕТ»", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_x(x_right)
+    pdf.set_font(fn, "", 8)
+    pdf.cell(w_right, 4.5, f"____________________ {RENTAL_IBAN_DIRECTOR_NAME}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    y_omet_sig_end = pdf.get_y()
+
+    pdf.set_y(max(y_cust_sig_end, y_omet_sig_end) + 4)
 
     pdf.output(pdf_path)
     return pdf_path
@@ -1128,7 +1159,7 @@ def generate_rental_contract_docx(
         f"КОМУНАЛЬНЕ ПІДПРИЄМСТВО «ОДЕСМІСЬКЕЛЕКТРОТРАНС», в особі директора "
         f"{RENTAL_DIRECTOR_FULL_NAME}, який діє на підставі Статуту, далі – Виконавець, з однієї сторони, та "
         f"{customer['preamble_customer']}, з другої сторони, уклали цей "
-        f"Договір надання послуг по перевезенню (далі — Договір) про таке:"
+        f"Договір надання послуг по перевезенню (далі – Договір) про таке:"
     )
     p_pre = doc.add_paragraph()
     p_pre.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -1246,12 +1277,13 @@ def generate_rental_contract_docx(
     r.bold = True
     cust_lines = customer.get("section7_lines") or []
     for line in cust_lines:
-        if line == "":
-            p_c.add_run("\n")
-        elif "Фізична особа" in line or "Підприємець" in line or "директор" in line.lower():
-            p_c.add_run(f"\n{line}\n")
-        else:
-            p_c.add_run(f"{line}\n")
+        p_c.add_run(f"{line}\n")
+    p_c.add_run("\n")
+    p_c.add_run(f"{customer.get('signature_title', 'Фізична особа')}\n\n")
+    sig_line = customer.get("signature_line") or f"_____________ {customer.get('signature_name', '')}"
+    p_c.add_run(f"{sig_line}\n")
+    if customer.get("foundation_line"):
+        p_c.add_run(f"{customer['foundation_line']}\n")
 
     p_o = cell_omet.paragraphs[0]
     p_o.paragraph_format.line_spacing = 1.0

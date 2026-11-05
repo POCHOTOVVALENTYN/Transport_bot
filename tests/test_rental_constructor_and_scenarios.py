@@ -238,13 +238,17 @@ def test_nbu_iban_qr_payload_generation():
     """Перевіряє відповідність рядка QR-коду стандарту Національного банку України."""
     payload = build_nbu_iban_qr_payload("У-У/2026/0099", "15.11.2026", 10627.95)
     lines = payload.split("\n")
+    assert len(lines) == 10
     assert lines[0] == "BCD"
     assert lines[1] == "002"
     assert lines[2] == "1"
     assert lines[3] == "UCT"
-    assert "КП «Одесміськелектротранс»" in payload
-    assert "UAH10627.95" in payload
-    assert "У-У/2026/0099" in payload
+    assert "Одесміськелектротранс" in lines[4]
+    assert lines[5].startswith("UA")
+    assert lines[6] == "UAH10627.95"
+    assert lines[7] == "03328497"
+    assert lines[8] == ""
+    assert "У-У/2026/0099" in lines[9]
 
 
 # ================= 3. ТЕСТИ ЗАМОВНИКІВ ТА ГЕНЕРАЦІЇ ДОКУМЕНТІВ =================
@@ -262,6 +266,8 @@ def test_customer_legal_status_details():
     assert "ФІЗИЧНА ОСОБА ШЕВЧЕНКО ТАРАС ГРИГОРОВИЧ" in ind["full_uppercase"]
     assert ind["short_name"] == "ШЕВЧЕНКО Т.Г."
     assert ind["signature_name"] == "Тарас ШЕВЧЕНКО"
+    assert ind["address"] == "65000, м. Одеса (заповнюється при підписанні)"
+    assert ind["passport"] == "паспорт / ID-картка (заповнюється при підписанні)"
 
     # 2. ФОП
     fop = parse_customer_details({
@@ -508,10 +514,10 @@ async def test_full_wizard_conversation_flow():
     assert created_order.rental_time_slot == "14:30"
     assert created_order.contract_number.endswith("-О")
 
-    # Перевіряємо, що бот надіслав документи
-    assert context.bot.send_document.call_count >= 3
+    # Перевіряємо, що бот надіслав документи (тільки 3 файли PDF, без DOCX для клієнта)
+    assert context.bot.send_document.call_count == 3
     sent_filenames = [
         call.kwargs.get("filename") for call in context.bot.send_document.call_args_list
     ]
-    assert any(fn.endswith(".docx") for fn in sent_filenames)
-    assert any(fn.endswith(".pdf") for fn in sent_filenames)
+    assert all(fn.endswith(".pdf") for fn in sent_filenames)
+    assert not any(fn.endswith(".docx") for fn in sent_filenames)
