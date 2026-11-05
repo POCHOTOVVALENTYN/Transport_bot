@@ -61,6 +61,11 @@ async def init_db():
                 except Exception:
                     pass
                 try:
+                    await conn.execute(text("ALTER TABLE news ADD COLUMN title VARCHAR"))
+                    print("✅ Migration: added title column to news")
+                except Exception:
+                    pass
+                try:
                     # Разова правка: вакансія "Електромонтер тягової підстанції" при сідінгу
                     # отримала чужий (скопійований) URL. Ідемпотентно: спрацює лише поки
                     # значення все ще хибне.
@@ -398,6 +403,7 @@ class NewsItem(Base):
     created_at = Column(DateTime, default=func.now())
     admin_id = Column(BigInteger, nullable=False)
     admin_name = Column(String, nullable=True)
+    title = Column(String, nullable=True)
     text = Column(String, nullable=True)
     media_type = Column(String, nullable=True)  # 'photo', 'video', 'animation', 'document', None
     media_file_id = Column(String, nullable=True)

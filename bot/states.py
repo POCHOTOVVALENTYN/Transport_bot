@@ -98,6 +98,7 @@ class States:
     ADMIN_VACANCY_EDIT_CONTACT_VALUE = "ADMIN_VACANCY_EDIT_CONTACT_VALUE"
 
     # ========== РОЗСИЛКА НОВИН (АДМІН) ==========
+    ADMIN_BROADCAST_TITLE = "ADMIN_BROADCAST_TITLE"
     ADMIN_BROADCAST_DURATION = "ADMIN_BROADCAST_DURATION"
 
     # ========== ОРЕНДА ТРАМВАЇВ ТА ТРОЛЕЙБУСІВ ==========

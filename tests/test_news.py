@@ -13,7 +13,7 @@ from database.db import init_db
 from services.news_service import NewsService, format_kyiv_time
 from handlers.command_handlers import get_main_menu_keyboard
 from handlers.news_handlers import build_news_broadcast_alert
-from config.messages import NEWS_BROADCAST_ALERT
+from config.messages import NEWS_BROADCAST_ALERT, format_news_broadcast_alert
 
 news_service = NewsService()
 
@@ -24,13 +24,16 @@ async def run_news_tests() -> None:
     print("   ✅ Таблиці та індекси успішно ініціалізовано")
 
     unique_marker = uuid.uuid4().hex[:8]
-    test_text_1 = f"Тестова новина 1 [{unique_marker}]: Ремонт колії на вул. Преображенській"
-    test_text_2 = f"Тестова новина 2 [{unique_marker}]: Зміна руху трамваю №5"
+    test_title_1 = f"Ремонт колії на вул. Преображенській [{unique_marker}]"
+    test_text_1 = f"Детальний опис ремонту колії на вул. Преображенській: рух тимчасово змінено."
+    test_title_2 = f"Зміна руху трамваю №5 [{unique_marker}]"
+    test_text_2 = f"Трамвай №5 прямуватиме через парк Шевченка."
 
-    print("🧪 [TEST 1] Збереження розсилки у новини (save_broadcast_news)")
+    print("🧪 [TEST 1] Збереження розсилки у новини з заголовком (save_broadcast_news)")
     news_1 = await news_service.save_broadcast_news({
         "admin_id": 12345678,
         "admin_name": "Адмін Валентин",
+        "title": test_title_1,
         "text": test_text_1,
         "media_type": None,
         "media_file_id": None,
@@ -39,8 +42,9 @@ async def run_news_tests() -> None:
     })
     assert news_1.id is not None
     assert news_1.is_active is True
+    assert news_1.title == test_title_1
     assert news_1.text == test_text_1
-    print(f"   ✅ Новину #{news_1.id} створено з is_active=True")
+    print(f"   ✅ Новину #{news_1.id} створено з title='{news_1.title}' та is_active=True")
 
     print("🧪 [TEST 2] Оновлення статистики розсилки (update_broadcast_stats)")
     await news_service.update_broadcast_stats(news_id=news_1.id, sent_count=150, blocked_count=3)
@@ -50,10 +54,11 @@ async def run_news_tests() -> None:
     assert updated_news_1.blocked_count == 3
     print(f"   ✅ Статистика оновлена: sent=150, blocked=3")
 
-    print("🧪 [TEST 3] Створення другої новини з фото")
+    print("🧪 [TEST 3] Створення другої новини з фото та заголовком")
     news_2 = await news_service.save_broadcast_news({
         "admin_id": 87654321,
         "admin_name": "Адмін Тетяна",
+        "title": test_title_2,
         "text": test_text_2,
         "media_type": "photo",
         "media_file_id": "test_file_id_abc123",
@@ -61,9 +66,10 @@ async def run_news_tests() -> None:
         "blocked_count": 1
     })
     assert news_2.id is not None
+    assert news_2.title == test_title_2
     assert news_2.media_type == "photo"
     assert news_2.media_file_id == "test_file_id_abc123"
-    print(f"   ✅ Новину #{news_2.id} з фото успішно створено")
+    print(f"   ✅ Новину #{news_2.id} з фото та title='{news_2.title}' успішно створено")
 
     print("🧪 [TEST 4] Отримання активних новин для пасажирів (get_active_news)")
     active_result = await news_service.get_active_news(limit=10, offset=0)
@@ -107,27 +113,35 @@ async def run_news_tests() -> None:
     assert "Оперативні новини" in news_btn.text
     print(f"   ✅ Кнопка знайдена: '{news_btn.text}' (callback_data='{news_btn.callback_data}')")
 
-    print("🧪 [TEST 9] Перевірка формування стандартного сповіщення (build_news_broadcast_alert)")
-    test_news_id = 42
-    alert_payload = build_news_broadcast_alert(news_id=test_news_id)
+    print("🧪 [TEST 9] Перевірка формування сповіщення (build_news_broadcast_alert) з заголовком")
+    custom_title = "Тимчасове перекриття вул. Рішельєвської"
+    alert_payload = build_news_broadcast_alert(title=custom_title, news_id=42)
     assert "text" in alert_payload
     assert "reply_markup" in alert_payload
-    assert alert_payload["text"] == NEWS_BROADCAST_ALERT
+    assert custom_title in alert_payload["text"]
     assert "ОПЕРАТИВНА ІНФОРМАЦІЯ | КП «ОМЕТ»" in alert_payload["text"]
+    assert "«📢 Оперативні новини»" in alert_payload["text"]
+    assert "автоматично видалиться через 5 хвилин" in alert_payload["text"]
 
+    # Кнопки: має бути лише одна кнопка "Зрозуміло", без кнопки "Читати новину" чи інших
     alert_buttons = [btn for row in alert_payload["reply_markup"].inline_keyboard for btn in row]
-    assert len(alert_buttons) == 2, "Сповіщення має містити рівно 2 кнопки (оперативні новини, зрозуміло)"
+    assert len(alert_buttons) == 1, "Сповіщення має містити рівно 1 кнопку: '🗑 Зрозуміло'!"
 
-    news_btn = alert_buttons[0]
-    assert news_btn.text == "📢 Оперативні новини"
-    assert news_btn.callback_data == "news_client_list:0"
-
-    dismiss_btn = alert_buttons[1]
+    dismiss_btn = alert_buttons[0]
     assert dismiss_btn.text == "🗑 Зрозуміло"
     assert dismiss_btn.callback_data == "delete_message"
-    print("   ✅ Текст та клавіатура стандартного сповіщення повністю відповідають оновленій специфікації")
+    print("   ✅ Сповіщення містить лише кнопку '🗑 Зрозуміло' та заголовок новини")
 
-    print("\n🎉 УСІ 9 ТЕСТІВ УСПІШНО ПРОЙДЕНО БЕЗ ПОМИЛОК!")
+    print("🧪 [TEST 10] Перевірка дефолтного сповіщення без заголовка")
+    default_payload = build_news_broadcast_alert()
+    assert "Оперативні зміни в роботі електротранспорту" in default_payload["text"]
+    assert "5 хвилин" in default_payload["text"]
+    default_buttons = [btn for row in default_payload["reply_markup"].inline_keyboard for btn in row]
+    assert len(default_buttons) == 1
+    assert default_buttons[0].callback_data == "delete_message"
+    print("   ✅ Дефолтне сповіщення успішно сформовано")
+
+    print("\n🎉 УСІ 10 ТЕСТІВ УСПІШНО ПРОЙДЕНО БЕЗ ПОМИЛОК!")
 
 
 def test_news_suite():

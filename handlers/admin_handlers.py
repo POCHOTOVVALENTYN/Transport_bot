@@ -355,10 +355,12 @@ async def admin_news_archive(update: Update, context: ContextTypes.DEFAULT_TYPE)
     for item in items:
         created_time = format_kyiv_time(item.created_at)
         status_icon = "🟢" if item.is_active else "🔴"
-        snippet = (item.text or "").strip().replace("\n", " ")
-        if len(snippet) > 24:
-            snippet = snippet[:22] + ".."
-        elif not snippet:
+        raw_title = (item.title or item.text or "").strip().replace("\n", " ")
+        if len(raw_title) > 24:
+            snippet = raw_title[:22] + ".."
+        elif raw_title:
+            snippet = raw_title
+        else:
             snippet = "📸 Медіаматеріал"
 
         btn_label = f"{status_icon} {created_time}: {snippet}"
@@ -421,6 +423,7 @@ async def admin_news_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expiry_label = "♾️ <b>Строк дії:</b> Без обмеження"
     content_text = news.text or "<i>(Текст відсутній / тільки медіа)</i>"
     admin_name_safe = html.escape(news.admin_name or "Адміністратор")
+    title_display = f"📢 <b>Заголовок:</b> {html.escape(news.title)}\n" if news.title else ""
 
     detail_text = (
         f"🗄️ <b>Картка розсилки #{news.id}</b>\n\n"
@@ -430,6 +433,7 @@ async def admin_news_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📌 <b>Статус:</b> {status_label}\n"
         f"{expiry_label}\n"
         f"----------------------------------------\n"
+        f"{title_display}"
         f"💬 <b>Текст оголошення:</b>\n{content_text}"
     )
 
@@ -2126,24 +2130,99 @@ async def admin_export_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Початок процесу розсилки (Крок 1 з 2: Заголовок / короткий опис).
+    Запитує короткий заголовок новини (до 120 символів).
+    """
     query = update.callback_query
     await query.answer()
     if update.effective_user.id not in GENERAL_ADMIN_IDS:
-        return
+        return ConversationHandler.END
 
-    # Кнопка "Скасувати" веде в General Menu
+    # Очищуємо попередні тимчасові дані розсилки
+    context.user_data.pop('broadcast_title', None)
+    context.user_data.pop('broadcast_news_data', None)
+    context.user_data.pop('broadcast_msg_id', None)
+    context.user_data.pop('broadcast_chat_id', None)
+    context.user_data.pop('msgs_to_delete', None)
+    context.user_data.pop('broadcast_duration_msg_id', None)
+    context.user_data.pop('broadcast_users_count', None)
+    context.user_data.pop('broadcast_expires_at', None)
+
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="general_admin_menu")]])
 
-    # --- ЗМІНА: Зберігаємо результат (повідомлення) у змінну ---
+    prompt_text = (
+        "📢 <b>Режим розсилки оперативних новин (Крок 1 з 2)</b>\n\n"
+        "Введіть <b>короткий заголовок (опис)</b> новини (до 120 символів).\n\n"
+        "ℹ️ <i>Цей заголовок відображатиметься у швидкому сповіщенні в чаті користувачів та в списку «Оперативні новини».</i>\n\n"
+        "<i>Приклад: Тимчасове призупинення руху трамваїв №1, 7 через ремонт колії на вул. Чорноморського козацтва</i>"
+    )
+
     sent_msg = await query.edit_message_text(
-        "📢 <b>Режим розсилки новин</b>\n\n"
-        "Надішліть повідомлення (текст, фото або відео), яке отримають <b>ВСІ</b> користувачі бота.",
+        prompt_text,
         reply_markup=back_btn,
         parse_mode=ParseMode.HTML
     )
 
-    # --- ЗМІНА: Запам'ятовуємо ID цього повідомлення, щоб видалити пізніше ---
     context.user_data['broadcast_start_msg_id'] = sent_msg.message_id
+    context.user_data['msgs_to_delete'] = [sent_msg.message_id]
+
+    return States.ADMIN_BROADCAST_TITLE
+
+
+async def admin_broadcast_title_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Зберігає введений заголовок (Крок 1) та запитує основний контент новини (Крок 2 з 2).
+    """
+    user_id = update.effective_user.id
+    if user_id not in GENERAL_ADMIN_IDS:
+        return ConversationHandler.END
+
+    msg = update.message
+    if not msg or not msg.text:
+        warning_msg = await update.effective_chat.send_message(
+            "⚠️ Будь ласка, введіть заголовок новини звичайним текстом."
+        )
+        msgs_to_delete = context.user_data.setdefault('msgs_to_delete', [])
+        msgs_to_delete.append(warning_msg.message_id)
+        return States.ADMIN_BROADCAST_TITLE
+
+    title = msg.text.strip()
+    if not title:
+        warning_msg = await msg.reply_text("⚠️ Заголовок не може бути порожнім. Введіть заголовок новини:")
+        msgs_to_delete = context.user_data.setdefault('msgs_to_delete', [])
+        msgs_to_delete.extend([msg.message_id, warning_msg.message_id])
+        return States.ADMIN_BROADCAST_TITLE
+
+    if len(title) > 140:
+        warning_msg = await msg.reply_text(
+            f"⚠️ Заголовок занадто довгий ({len(title)} симв.). Максимальна довжина — 120-140 символів.\n"
+            "Будь ласка, скоротіть заголовок та надішліть знову:"
+        )
+        msgs_to_delete = context.user_data.setdefault('msgs_to_delete', [])
+        msgs_to_delete.extend([msg.message_id, warning_msg.message_id])
+        return States.ADMIN_BROADCAST_TITLE
+
+    context.user_data['broadcast_title'] = title
+
+    msgs_to_delete = context.user_data.setdefault('msgs_to_delete', [])
+    msgs_to_delete.append(msg.message_id)
+
+    back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="general_admin_menu")]])
+
+    step2_text = (
+        "📢 <b>Режим розсилки оперативних новин (Крок 2 з 2)</b>\n\n"
+        f"📌 <b>Заголовок:</b> <i>{html.escape(title)}</i>\n\n"
+        "Тепер надішліть <b>основний зміст новини</b> (детальний опис, причини або фото/відео/документ з описом).\n\n"
+        "ℹ️ <i>Цей повний матеріал пасажири зможуть прочитати у розділі «📢 Оперативні новини».</i>"
+    )
+
+    prompt_msg = await msg.reply_text(
+        step2_text,
+        reply_markup=back_btn,
+        parse_mode=ParseMode.HTML
+    )
+    msgs_to_delete.append(prompt_msg.message_id)
 
     return States.ADMIN_BROADCAST_TEXT
 
@@ -2176,6 +2255,8 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
         )
         return ConversationHandler.END
 
+    broadcast_title = context.user_data.get('broadcast_title', '')
+
     # 2. Зберігаємо дані для розсилки
     context.user_data['broadcast_msg_id'] = msg.message_id
     context.user_data['broadcast_chat_id'] = msg.chat_id
@@ -2198,29 +2279,22 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
         news_media_file_id = msg.document.file_id
 
     context.user_data['broadcast_news_data'] = {
+        'title': broadcast_title,
         'text': news_text,
         'media_type': news_media_type,
         'media_file_id': news_media_file_id
     }
 
     # --- Формуємо список видалення ---
-    msgs_to_delete = []
-
-    # а) Додаємо стартове повідомлення ("Режим розсилки..."), якщо воно є
-    start_msg_id = context.user_data.pop('broadcast_start_msg_id', None)
-    if start_msg_id:
-        msgs_to_delete.append(start_msg_id)
-
-    # б) Додаємо повідомлення, яке щойно надіслав адмін (текст/фото)
+    msgs_to_delete = context.user_data.setdefault('msgs_to_delete', [])
     msgs_to_delete.append(msg.message_id)
-
-    # Зберігаємо список у контекст (поки що неповний)
-    context.user_data['msgs_to_delete'] = msgs_to_delete
 
     # 3. Робимо "Прев'ю"
     # Ми зберігаємо повідомлення в змінну і додаємо його ID у список видалення
+    title_header = f"📌 <b>Заголовок:</b> {html.escape(broadcast_title)}\n\n" if broadcast_title else ""
     preview_title_msg = await msg.reply_text(
-        "👁 <b>Попередній перегляд матеріалу:</b>\n"
+        f"👁 <b>Попередній перегляд матеріалу в «Оперативних новинах»:</b>\n"
+        f"{title_header}"
         "<i>(Саме так новина відображатиметься у розділі «Оперативні новини»)</i>",
         parse_mode=ParseMode.HTML
     )
@@ -2228,13 +2302,15 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
 
     preview_msg = await msg.copy(chat_id=user_id)
     # Додаємо ID самого прев'ю (копії) до списку видалення
-    context.user_data['msgs_to_delete'].append(preview_msg.message_id)
+    msgs_to_delete.append(preview_msg.message_id)
 
     # Прев'ю компактного пуш-сповіщення, яке отримають пасажири в чат
+    alert_payload = build_news_broadcast_alert(title=broadcast_title)
     preview_alert_msg = await msg.reply_text(
         "💬 <b>Попередній перегляд сповіщення в чаті пасажирів:</b>\n"
-        "<i>(Новину буде додано в розділ «Оперативні новини», а підписники отримають це сповіщення)</i>\n\n"
-        f"{NEWS_BROADCAST_ALERT}",
+        "<i>(Це сповіщення надійде підписникам та автоматично видалиться через 5 хвилин)</i>\n\n"
+        f"{alert_payload['text']}",
+        reply_markup=alert_payload['reply_markup'],
         parse_mode=ParseMode.HTML
     )
     msgs_to_delete.append(preview_alert_msg.message_id)
@@ -2249,16 +2325,17 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
         [InlineKeyboardButton("❌ Скасувати / Редагувати", callback_data="broadcast_cancel")]
     ]
 
+    title_summary = f"📌 Заголовок: <b>{html.escape(broadcast_title)}</b>\n\n" if broadcast_title else ""
     menu_msg = await msg.reply_text(
         f"📢 <b>Підготовка до розсилки</b>\n\n"
         f"👥 Кількість отримувачів: <b>{len(users)}</b>\n"
-        f"⚠️ Перевірте вигляд повідомлення вище.\n\n"
+        f"{title_summary}"
         f"⏳ На скільки цю новину показувати як актуальну в розділі «Новини»?",
         reply_markup=InlineKeyboardMarkup(duration_keyboard),
         parse_mode=ParseMode.HTML
     )
     # Додаємо ID меню до списку видалення
-    context.user_data['msgs_to_delete'].append(menu_msg.message_id)
+    msgs_to_delete.append(menu_msg.message_id)
     context.user_data['broadcast_duration_msg_id'] = menu_msg.message_id
     context.user_data['broadcast_users_count'] = len(users)
 
@@ -2284,6 +2361,9 @@ async def admin_broadcast_duration_selected(update: Update, context: ContextType
     context.user_data['broadcast_expires_at'] = expires_at
 
     users_count = context.user_data.get('broadcast_users_count', 0)
+    broadcast_title = context.user_data.get('broadcast_title', '')
+    title_info = f"📌 Заголовок: <b>{html.escape(broadcast_title)}</b>\n" if broadcast_title else ""
+
     confirm_keyboard = [
         [InlineKeyboardButton(f"✅ Надіслати ({users_count} кор.)", callback_data="broadcast_confirm")],
         [InlineKeyboardButton("❌ Скасувати / Редагувати", callback_data="broadcast_cancel")]
@@ -2292,14 +2372,46 @@ async def admin_broadcast_duration_selected(update: Update, context: ContextType
     await query.edit_message_text(
         f"📢 <b>Підготовка до розсилки</b>\n\n"
         f"👥 Кількість отримувачів: <b>{users_count}</b>\n"
+        f"{title_info}"
         f"⏳ Строк дії новини: <b>{duration_label}</b>\n\n"
-        f"ℹ️ <i>Повний матеріал буде збережено в «Оперативні новини», а підписникам надійде стандартне сповіщення з кнопкою швидкого перегляду.</i>\n\n"
+        f"ℹ️ <i>Повний матеріал буде збережено в «Оперативні новини», а підписникам надійде сповіщення із заголовком та кнопкою видалення (автовидалення через 5 хв).</i>\n\n"
         f"Натисніть <b>Надіслати</b> для запуску або <b>Скасувати</b> для редагування.",
         reply_markup=InlineKeyboardMarkup(confirm_keyboard),
         parse_mode=ParseMode.HTML
     )
 
     return States.ADMIN_BROADCAST_CONFIRM
+
+
+async def _delayed_delete_messages(bot, sent_messages: list[tuple[int, int]], delay: int = 300) -> None:
+    """Видаляє повідомлення розсилки через delay секунд з урахуванням рейтлімітів."""
+    try:
+        await asyncio.sleep(delay)
+        for index, (user_id, msg_id) in enumerate(sent_messages, start=1):
+            try:
+                await bot.delete_message(chat_id=user_id, message_id=msg_id)
+            except Exception as e:
+                logger.debug(f"Could not auto-delete broadcast msg {msg_id} for user {user_id}: {e}")
+            if index % 25 == 0:
+                await asyncio.sleep(0.5)
+        logger.info(f"Auto-deleted {len(sent_messages)} broadcast messages.")
+    except Exception as e:
+        logger.error(f"Error in delayed delete messages: {e}")
+
+
+async def auto_delete_broadcast_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """JobQueue обробник для видалення повідомлень розсилки через 5 хвилин."""
+    sent_messages = context.job.data or []
+    if not sent_messages:
+        return
+    for index, (user_id, msg_id) in enumerate(sent_messages, start=1):
+        try:
+            await context.bot.delete_message(chat_id=user_id, message_id=msg_id)
+        except Exception as e:
+            logger.debug(f"Could not auto-delete broadcast msg {msg_id} for user {user_id}: {e}")
+        if index % 25 == 0:
+            await asyncio.sleep(0.5)
+    logger.info(f"JobQueue: Auto-deleted {len(sent_messages)} broadcast messages.")
 
 
 async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2330,8 +2442,6 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
 
         # --- ЛОГІКА ВІДПРАВКИ ---
         status_msg = await query.message.reply_text("🚀 Розсилка розпочалась... Не закривайте бота.")
-
-        # РЕКОМЕНДАЦІЯ: Додайте його в список на видалення для надійності
         msgs_to_delete.append(status_msg.message_id)
 
         msg_id = context.user_data.get('broadcast_msg_id')
@@ -2340,6 +2450,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
 
         # Автоматичне створення запису в оперативних новинах
         news_payload = context.user_data.get('broadcast_news_data', {})
+        broadcast_title = context.user_data.get('broadcast_title') or news_payload.get('title')
         expires_at = context.user_data.get('broadcast_expires_at')
         admin_user = update.effective_user
         created_news = None
@@ -2348,6 +2459,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
             created_news = await news_service.save_broadcast_news({
                 "admin_id": admin_user.id,
                 "admin_name": admin_name,
+                "title": broadcast_title,
                 "text": news_payload.get("text", ""),
                 "media_type": news_payload.get("media_type"),
                 "media_file_id": news_payload.get("media_file_id"),
@@ -2361,20 +2473,22 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
         count = 0
         blocked = 0
         start_time = datetime.now()
+        sent_messages: list[tuple[int, int]] = []
 
-        # Формуємо стандартне сповіщення для пасажирів (Варіант 1)
+        # Формуємо стандартне сповіщення для пасажирів із заголовком новини
         news_id = created_news.id if created_news else 0
-        alert_payload = build_news_broadcast_alert(news_id=news_id)
+        alert_payload = build_news_broadcast_alert(title=broadcast_title or "", news_id=news_id)
 
         # Цикл розсилки стандартного сповіщення
         for index, user_id in enumerate(users, start=1):
             try:
-                await context.bot.send_message(
+                sent_msg = await context.bot.send_message(
                     chat_id=user_id,
                     text=alert_payload["text"],
                     reply_markup=alert_payload["reply_markup"],
                     parse_mode=ParseMode.HTML
                 )
+                sent_messages.append((user_id, sent_msg.message_id))
                 count += 1
                 if index % BROADCAST_BATCH_SIZE == 0:
                     await asyncio.sleep(BROADCAST_PAUSE_SEC)
@@ -2393,8 +2507,19 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
             except Exception as update_err:
                 logger.error(f"Failed to update news broadcast stats: {update_err}")
 
-        # Видаляємо повідомлення "Розсилка розпочалась..."
-        #await status_msg.delete()
+        # Планування автоматичного видалення через 5 хвилин (300 секунд)
+        if sent_messages:
+            if context.job_queue:
+                context.job_queue.run_once(
+                    auto_delete_broadcast_job,
+                    when=300,
+                    data=sent_messages,
+                    name=f"auto_delete_broadcast_{int(datetime.now().timestamp())}"
+                )
+                logger.info(f"Scheduled JobQueue auto-deletion for {len(sent_messages)} messages in 300s")
+            else:
+                asyncio.create_task(_delayed_delete_messages(context.bot, sent_messages, 300))
+                logger.info(f"Scheduled asyncio.create_task auto-deletion for {len(sent_messages)} messages in 300s")
 
         # Фінальний звіт
         duration = (datetime.now() - start_time).total_seconds()
@@ -2404,7 +2529,8 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
                 f"✅ <b>Новину опубліковано в «Оперативні новини», а сповіщення надіслано!</b>\n\n"
                 f"📨 Успішно надіслано: <b>{count}</b>\n"
                 f"🚫 Не отримали (блокували): <b>{blocked}</b>\n"
-                f"⏱️ Час виконання: <b>{duration:.1f} сек.</b>"
+                f"⏱️ Час виконання: <b>{duration:.1f} сек.</b>\n"
+                f"🗑️ <i>Сповіщення в чатах пасажирів автоматично видаляться через 5 хвилин.</i>"
             ),
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("🔙 В адмінку", callback_data="general_admin_menu")]]),
@@ -2425,6 +2551,7 @@ async def admin_broadcast_send_confirm(update: Update, context: ContextTypes.DEF
                 logger.debug(f"Could not delete message {mid}: {e}")
 
         # Очищаємо дані сесії
+        context.user_data.pop('broadcast_title', None)
         context.user_data.pop('broadcast_msg_id', None)
         context.user_data.pop('broadcast_chat_id', None)
         context.user_data.pop('broadcast_news_data', None)

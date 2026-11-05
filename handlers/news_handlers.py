@@ -1,25 +1,27 @@
+import html
 from typing import Optional, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
-from config.messages import NEWS_BROADCAST_ALERT
+from config.messages import NEWS_BROADCAST_ALERT, format_news_broadcast_alert
 from services.news_service import NewsService, format_kyiv_time
 from utils.logger import logger
 
 news_service = NewsService()
 
 
-def build_news_broadcast_alert(news_id: int = 0) -> dict[str, Any]:
+def build_news_broadcast_alert(title: str = "", news_id: int = 0) -> dict[str, Any]:
     """
     Формує текст та клавіатуру стандартного сповіщення для розсилки в чат.
-    RORO: приймає news_id (опціонально), повертає dict з 'text' та 'reply_markup'.
+    RORO: приймає title та news_id (опціонально), повертає dict з 'text' та 'reply_markup'.
+    Містить лише кнопку "Зрозуміло" (delete_message).
     """
+    alert_text = format_news_broadcast_alert(title=title)
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Оперативні новини", callback_data="news_client_list:0")],
         [InlineKeyboardButton("🗑 Зрозуміло", callback_data="delete_message")]
     ])
     return {
-        "text": NEWS_BROADCAST_ALERT,
+        "text": alert_text,
         "reply_markup": keyboard
     }
 
@@ -98,13 +100,15 @@ async def news_client_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     for news in items:
         created_time = format_kyiv_time(news.created_at)
-        preview_text = (news.text or "").strip().replace("\n", " ")
-        if len(preview_text) > 32:
-            preview_text = preview_text[:30] + ".."
-        elif not preview_text:
-            preview_text = "📸 Медіаматеріал"
+        raw_text = (news.title or news.text or "").strip().replace("\n", " ")
+        if len(raw_text) > 32:
+            display_title = raw_text[:30] + ".."
+        elif raw_text:
+            display_title = raw_text
+        else:
+            display_title = "📸 Медіаматеріал"
 
-        button_label = f"📅 {created_time}: {preview_text}"
+        button_label = f"📅 {created_time}: {display_title}"
         keyboard.append([
             InlineKeyboardButton(button_label, callback_data=f"news_client_view:{news.id}:{offset}")
         ])
@@ -170,9 +174,11 @@ async def news_client_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     created_time = format_kyiv_time(news.created_at)
     content_text = news.text or "<i>(Оголошення без додаткового тексту)</i>"
+    title_block = f"📌 <b>{html.escape(news.title)}</b>\n\n" if news.title else ""
     detail_message = (
         f"📢 <b>Оперативна новина</b>\n"
         f"📅 Опубліковано: <b>{created_time}</b>\n\n"
+        f"{title_block}"
         f"{content_text}"
     )
 

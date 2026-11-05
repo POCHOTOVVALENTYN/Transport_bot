@@ -44,6 +44,7 @@ class NewsService:
             news = NewsItem(
                 admin_id=admin_id,
                 admin_name=params.get("admin_name", "Адміністратор"),
+                title=params.get("title"),
                 text=params.get("text", ""),
                 media_type=params.get("media_type"),
                 media_file_id=params.get("media_file_id"),
