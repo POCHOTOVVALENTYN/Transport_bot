@@ -10,7 +10,7 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///test_news.db"
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from database.db import init_db
-from services.news_service import NewsService, format_kyiv_time
+from services.news_service import NewsService, format_kyiv_time, extract_news_title
 from handlers.command_handlers import get_main_menu_keyboard
 from handlers.news_handlers import build_news_broadcast_alert
 from config.messages import NEWS_BROADCAST_ALERT, format_news_broadcast_alert
@@ -113,15 +113,17 @@ async def run_news_tests() -> None:
     assert "Оперативні новини" in news_btn.text
     print(f"   ✅ Кнопка знайдена: '{news_btn.text}' (callback_data='{news_btn.callback_data}')")
 
-    print("🧪 [TEST 9] Перевірка формування сповіщення (build_news_broadcast_alert) з заголовком")
+    print("🧪 [TEST 9] Перевірка формування сповіщення (build_news_broadcast_alert) з фокусом на заголовку")
     custom_title = "Тимчасове перекриття вул. Рішельєвської"
     alert_payload = build_news_broadcast_alert(title=custom_title, news_id=42)
     assert "text" in alert_payload
     assert "reply_markup" in alert_payload
     assert custom_title in alert_payload["text"]
-    assert "ОПЕРАТИВНА ІНФОРМАЦІЯ | КП «ОМЕТ»" in alert_payload["text"]
     assert "«📢 Оперативні новини»" in alert_payload["text"]
-    assert "автоматично видалиться через 5 хвилин" in alert_payload["text"]
+
+    # Перевірка відсутності шапки та попередження про автовидалення
+    assert "ОПЕРАТИВНА ІНФОРМАЦІЯ | КП «ОМЕТ»" not in alert_payload["text"]
+    assert "автоматично видалиться через 5 хвилин" not in alert_payload["text"]
 
     # Кнопки: має бути лише одна кнопка "Зрозуміло", без кнопки "Читати новину" чи інших
     alert_buttons = [btn for row in alert_payload["reply_markup"].inline_keyboard for btn in row]
@@ -130,18 +132,42 @@ async def run_news_tests() -> None:
     dismiss_btn = alert_buttons[0]
     assert dismiss_btn.text == "🗑 Зрозуміло"
     assert dismiss_btn.callback_data == "delete_message"
-    print("   ✅ Сповіщення містить лише кнопку '🗑 Зрозуміло' та заголовок новини")
+    print("   ✅ Сповіщення починається із заголовка, не містить зайвих шапок і містить лише кнопку '🗑 Зрозуміло'")
 
     print("🧪 [TEST 10] Перевірка дефолтного сповіщення без заголовка")
     default_payload = build_news_broadcast_alert()
     assert "Оперативні зміни в роботі електротранспорту" in default_payload["text"]
-    assert "5 хвилин" in default_payload["text"]
+    assert "ОПЕРАТИВНА ІНФОРМАЦІЯ | КП «ОМЕТ»" not in default_payload["text"]
+    assert "автоматично видалиться через 5 хвилин" not in default_payload["text"]
     default_buttons = [btn for row in default_payload["reply_markup"].inline_keyboard for btn in row]
     assert len(default_buttons) == 1
     assert default_buttons[0].callback_data == "delete_message"
-    print("   ✅ Дефолтне сповіщення успішно сформовано")
+    print("   ✅ Дефолтне сповіщення успішно сформовано без зайвих блоків")
 
-    print("\n🎉 УСІ 10 ТЕСТІВ УСПІШНО ПРОЙДЕНО БЕЗ ПОМИЛОК!")
+    print("🧪 [TEST 11] Перевірка автоматичного вилучення заголовка (extract_news_title)")
+    # Порожній або відсутній текст
+    assert extract_news_title(None) == "Оперативні зміни в роботі електротранспорту"
+    assert extract_news_title("") == "Оперативні зміни в роботі електротранспорту"
+
+    # Короткий текст
+    short_text = "Тимчасово змінено маршрут тролейбуса №9."
+    assert extract_news_title(short_text) == short_text
+
+    # Перше коротке + друге речення (не розриваючи вул.)
+    multi_sent = "Увага! Тимчасово призупинено рух трамваїв №1 та №7 через аварію на вул. Чорноморського козацтва. Вагони курсують до Лузанівки."
+    extracted = extract_news_title(multi_sent)
+    assert extracted.startswith("Увага! Тимчасово призупинено рух трамваїв №1 та №7")
+    assert "вул. Чорноморського козацтва" in extracted
+    assert len(extracted) <= 140
+
+    # Дуже довге перше речення
+    long_sent = "Попередження про сильний вітер та падіння гілок на контактну мережу в Приморському районі міста Одеси, у зв'язку з чим рух тролейбусів номер 7 тимчасово скеровано іншим маршрутом через залізничний вокзал."
+    extracted_long = extract_news_title(long_sent)
+    assert len(extracted_long) <= 140
+    assert extracted_long.endswith("...")
+    print("   ✅ Автоматичне зчитування заголовків з 1-2 речень працює бездоганно")
+
+    print("\n🎉 УСІ 11 ТЕСТІВ УСПІШНО ПРОЙДЕНО БЕЗ ПОМИЛОК!")
 
 
 def test_news_suite():

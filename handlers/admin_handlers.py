@@ -18,7 +18,7 @@ from handlers.news_handlers import build_news_broadcast_alert
 from services.user_service import UserService
 from services.tickets_service import TicketsService
 from services.museum_service import MuseumService
-from services.news_service import NewsService, format_kyiv_time
+from services.news_service import NewsService, format_kyiv_time, extract_news_title
 from services.lost_items_service import LostItemsService, format_kyiv_date as format_lost_date
 from services.vacancy_service import VacancyService
 from services.museum_document_service import generate_visitors_document
@@ -2131,8 +2131,9 @@ async def admin_export_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Початок процесу розсилки (Крок 1 з 2: Заголовок / короткий опис).
-    Запитує короткий заголовок новини (до 120 символів).
+    Початок процесу розсилки оперативних новин.
+    Адміністратор надсилає повідомлення (текст або медіа з описом), а бот
+    автоматично вилучає заголовок із перших 1-2 речень для сповіщення.
     """
     query = update.callback_query
     await query.answer()
@@ -2152,10 +2153,10 @@ async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TY
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="general_admin_menu")]])
 
     prompt_text = (
-        "📢 <b>Режим розсилки оперативних новин (Крок 1 з 2)</b>\n\n"
-        "Введіть <b>короткий заголовок (опис)</b> новини (до 120 символів).\n\n"
-        "ℹ️ <i>Цей заголовок відображатиметься у швидкому сповіщенні в чаті користувачів та в списку «Оперативні новини».</i>\n\n"
-        "<i>Приклад: Тимчасове призупинення руху трамваїв №1, 7 через ремонт колії на вул. Чорноморського козацтва</i>"
+        "📢 <b>Режим розсилки оперативних новин</b>\n\n"
+        "Надішліть повідомлення (текст, фото або відео з описом), яке отримають <b>ВСІ</b> користувачі бота.\n\n"
+        "ℹ️ <i>Бот автоматично визначить заголовок із перших 1-2 речень для швидкого сповіщення в чаті, "
+        "а повний матеріал збереже у розділі «📢 Оперативні новини».</i>"
     )
 
     sent_msg = await query.edit_message_text(
@@ -2166,63 +2167,6 @@ async def admin_broadcast_start(update: Update, context: ContextTypes.DEFAULT_TY
 
     context.user_data['broadcast_start_msg_id'] = sent_msg.message_id
     context.user_data['msgs_to_delete'] = [sent_msg.message_id]
-
-    return States.ADMIN_BROADCAST_TITLE
-
-
-async def admin_broadcast_title_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Зберігає введений заголовок (Крок 1) та запитує основний контент новини (Крок 2 з 2).
-    """
-    user_id = update.effective_user.id
-    if user_id not in GENERAL_ADMIN_IDS:
-        return ConversationHandler.END
-
-    msg = update.message
-    if not msg or not msg.text:
-        warning_msg = await update.effective_chat.send_message(
-            "⚠️ Будь ласка, введіть заголовок новини звичайним текстом."
-        )
-        msgs_to_delete = context.user_data.setdefault('msgs_to_delete', [])
-        msgs_to_delete.append(warning_msg.message_id)
-        return States.ADMIN_BROADCAST_TITLE
-
-    title = msg.text.strip()
-    if not title:
-        warning_msg = await msg.reply_text("⚠️ Заголовок не може бути порожнім. Введіть заголовок новини:")
-        msgs_to_delete = context.user_data.setdefault('msgs_to_delete', [])
-        msgs_to_delete.extend([msg.message_id, warning_msg.message_id])
-        return States.ADMIN_BROADCAST_TITLE
-
-    if len(title) > 140:
-        warning_msg = await msg.reply_text(
-            f"⚠️ Заголовок занадто довгий ({len(title)} симв.). Максимальна довжина — 120-140 символів.\n"
-            "Будь ласка, скоротіть заголовок та надішліть знову:"
-        )
-        msgs_to_delete = context.user_data.setdefault('msgs_to_delete', [])
-        msgs_to_delete.extend([msg.message_id, warning_msg.message_id])
-        return States.ADMIN_BROADCAST_TITLE
-
-    context.user_data['broadcast_title'] = title
-
-    msgs_to_delete = context.user_data.setdefault('msgs_to_delete', [])
-    msgs_to_delete.append(msg.message_id)
-
-    back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Скасувати", callback_data="general_admin_menu")]])
-
-    step2_text = (
-        "📢 <b>Режим розсилки оперативних новин (Крок 2 з 2)</b>\n\n"
-        f"📌 <b>Заголовок:</b> <i>{html.escape(title)}</i>\n\n"
-        "Тепер надішліть <b>основний зміст новини</b> (детальний опис, причини або фото/відео/документ з описом).\n\n"
-        "ℹ️ <i>Цей повний матеріал пасажири зможуть прочитати у розділі «📢 Оперативні новини».</i>"
-    )
-
-    prompt_msg = await msg.reply_text(
-        step2_text,
-        reply_markup=back_btn,
-        parse_mode=ParseMode.HTML
-    )
-    msgs_to_delete.append(prompt_msg.message_id)
 
     return States.ADMIN_BROADCAST_TEXT
 
@@ -2255,14 +2199,14 @@ async def admin_broadcast_preview(update: Update, context: ContextTypes.DEFAULT_
         )
         return ConversationHandler.END
 
-    broadcast_title = context.user_data.get('broadcast_title', '')
-
     # 2. Зберігаємо дані для розсилки
     context.user_data['broadcast_msg_id'] = msg.message_id
     context.user_data['broadcast_chat_id'] = msg.chat_id
 
     # Визначаємо текст та медіа для збереження в новинах
     news_text = msg.text or msg.caption or ""
+    broadcast_title = extract_news_title(news_text)
+    context.user_data['broadcast_title'] = broadcast_title
     news_media_type = None
     news_media_file_id = None
     if msg.photo:

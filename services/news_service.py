@@ -1,4 +1,5 @@
 import datetime
+import re
 from typing import Optional, Any
 from zoneinfo import ZoneInfo
 from sqlalchemy import select, update, func
@@ -6,6 +7,51 @@ from database.db import AsyncSessionLocal, NewsItem
 from utils.logger import logger
 
 KYIV_TIMEZONE = ZoneInfo("Europe/Kyiv")
+
+
+def extract_news_title(text: Optional[str], max_chars: int = 140) -> str:
+    """
+    Автоматично вилучає заголовок з першого (та другого за необхідності) речення тексту.
+    Враховує скорочення (вул., просп., пров., тощо), щоб не розривати речення всередині адреси.
+    """
+    if not text:
+        return "Оперативні зміни в роботі електротранспорту"
+
+    clean = re.sub(r'<[^>]+>', '', text).strip()
+    if not clean:
+        return "Оперативні зміни в роботі електротранспорту"
+
+    normalized = " ".join(clean.split())
+    if len(normalized) <= max_chars:
+        return normalized
+
+    # Патерн розділення на речення: знак пунктуації (. ! ? …), за яким слідує пробіл або новий рядок,
+    # але НЕ після типових скорочень.
+    abbrev_lookbehind = r'(?<!\bвул)(?<!\bпросп)(?<!\bпров)(?<!\bбульв)(?<!\bім)(?<!\bм)(?<!\bр)(?<!\b№)(?<=[.!?…])\s+'
+    sentences = [s.strip() for s in re.split(abbrev_lookbehind, clean) if s.strip()]
+
+    if not sentences:
+        return normalized[:max_chars - 3].rstrip() + "..."
+
+    first_sentence = sentences[0]
+
+    # Якщо є друге речення і перше коротке (< 35 символів) або обидва вміщуються в ліміт:
+    if len(sentences) > 1:
+        combined = f"{first_sentence} {sentences[1]}"
+        if len(combined) <= max_chars:
+            return combined
+        if len(first_sentence) < 35:
+            return combined[:max_chars - 3].rstrip() + "..."
+
+    if len(first_sentence) <= max_chars:
+        return first_sentence
+
+    # Якщо навіть перше речення довше за ліміт, обрізаємо акуратно по межі слів
+    truncated = first_sentence[:max_chars - 3]
+    last_space = truncated.rfind(' ')
+    if last_space > 30:
+        truncated = truncated[:last_space]
+    return truncated.rstrip() + "..."
 
 
 def to_kyiv_datetime(dt_value: Optional[datetime.datetime]) -> Optional[datetime.datetime]:

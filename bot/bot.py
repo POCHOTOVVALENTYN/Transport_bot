@@ -72,7 +72,7 @@ from handlers.admin_handlers import (
     admin_add_date_capacity_save,
     admin_del_date_menu, admin_del_date_confirm, admin_menu_show,
     admin_show_bookings, admin_sync_db,
-    admin_broadcast_start, admin_broadcast_title_save, admin_broadcast_preview,       # Нові функції розсилки
+    admin_broadcast_start, admin_broadcast_preview,
     admin_broadcast_duration_selected,
     admin_broadcast_send_confirm,
     show_general_admin_menu, admin_museum_menu_show, admin_show_stats, # Нова функція зі списком
@@ -281,10 +281,6 @@ class TransportBot:
                     CallbackQueryHandler(admin_museum_menu_show, pattern="^admin_museum_menu$")
                 ],
                 # === 👇 (2) ДОДАЄМО СТАНИ РОЗСИЛКИ ТУТ 👇 ===
-                States.ADMIN_BROADCAST_TITLE: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, admin_broadcast_title_save),
-                    CallbackQueryHandler(admin_broadcast_send_confirm, pattern="^broadcast_cancel$"),
-                ],
                 States.ADMIN_BROADCAST_TEXT: [
                     MessageHandler(filters.ALL & ~filters.COMMAND, admin_broadcast_preview)
                 ],
