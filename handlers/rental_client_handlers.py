@@ -53,10 +53,16 @@ from services.rental_documents_service import (
     send_legal_contract_email,
 )
 from services.tram_rental_service import (
+    POPULAR_TRAM_STOPS,
     RentalCalculationInput,
     calculate_rental_route,
     generate_rental_route_sheet_pdf,
+    get_all_districts,
+    get_all_rental_points,
     get_available_turning_loops,
+    get_stops_by_district,
+    is_turnaround_loop,
+    search_tram_stops,
 )
 from utils.logger import logger
 
@@ -402,9 +408,9 @@ async def rental_select_route_mode(update: Update, context: ContextTypes.DEFAULT
         await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
         return States.RENTAL_SELECT_PRESET
 
-    # Режим Б: Власний конструктор розворотних кілець
+    # Режим Б: Власний конструктор маршруту (будь-яка зупинка або кільце міста)
     draft["via_loops"] = []
-    return await _render_loop_picker(update, context, step="pickup", page=0)
+    return await _render_stop_selection_hub(update, context, step="pickup")
 
 
 async def rental_select_preset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -425,6 +431,363 @@ async def rental_select_preset(update: Update, context: ContextTypes.DEFAULT_TYP
     return await _prompt_wait_time(update, context)
 
 
+POPULAR_PAGE_SIZE = 10
+
+
+async def _render_stop_selection_hub(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    step: str = "pickup",
+    error_msg: Optional[str] = None,
+) -> int:
+    """
+    Головний екран конструктора маршруту для вибору точки (посадки, проміжних точок або висадки).
+    Дозволяє обрати будь-яку з 214 трамвайних зупинок Одеси через:
+    1. ⭐ Популярні зупинки (ТОП-20),
+    2. 🔍 Швидкий пошук за назвою,
+    3. 🔄 Розворотні кільця (зі стоянкою),
+    4. 📍 За районами міста (6 зон).
+    """
+    draft = _get_draft(context)
+    context.user_data["rental_stop_step"] = step
+
+    if step == "pickup":
+        header = (
+            "🟢 <b>КОНСТРУКТОР МАРШРУТУ: ЗУПИНКА ПОСАДКИ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Ви можете обрати будь-яку з 214 трамвайних зупинок Одеси або розворотне кільце:\n"
+            "• <i>На зупинці посадки ретро-трамвай прибуває завчасно та очікує Вас у межах інтервалу руху основних вагонів.</i>\n\n"
+            "Оберіть зручний спосіб вибору початкової зупинки:"
+        )
+        target_state = States.RENTAL_SELECT_PICKUP_LOOP
+        back_btn = InlineKeyboardButton("⬅️ Назад до вибору режиму", callback_data="rental_back_rmode")
+    elif step == "via":
+        chosen_via = draft.get("via_loops", [])
+        via_chain = " ➡️ ".join([draft["pickup_stop"]] + chosen_via)
+        header = (
+            "🔄 <b>КОНСТРУКТОР МАРШРУТУ: ПРОМІЖНІ ЗУПИНКИ ТА КІЛЬЦЯ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"Поточна нитка маршруту:\n<b>{via_chain}</b>\n\n"
+            "Оберіть наступну проміжну зупинку чи кільце (можна додати декілька точок поспіль) "
+            "або перейдіть до вибору зупинки висадки:"
+        )
+        target_state = States.RENTAL_SELECT_VIA_LOOPS
+        back_btn = InlineKeyboardButton("⬅️ Назад до зупинки посадки", callback_data="rental_back_pickup")
+    else:  # dropoff
+        chosen_via = draft.get("via_loops", [])
+        via_chain = " ➡️ ".join([draft["pickup_stop"]] + chosen_via)
+        header = (
+            "🏁 <b>КОНСТРУКТОР МАРШРУТУ: ЗУПИНКА ВИСАДКИ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"Поточна нитка маршруту:\n<b>{via_chain} ➡️ [Зупинка висадки]</b>\n\n"
+            "Оберіть фінальну зупинку висадки пасажирів:"
+        )
+        target_state = States.RENTAL_SELECT_DROPOFF_LOOP
+        back_btn = InlineKeyboardButton("⬅️ Назад до проміжних точок", callback_data="rental_back_via")
+
+    if error_msg:
+        header = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + header
+
+    keyboard = [
+        [InlineKeyboardButton("⭐ Популярні зупинки (ТОП-20)", callback_data=f"rental_stop_pop:{step}:0")],
+        [InlineKeyboardButton("🔍 Швидкий пошук за назвою", callback_data=f"rental_stop_search_prompt:{step}")],
+        [InlineKeyboardButton("🔄 Розворотні кільця (зі стоянкою)", callback_data=f"rental_stop_loops:{step}:0")],
+        [InlineKeyboardButton("📍 Обрати за районами міста", callback_data=f"rental_stop_districts:{step}")],
+    ]
+
+    if step == "via":
+        keyboard.append([InlineKeyboardButton("✅ Перейти до вибору висадки", callback_data="rental_via_done")])
+        if draft.get("via_loops"):
+            keyboard.append([InlineKeyboardButton("🗑️ Очистити проміжні зупинки", callback_data="rental_via_clear")])
+
+    keyboard.append([back_btn])
+    await _send_or_edit(update, context, header, InlineKeyboardMarkup(keyboard))
+    return target_state
+
+
+async def _render_popular_stops_picker(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    step: str,
+    page: int = 0,
+) -> int:
+    """Відображає ТОП-20 популярних зупинок Одеси з пагінацією по 10 штук (по 2 в ряд)."""
+    draft = _get_draft(context)
+    vt = draft.get("transport_type", "TRAM")
+    all_pts = get_all_rental_points(vt)
+    total_pages = max(1, (len(POPULAR_TRAM_STOPS) + POPULAR_PAGE_SIZE - 1) // POPULAR_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start_idx = page * POPULAR_PAGE_SIZE
+    page_items = POPULAR_TRAM_STOPS[start_idx : start_idx + POPULAR_PAGE_SIZE]
+
+    step_labels = {
+        "pickup": "посадки",
+        "via": "проміжної точки",
+        "dropoff": "висадки",
+    }
+    step_label = step_labels.get(step, "посадки")
+    header = (
+        f"⭐ <b>ПОПУЛЯРНІ ТА ЕКСКУРСІЙНІ ЗУПИНКИ: ТОЧКА {step_label.upper()}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>🔄 — розворотне кільце (можлива стоянка до 10 хв)\n"
+        "🚏 — лінійна зупинка (посадка/висадка в межах інтервалу руху)</i>\n\n"
+        f"Сторінка {page + 1}/{total_pages}. Оберіть зупинку:"
+    )
+
+    buttons: List[List[InlineKeyboardButton]] = []
+    for i in range(0, len(page_items), 2):
+        row: List[InlineKeyboardButton] = []
+        for j in range(2):
+            if i + j < len(page_items):
+                item = page_items[i + j]
+                name = item["name"]
+                icon = item["icon"]
+                idx = all_pts.index(name) if name in all_pts else 0
+                row.append(
+                    InlineKeyboardButton(
+                        f"{icon} {name}",
+                        callback_data=f"rental_spick:{step}:{idx}",
+                    )
+                )
+        buttons.append(row)
+
+    nav_row: List[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Попер.", callback_data=f"rental_stop_pop:{step}:{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Наст. ➡️", callback_data=f"rental_stop_pop:{step}:{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+
+    buttons.append([InlineKeyboardButton("⬅️ До способів вибору", callback_data=f"rental_stop_hub:{step}")])
+    await _send_or_edit(update, context, header, InlineKeyboardMarkup(buttons))
+
+    if step == "pickup":
+        return States.RENTAL_SELECT_PICKUP_LOOP
+    if step == "via":
+        return States.RENTAL_SELECT_VIA_LOOPS
+    return States.RENTAL_SELECT_DROPOFF_LOOP
+
+
+async def _render_districts_menu(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    step: str,
+) -> int:
+    """Відображає перелік 6 районів Одеси для вибору зупинки."""
+    districts = get_all_districts()
+    step_labels = {"pickup": "посадки", "via": "проміжної точки", "dropoff": "висадки"}
+    header = (
+        f"📍 <b>ОБЕРІТЬ РАЙОН МІСТА ДЛЯ ТОЧКИ {step_labels.get(step, 'посадки').upper()}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Оберіть район, щоб переглянути зупинки трамвайної лінії:"
+    )
+    buttons: List[List[InlineKeyboardButton]] = []
+    for d_idx, d_name in enumerate(districts):
+        buttons.append([InlineKeyboardButton(d_name, callback_data=f"rental_stop_dist:{step}:{d_idx}")])
+    buttons.append([InlineKeyboardButton("⬅️ До способів вибору", callback_data=f"rental_stop_hub:{step}")])
+    await _send_or_edit(update, context, header, InlineKeyboardMarkup(buttons))
+
+    if step == "pickup":
+        return States.RENTAL_SELECT_PICKUP_LOOP
+    if step == "via":
+        return States.RENTAL_SELECT_VIA_LOOPS
+    return States.RENTAL_SELECT_DROPOFF_LOOP
+
+
+async def _render_district_stops(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    step: str,
+    district_idx: int,
+) -> int:
+    """Відображає перелік зупинок для обраного району міста."""
+    draft = _get_draft(context)
+    vt = draft.get("transport_type", "TRAM")
+    all_pts = get_all_rental_points(vt)
+    districts = get_all_districts()
+    d_name = districts[district_idx] if 0 <= district_idx < len(districts) else districts[0]
+    d_stops = get_stops_by_district(d_name)
+
+    header = (
+        f"📍 <b>ЗУПИНКИ РАЙОНУ: {d_name}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>🔄 — розворотне кільце | 🚏 — лінійна зупинка</i>\n\n"
+        "Оберіть зупинку зі списку:"
+    )
+    buttons: List[List[InlineKeyboardButton]] = []
+    for i in range(0, len(d_stops), 2):
+        row: List[InlineKeyboardButton] = []
+        for j in range(2):
+            if i + j < len(d_stops):
+                stop_name = d_stops[i + j]
+                icon = "🔄" if is_turnaround_loop(stop_name, vt) else "🚏"
+                idx = all_pts.index(stop_name) if stop_name in all_pts else 0
+                row.append(
+                    InlineKeyboardButton(
+                        f"{icon} {stop_name}",
+                        callback_data=f"rental_spick:{step}:{idx}",
+                    )
+                )
+        buttons.append(row)
+
+    buttons.append([InlineKeyboardButton("⬅️ До вибору районів", callback_data=f"rental_stop_districts:{step}")])
+    buttons.append([InlineKeyboardButton("🏠 До способів вибору", callback_data=f"rental_stop_hub:{step}")])
+    await _send_or_edit(update, context, header, InlineKeyboardMarkup(buttons))
+
+    if step == "pickup":
+        return States.RENTAL_SELECT_PICKUP_LOOP
+    if step == "via":
+        return States.RENTAL_SELECT_VIA_LOOPS
+    return States.RENTAL_SELECT_DROPOFF_LOOP
+
+
+async def _render_stop_search_prompt(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    step: str,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Відображає екран готовності до текстового пошуку зупинки за назвою."""
+    context.user_data["rental_stop_step"] = step
+    step_labels = {"pickup": "посадки", "via": "проміжної точки", "dropoff": "висадки"}
+    header = (
+        f"🔍 <b>ШВИДКИЙ ПОШУК ЗУПИНКИ {step_labels.get(step, 'посадки').upper()}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Надішліть сюди у чат повідомлення з назвою або частиною назви зупинки:\n"
+        "<i>Наприклад: <b>Канатна</b>, <b>Грецька</b>, <b>Філатова</b>, <b>Дерибасівська</b>, <b>Аркадія</b>, <b>Торгова</b></i>"
+    )
+    if error_msg:
+        header = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + header
+
+    keyboard = [[InlineKeyboardButton("⬅️ До способів вибору", callback_data=f"rental_stop_hub:{step}")]]
+    await _send_or_edit(update, context, header, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_SEARCH_STOP_TEXT
+
+
+async def rental_handle_stop_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обробляє текстовий пошук зупинки від замовника з збереженням чистоти чату."""
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_SEARCH_STOP_TEXT
+
+    query_text = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    step = context.user_data.get("rental_stop_step", "pickup")
+    draft = _get_draft(context)
+    vt = draft.get("transport_type", "TRAM")
+    all_pts = get_all_rental_points(vt)
+    matches = search_tram_stops(query_text, transport_type=vt, limit=6)
+
+    if not matches:
+        return await _render_stop_search_prompt(
+            update,
+            context,
+            step=step,
+            error_msg=f"За запитом «{query_text}» зупинок не знайдено. Спробуйте інше слово або частину назви:",
+        )
+
+    header = (
+        f"🔍 <b>РЕЗУЛЬТАТИ ПОШУКУ ДЛЯ «{query_text}»:</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Оберіть потрібну зупинку зі списку знайдених:\n"
+        "<i>🔄 — розворотне кільце | 🚏 — лінійна зупинка</i>"
+    )
+    buttons: List[List[InlineKeyboardButton]] = []
+    for match in matches:
+        icon = "🔄" if is_turnaround_loop(match, vt) else "🚏"
+        idx = all_pts.index(match) if match in all_pts else 0
+        buttons.append([InlineKeyboardButton(f"{icon} {match}", callback_data=f"rental_spick:{step}:{idx}")])
+
+    buttons.append([InlineKeyboardButton("🔍 Шукати іншу назву", callback_data=f"rental_stop_search_prompt:{step}")])
+    buttons.append([InlineKeyboardButton("⬅️ До способів вибору", callback_data=f"rental_stop_hub:{step}")])
+
+    await _send_or_edit(update, context, header, InlineKeyboardMarkup(buttons))
+    if step == "pickup":
+        return States.RENTAL_SELECT_PICKUP_LOOP
+    if step == "via":
+        return States.RENTAL_SELECT_VIA_LOOPS
+    return States.RENTAL_SELECT_DROPOFF_LOOP
+
+
+async def rental_handle_stop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Фіксує обрану зупинку (посадки, проміжну чи висадки) та спрямовує на наступний крок."""
+    query = update.callback_query
+    await query.answer()
+    _, step, idx_str = query.data.split(":")
+    idx = int(idx_str)
+    draft = _get_draft(context)
+    vt = draft.get("transport_type", "TRAM")
+    all_pts = get_all_rental_points(vt)
+    if 0 <= idx < len(all_pts):
+        chosen_stop = all_pts[idx]
+    else:
+        chosen_stop = all_pts[0]
+
+    if step == "pickup":
+        draft["pickup_stop"] = chosen_stop
+        draft["via_loops"] = []
+        return await _render_stop_selection_hub(update, context, step="via")
+    elif step == "via":
+        via_list = draft.setdefault("via_loops", [])
+        if not via_list or via_list[-1] != chosen_stop:
+            via_list.append(chosen_stop)
+        return await _render_stop_selection_hub(update, context, step="via")
+    else:  # dropoff
+        draft["dropoff_stop"] = chosen_stop
+        # Перевірка кільцевого маршруту: якщо старт і фініш однакові, потрібна хоча б одна точка розвороту
+        if draft["pickup_stop"] == draft["dropoff_stop"] and not draft.get("via_loops"):
+            await query.answer(
+                "Для кільцевого маршруту (посадка і висадка на одній зупинці) оберіть хоча б одну проміжну точку розвороту!",
+                show_alert=True,
+            )
+            return await _render_stop_selection_hub(update, context, step="via")
+        return await _prompt_wait_time(update, context)
+
+
+async def rental_handle_stop_hub_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Диспетчер навігації між підрозділами вибору зупинок."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data.startswith("rental_stop_hub:"):
+        step = data.split(":", 1)[1]
+        return await _render_stop_selection_hub(update, context, step=step)
+
+    if data.startswith("rental_stop_pop:"):
+        _, step, page_str = data.split(":")
+        return await _render_popular_stops_picker(update, context, step=step, page=int(page_str))
+
+    if data.startswith("rental_stop_search_prompt:"):
+        step = data.split(":", 1)[1]
+        return await _render_stop_search_prompt(update, context, step=step)
+
+    if data.startswith("rental_stop_districts:"):
+        step = data.split(":", 1)[1]
+        return await _render_districts_menu(update, context, step=step)
+
+    if data.startswith("rental_stop_dist:"):
+        _, step, d_idx_str = data.split(":")
+        return await _render_district_stops(update, context, step=step, district_idx=int(d_idx_str))
+
+    if data.startswith("rental_stop_loops:"):
+        _, step, page_str = data.split(":")
+        return await _render_loop_picker(update, context, step=step, page=int(page_str))
+
+    if data == "rental_back_pickup":
+        return await _render_stop_selection_hub(update, context, step="pickup")
+
+    if data == "rental_back_via":
+        return await _render_stop_selection_hub(update, context, step="via")
+
+    return await _render_stop_selection_hub(update, context, step="pickup")
+
+
 async def _render_loop_picker(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -432,7 +795,7 @@ async def _render_loop_picker(
     page: int = 0,
 ) -> int:
     """
-    Відображає пагінований список офіційних розворотних кілець (36 трамвайних або 18 тролейбусних)
+    Відображає пагінований список офіційних розворотних кілець
     для вибору кільця посадки (pickup), проміжних кілець (via) або кільця висадки (dropoff).
     """
     draft = _get_draft(context)
@@ -443,37 +806,19 @@ async def _render_loop_picker(
     start_idx = page * LOOPS_PAGE_SIZE
     page_loops = loops[start_idx : start_idx + LOOPS_PAGE_SIZE]
 
+    step_labels = {"pickup": "посадки", "via": "проміжного кільця", "dropoff": "висадки"}
+    header = (
+        f"🔄 <b>РОЗВОРОТНІ КІЛЬЦЯ ОДЕСИ: ТОЧКА {step_labels.get(step, 'посадки').upper()}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>На розворотних кільцях дозволена тривала стоянка вагона (до 10 хв) та безпечний розворот.</i>\n\n"
+        f"Сторінка {page + 1}/{total_pages}. Оберіть кільце:"
+    )
+    prefix = f"rental_loop_{step}"
     if step == "pickup":
-        header = (
-            "🟢 <b>КОНСТРУКТОР МАРШРУТУ: ОБЕРІТЬ РОЗВОРОТНЕ КІЛЬЦЕ ПОСАДКИ</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "<i>Посадка пасажирів дозволена виключно на розворотних кільцях, щоб не затримувати лінійний рух.</i>\n"
-            f"Сторінка {page + 1}/{total_pages}. Оберіть початкове кільце:"
-        )
-        prefix = "rental_loop_pick"
         target_state = States.RENTAL_SELECT_PICKUP_LOOP
     elif step == "via":
-        chosen_via = draft.get("via_loops", [])
-        via_chain = " ➡️ ".join([draft["pickup_stop"]] + chosen_via)
-        header = (
-            "🔄 <b>КОНСТРУКТОР МАРШРУТУ: ПРОМІЖНІ РОЗВОРОТНІ КІЛЬЦЯ</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"Поточна нитка маршруту:\n<b>{via_chain}</b>\n\n"
-            "Оберіть наступне проміжне розворотне кільце (можна додати декілька кілець поспіль) "
-            "або натисніть <b>«✅ Перейти до вибору кільця висадки»</b>:"
-        )
-        prefix = "rental_loop_via"
         target_state = States.RENTAL_SELECT_VIA_LOOPS
     else:
-        chosen_via = draft.get("via_loops", [])
-        via_chain = " ➡️ ".join([draft["pickup_stop"]] + chosen_via)
-        header = (
-            "🏁 <b>КОНСТРУКТОР МАРШРУТУ: ОБЕРІТЬ РОЗВОРОТНЕ КІЛЬЦЕ ВИСАДКИ</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"Поточна нитка маршруту:\n<b>{via_chain} ➡️ [Кільце висадки]</b>\n\n"
-            "Оберіть фінальне розворотне кільце висадки пасажирів:"
-        )
-        prefix = "rental_loop_drop"
         target_state = States.RENTAL_SELECT_DROPOFF_LOOP
 
     buttons: List[List[InlineKeyboardButton]] = []
@@ -502,14 +847,14 @@ async def _render_loop_picker(
 
     if step == "via":
         buttons.append(
-            [InlineKeyboardButton("✅ Перейти до вибору кільця висадки", callback_data="rental_via_done")]
+            [InlineKeyboardButton("✅ Перейти до вибору зупинки висадки", callback_data="rental_via_done")]
         )
         if draft.get("via_loops"):
             buttons.append(
-                [InlineKeyboardButton("🗑️ Очистити проміжні кільця", callback_data="rental_via_clear")]
+                [InlineKeyboardButton("🗑️ Очистити проміжні зупинки", callback_data="rental_via_clear")]
             )
 
-    buttons.append([InlineKeyboardButton("⬅️ Назад до режиму маршруту", callback_data="rental_back_rmode")])
+    buttons.append([InlineKeyboardButton("⬅️ До способів вибору", callback_data=f"rental_stop_hub:{step}")])
     await _send_or_edit(update, context, header, InlineKeyboardMarkup(buttons))
     return target_state
 
@@ -530,7 +875,7 @@ async def rental_handle_pickup_loop_selected(update: Update, context: ContextTyp
     if 0 <= idx < len(loops):
         draft["pickup_stop"] = loops[idx]
     draft["via_loops"] = []
-    return await _render_loop_picker(update, context, step="via", page=0)
+    return await _render_stop_selection_hub(update, context, step="via")
 
 
 async def rental_handle_via_loop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -544,21 +889,21 @@ async def rental_handle_via_loop_selected(update: Update, context: ContextTypes.
         via_list = draft.setdefault("via_loops", [])
         if not via_list or via_list[-1] != chosen:
             via_list.append(chosen)
-    return await _render_loop_picker(update, context, step="via", page=0)
+    return await _render_stop_selection_hub(update, context, step="via")
 
 
 async def rental_handle_via_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
-    await query.answer("Проміжні кільця очищено")
+    await query.answer("Проміжні зупинки очищено")
     draft = _get_draft(context)
     draft["via_loops"] = []
-    return await _render_loop_picker(update, context, step="via", page=0)
+    return await _render_stop_selection_hub(update, context, step="via")
 
 
 async def rental_handle_via_done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    return await _render_loop_picker(update, context, step="dropoff", page=0)
+    return await _render_stop_selection_hub(update, context, step="dropoff")
 
 
 async def rental_handle_dropoff_loop_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -576,7 +921,7 @@ async def rental_handle_dropoff_loop_selected(update: Update, context: ContextTy
             "Для кільцевого маршруту (посадка і висадка на одному кільці) оберіть хоча б одне проміжне розворотне кільце!",
             show_alert=True,
         )
-        return await _render_loop_picker(update, context, step="via", page=0)
+        return await _render_stop_selection_hub(update, context, step="via")
 
     return await _prompt_wait_time(update, context)
 
@@ -585,12 +930,12 @@ async def _prompt_wait_time(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     draft = _get_draft(context)
     via_str = " ➡️ ".join(draft.get("via_loops") or []) or "прямий рейс"
     text = (
-        "⏱️ <b>ЧАС ТЕХНОЛОГІЧНОЇ / ЕКСКУРСІЙНОЇ СТОЯНКИ НА РОЗВОРОТНИХ КІЛЬЦЯХ</b>\n"
+        "⏱️ <b>ЧАС ТЕХНОЛОГІЧНОЇ / ЕКСКУРСІЙНОЇ СТОЯНКИ</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"Обраний маршрут:\n<b>{draft['pickup_stop']} ➡️ [{via_str}] ➡️ {draft['dropoff_stop']}</b>\n\n"
-        "Оберіть час технологічної або екскурсійної стоянки (максимум 10 хвилин, щоб не затримувати лінійний графік):"
+        "ℹ️ <i>На зупинці посадки ретро-трамвай прибуває завчасно та очікує замовника в межах технологічного інтервалу лінійних вагонів (до 3–5 хв).</i>\n\n"
+        "Оберіть додатковий час стоянки на розворотних кільцях (максимум 10 хвилин, щоб не затримувати лінійний графік):"
     )
-    wait_options = [0, 2, 5, 7, 10]
     keyboard = [
         [
             InlineKeyboardButton("⏱️ 0 хв", callback_data="rental_wait:0"),

@@ -97,6 +97,16 @@ STOP_ALIASES: Dict[str, str] = {
     "411 батарея": "Меморіал 411-ї батареї",
     "411-а батарея": "Меморіал 411-ї батареї",
     "меморіал 411 батареї": "Меморіал 411-ї батареї",
+    "дерибасівська": "вул. Грецька",
+    "вул. дерибасівська": "вул. Грецька",
+    "соборна": "вул. Грецька",
+    "ланжерон": "Парк ім. Тараса Шевченка",
+    "французький бульвар": "Театр Музичної комедії",
+    "французький б-р": "Театр Музичної комедії",
+    "філатова": "Інститут ім. Філатова",
+    "інститут філатова": "Інститут ім. Філатова",
+    "золотий берег": "16-а станція Великого Фонтану",
+    "аркадійська алея": "Аркадія",
     "люстдорф": "селище Люстдорф",
     "чорноморка": "селище Люстдорф",
     "центроліт": "завод «Центроліт»",
@@ -654,18 +664,26 @@ class _WialonTransitNetwork:
         for p in payload.get("platforms", []):
             sid = str(p["stop_id"])
             vt = str(p["transport_type"]).upper()
-            ckey = p.get("canonical_key") or _canonical_stop_key(p["name"])
             self.platforms[sid] = p
             self.platforms_by_vt[vt][sid] = p
-            self.key_to_stop_ids[vt][ckey].append(sid)
-            if ckey not in self.key_to_display_name[vt]:
-                self.key_to_display_name[vt][ckey] = p["name"]
+            raw_key = (p.get("canonical_key") or "").strip().lower()
+            computed_key = _canonical_stop_key(p["name"])
+            stored_key = _canonical_stop_key(raw_key) if raw_key else ""
+            keys_to_index = {computed_key, raw_key, stored_key} - {""}
+            for k in keys_to_index:
+                if sid not in self.key_to_stop_ids[vt][k]:
+                    self.key_to_stop_ids[vt][k].append(sid)
+                if k not in self.key_to_display_name[vt]:
+                    self.key_to_display_name[vt][k] = p["name"]
 
         for l in payload.get("turning_loops", []):
             vt = str(l["transport_type"]).upper()
             self.turning_loops[vt].append(l)
-            ckey = l.get("canonical_key") or _canonical_stop_key(l["name"])
-            self.loop_key_map[vt][ckey] = l
+            raw_key = (l.get("canonical_key") or "").strip().lower()
+            computed_key = _canonical_stop_key(l["name"])
+            stored_key = _canonical_stop_key(raw_key) if raw_key else ""
+            for k in ({computed_key, raw_key, stored_key} - {""}):
+                self.loop_key_map[vt][k] = l
             for alias in l.get("aliases", []):
                 akey = _canonical_stop_key(alias)
                 if akey:
@@ -1082,6 +1100,186 @@ def get_available_stops(transport_type: Optional[str] = None) -> List[str]:
     if transport_type and transport_type.upper() == "TROLLEYBUS":
         return sorted(list(TROLLEYBUS_TRACK_GRAPH.keys()))
     return sorted(list(TRAM_TRACK_GRAPH.keys()))
+
+
+def get_all_rental_points(transport_type: Optional[str] = None) -> List[str]:
+    """Повертає об'єднаний та відсортований список усіх точок оренди (і зупинок, і розворотних кілець)."""
+    vt = (transport_type or "TRAM").upper()
+    stops = set(get_available_stops(vt))
+    loops = set(get_available_turning_loops(vt))
+    return sorted(list(stops | loops))
+
+
+# ТОП-20 популярних та екскурсійних зупинок Одеси
+POPULAR_TRAM_STOPS: List[Dict[str, Any]] = [
+    {"name": "Аркадія", "icon": "🔄", "is_loop": True, "desc": "Курортний хаб, пляжі, Аркадійська алея"},
+    {"name": "Парк ім. Тараса Шевченка", "icon": "🔄", "is_loop": True, "desc": "Центральний парк, спуск до Ланжерона, Алея Слави"},
+    {"name": "Театр Музичної комедії", "icon": "🔄", "is_loop": True, "desc": "Початок Французького бульвару, театр ім. М. Водяного"},
+    {"name": "пл. Старосінна", "icon": "🔄", "is_loop": True, "desc": "Залізничний вокзал, ТД-1, база ретро-вагона"},
+    {"name": "Залізничний вокзал", "icon": "🚏", "is_loop": False, "desc": "Привокзальна площа, головні ворота Одеси"},
+    {"name": "Куликове поле", "icon": "🔄", "is_loop": True, "desc": "Кільцевий розворот ліній Фонтану біля вокзалу"},
+    {"name": 'ринок "Привоз"', "icon": "🚏", "is_loop": False, "desc": "Культова одеська візитівка, історичний ринок"},
+    {"name": "пл. Тираспольська", "icon": "🔄", "is_loop": True, "desc": "Історичне кільце, перетин маршрутів старого міста"},
+    {"name": "вул. Пастера", "icon": "🔄", "is_loop": True, "desc": "Новий ринок, Український академічний театр"},
+    {"name": "вул. Грецька", "icon": "🚏", "is_loop": False, "desc": "вул. Преображенська, 2 хв до вул. Дерибасівської"},
+    {"name": "вул. Преображенська", "icon": "🚏", "is_loop": False, "desc": "Головна вісь старого міста, Соборна площа"},
+    {"name": "вул. Торгова", "icon": "🚏", "is_loop": False, "desc": "Початок б-ру Жванецького та Художнього музею"},
+    {"name": "вул. Канатна", "icon": "🚏", "is_loop": False, "desc": "Стадіон «Спартак», початок Французького бульвару"},
+    {"name": "Інститут ім. Філатова", "icon": "🚏", "is_loop": False, "desc": "Французький бульвар, старовинні садиби та дачі"},
+    {"name": "пл. 10 Квітня", "icon": "🚏", "is_loop": False, "desc": "Меморіал «Крила Перемоги», дендропарк Перемоги"},
+    {"name": "5-а станція Великого Фонтану", "icon": "🚏", "is_loop": False, "desc": "Сквер Героїв-льотчиків, пересадковий хаб"},
+    {"name": "16-а станція Великого Фонтану", "icon": "🔄", "is_loop": True, "desc": "Курорт «Золотий Берег», набережна біля моря"},
+    {"name": "Меморіал 411-ї батареї", "icon": "🔄", "is_loop": True, "desc": "Меморіальний парк-музей військової техніки"},
+    {"name": "Херсонський сквер", "icon": "🔄", "is_loop": True, "desc": "Хаб під узвозом Маринеска, старт маршруту № 20"},
+    {"name": "Лузанівка", "icon": "🔄", "is_loop": True, "desc": "Курортний пляжний комплекс Пересипу"},
+]
+
+# Розподіл трамвайних зупинок за 6 районами міста
+TRAM_DISTRICTS: Dict[str, List[str]] = {
+    "🏖️ Французький б-р & Аркадія": [
+        "Театр Музичної комедії",
+        "вул. Пироговська",
+        "пр. Лесі Українки",
+        "вул. Довженка",
+        "Інститут ім. Філатова",
+        'Санаторій "Аркадія"',
+        'Санаторій "ім. Чкалова"',
+        'Санаторій "Одеса"',
+        "Міжрейсова база моряків",
+        "пл. 10 Квітня",
+        "Аркадія",
+    ],
+    "⛲ Великий Фонтан": [
+        "1-а станція Великого Фонтану",
+        "2-а станція Великого Фонтану",
+        "3-а станція Великого Фонтану",
+        "4-а станція Великого Фонтану",
+        "5-а станція Великого Фонтану",
+        "6-а станція Великого Фонтану",
+        "7-а станція Великого Фонтану",
+        "8-а станція Великого Фонтану",
+        "9-а станція Великого Фонтану",
+        "10-а станція Великого Фонтану",
+        "11-а станція Великого Фонтану",
+        "12-а станція Великого Фонтану",
+        "14-а станція Великого Фонтану",
+        "15-а станція Великого Фонтану",
+        "16-а станція Великого Фонтану",
+        "Меморіал 411-ї батареї",
+    ],
+    "🚋 Центр, Вокзал & Привоз": [
+        "Залізничний вокзал",
+        "Куликове поле",
+        "пл. Старосінна",
+        'ринок "Привоз"',
+        "вул. Преображенська",
+        "вул. Грецька",
+        "вул. Європейська",
+        "пл. Тираспольська",
+        "вул. Пастера",
+        "вул. Торгова",
+        "Парк ім. Тараса Шевченка",
+        "Преображенський парк",
+        "вул. Канатна",
+        "вул. Старопортофранківська",
+        "вул. Дегтярна",
+        "вул. Тираспольська",
+        "вул. Мечникова",
+    ],
+    "🌊 Люстдорфська дорога & Таїрова": [
+        "1-а станція Люстдорфської дороги",
+        "2-а ст. Люстдорфської дороги (пл. Трибуни Героїв)",
+        "3-я станція Люстдорфської дороги",
+        "4-а станція Люстдорфської дороги",
+        "5-а станція Люстдорфської дороги",
+        "вул. Іцхака Рабіна",
+        "ж/м Шкільний",
+        "11-а станція Люстдорфської дороги",
+        "селище Люстдорф",
+        "Рибний порт",
+        "2-е кладовище",
+    ],
+    "🏭 Молдаванка, Застава & Слобідка": [
+        "станція Одеса-Товарна",
+        "пл. Олексіївська",
+        "ВРМ",
+        "пров. Високий",
+        "вул. М'ясоїдівська",
+        "пров. Прохорівський",
+        "вул. Степова",
+        "вул. Балківська",
+        "вул. Колонічна",
+        "вул. Бугаївська",
+        "станція Застава ІІ",
+        "узвіз Маловського",
+        "ТД-2",
+        "Слобідський ринок",
+        "Хаджибейський лиман",
+        "Херсонський сквер",
+        "Автовокзал",
+    ],
+    "🚢 Пересип & Селище Котовського": [
+        "Пересипський міст",
+        "вул. Чорноморського козацтва",
+        "пл. Ярмаркова",
+        "Лузанівка",
+        "вул. 28-ї бригади",
+        "завод «Центроліт»",
+    ],
+}
+
+
+def is_turnaround_loop(stop_name: str, transport_type: str = "TRAM") -> bool:
+    """Визначає, чи є зазначена зупинка офіційним розворотним кільцем із можливістю тривалого відстою."""
+    if not stop_name:
+        return False
+    norm = normalize_stop_name(stop_name)
+    loops = get_available_turning_loops(transport_type)
+    loop_set = set(loops) | {normalize_stop_name(l) for l in loops}
+    if norm in loop_set or stop_name in loop_set:
+        return True
+    canon = _canonical_stop_key(norm)
+    return any(_canonical_stop_key(l) == canon for l in loops)
+
+
+def search_tram_stops(query_text: str, transport_type: str = "TRAM", limit: int = 6) -> List[str]:
+    """Здійснює швидкий та гнучкий пошук зупинок серед усіх точок трамвайної мережі Одеси."""
+    q = query_text.strip().lower()
+    if not q:
+        return []
+
+    stops = get_all_rental_points(transport_type)
+    results: List[str] = []
+
+    # 1. Пошук через словник туристичних аліасів (наприклад, 'дерибас' -> 'вул. Грецька')
+    for alias_k, canonical_target in STOP_ALIASES.items():
+        if q in alias_k or alias_k in q:
+            if canonical_target in stops and canonical_target not in results:
+                results.append(canonical_target)
+
+    # 2. Прямий збіг підрядка в назві зупинки
+    for s in stops:
+        if q in s.lower() and s not in results:
+            results.append(s)
+
+    # 3. Канонічний збіг кореневої назви (без скорочень 'вул.', 'пл.', 'пр.')
+    cq = _canonical_stop_key(q)
+    if cq:
+        for s in stops:
+            if cq in _canonical_stop_key(s) and s not in results:
+                results.append(s)
+
+    return results[:limit]
+
+
+def get_all_districts() -> List[str]:
+    """Повертає перелік усіх 6 районів для групування зупинок."""
+    return list(TRAM_DISTRICTS.keys())
+
+
+def get_stops_by_district(district_name: str) -> List[str]:
+    """Повертає список зупинок для зазначеного району міста."""
+    return TRAM_DISTRICTS.get(district_name, [])
 
 
 def get_edge_weight(u: str, v: str, transport_type: TransportType = "TRAM") -> Tuple[float, int]:

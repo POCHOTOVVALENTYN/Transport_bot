@@ -521,3 +521,88 @@ async def test_full_wizard_conversation_flow():
     ]
     assert all(fn.endswith(".pdf") for fn in sent_filenames)
     assert not any(fn.endswith(".docx") for fn in sent_filenames)
+
+
+def test_stop_search_and_popular_catalog() -> None:
+    """Тестує функціонал пошуку будь-якої зупинки, ТОП-20 популярних та 6 районів."""
+    from services.tram_rental_service import (
+        POPULAR_TRAM_STOPS,
+        get_all_districts,
+        get_all_rental_points,
+        get_stops_by_district,
+        is_turnaround_loop,
+        search_tram_stops,
+    )
+
+    # 1. ТОП-20 популярних зупинок
+    assert len(POPULAR_TRAM_STOPS) == 20
+    all_pts = get_all_rental_points("TRAM")
+    for item in POPULAR_TRAM_STOPS:
+        assert item["name"] in all_pts
+        assert item["icon"] in ("🔄", "🚏")
+
+    # 2. Розворотне кільце vs лінійна зупинка
+    assert is_turnaround_loop("Аркадія") is True
+    assert is_turnaround_loop("Парк ім. Тараса Шевченка") is True
+    assert is_turnaround_loop("вул. Канатна") is False
+    assert is_turnaround_loop("Інститут ім. Філатова") is False
+
+    # 3. Швидкий пошук за назвою та аліасами
+    assert "вул. Канатна" in search_tram_stops("канат")
+    assert "Аркадія" in search_tram_stops("аркад")
+    assert "вул. Грецька" in search_tram_stops("дерибас")
+    assert "Парк ім. Тараса Шевченка" in search_tram_stops("ланжерон")
+    assert "Інститут ім. Філатова" in search_tram_stops("філат")
+
+    # 4. Райони міста
+    districts = get_all_districts()
+    assert len(districts) == 6
+    for d in districts:
+        d_stops = get_stops_by_district(d)
+        assert len(d_stops) > 0
+        for s in d_stops:
+            assert s in all_pts
+
+
+def test_linear_stop_pickup_route_calculation() -> None:
+    """Тестує побудову маршруту, коли посадка відбувається на лінійній зупинці (вул. Канатна)."""
+    from services.tram_rental_service import RentalCalculationInput, calculate_rental_route
+
+    calc_input = RentalCalculationInput(
+        pickup_stop="вул. Канатна",
+        dropoff_stop="Аркадія",
+        intermediate_loop=None,
+        via_loops=[],
+        wagon_type="retro",
+        transport_type="TRAM",
+        wait_minutes_at_loop=5,
+    )
+    result = calculate_rental_route(calc_input)
+    assert result.is_success is True
+
+    # Фаза 1: виїзд з депо ВРМ на вул. Канатну
+    assert result.phase_1_dispatch.from_stop == "ВРМ"
+    assert result.phase_1_dispatch.to_stop == "вул. Канатна"
+    assert result.phase_1_dispatch.distance_km > 0
+    assert result.phase_1_dispatch.motion_minutes > 0
+
+    # Фаза 2: рейс замовника вул. Канатна -> Аркадія
+    assert result.phase_2_rental.from_stop == "вул. Канатна"
+    assert result.phase_2_rental.to_stop == "Аркадія"
+    assert result.phase_2_rental.distance_km > 0
+    assert "Аркадія" in result.phase_2_rental.stops_path
+
+    # Фаза 3: повернення з Аркадії у ВРМ
+    assert result.phase_3_return.from_stop == "Аркадія"
+    assert result.phase_3_return.to_stop == "ВРМ"
+    assert result.phase_3_return.distance_km > 0
+
+    assert result.total_duration_minutes >= 60
+    assert result.total_billable_km > 0
+
+    from services.rental_documents_service import RentalPriceInput, calculate_rental_price_breakdown
+    breakdown = calculate_rental_price_breakdown(
+        RentalPriceInput(duration_minutes=result.total_duration_minutes, wagon_key="retro_mtv")
+    )
+    assert breakdown.total_price_uah > 0
+    assert breakdown.billable_minutes >= 60
