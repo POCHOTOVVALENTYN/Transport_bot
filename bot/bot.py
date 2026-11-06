@@ -140,6 +140,8 @@ from handlers.rental_client_handlers import (
     show_rental_hub,
     show_rental_rules_info,
     _prompt_route_mode,
+    _render_customer_name_input,
+    _render_customer_phone_input,
     _render_customer_type_selection,
     _render_date_selection,
     _render_safety_briefing,
@@ -753,14 +755,19 @@ class TransportBot:
                     CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
                 ],
                 States.RENTAL_ENTER_CUSTOMER_PHONE: [
+                    CallbackQueryHandler(_render_customer_name_input, pattern="^rental_back_name$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_phone_input),
                 ],
                 States.RENTAL_ENTER_CUSTOMER_TAX_ID: [
                     CallbackQueryHandler(rental_handle_tax_input, pattern="^rental_tax_skip$"),
+                    CallbackQueryHandler(_render_customer_phone_input, pattern="^rental_back_phone$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_tax_input),
                 ],
                 States.RENTAL_FINAL_CONFIRM: [
                     CallbackQueryHandler(rental_finalize_order, pattern="^rental_confirm_create$"),
+                    CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
             },

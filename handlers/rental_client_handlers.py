@@ -99,7 +99,25 @@ async def _send_or_edit(
     text: str,
     reply_markup: InlineKeyboardMarkup,
 ) -> None:
+    """
+    Розумне оновлення екрану (Single-screen UI) для збереження чистоти чату:
+    1. Видаляє залишки старих медіа / фото, якщо користувач перейшов у текстовий розділ,
+    2. При натисканні інлайн-кнопок редагує існуюче повідомлення,
+    3. При текстовому вводі (ПІБ, телефон, дата тощо) миттєво видаляє повідомлення користувача
+       та редагує попереднє повідомлення бота, уникаючи розростання чату.
+    """
+    chat_id = update.effective_chat.id if update.effective_chat else None
     query = update.callback_query
+
+    # Очищуємо старі фото з чату (наприклад, титульну картку ретро-трамвая)
+    media_ids = context.user_data.pop("media_message_ids", None)
+    if media_ids and chat_id:
+        for mid in media_ids:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+            except Exception:
+                pass
+
     if query:
         try:
             await query.edit_message_text(
@@ -107,20 +125,54 @@ async def _send_or_edit(
                 reply_markup=reply_markup,
                 parse_mode=ParseMode.HTML,
             )
+            context.user_data["last_bot_msg_id"] = query.message.message_id
             return
         except Exception:
             pass
+
         try:
             await query.message.delete()
         except Exception:
             pass
 
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=text,
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.HTML,
-    )
+        if chat_id:
+            sent = await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML,
+            )
+            context.user_data["last_bot_msg_id"] = sent.message_id
+        return
+
+    # Якщо користувач надіслав текстове повідомлення або документ
+    if update.message and chat_id:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+
+        prev_id = context.user_data.get("last_bot_msg_id")
+        if prev_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=prev_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            except Exception:
+                pass
+
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML,
+        )
+        context.user_data["last_bot_msg_id"] = sent.message_id
 
 
 async def _send_or_edit_photo(
@@ -130,11 +182,20 @@ async def _send_or_edit_photo(
     caption: str,
     reply_markup: InlineKeyboardMarkup,
 ) -> None:
-    """Надсилає або оновлює фотографію з підписом та клавіатурою для титульних розділів."""
+    """Надсилає або оновлює фотографію з підписом та клавіатурою для титульних розділів з контролем чистоти чату."""
     query = update.callback_query
-    chat_id = update.effective_chat.id
+    chat_id = update.effective_chat.id if update.effective_chat else None
 
-    if os.path.exists(str(photo_path)):
+    # Очищуємо попередні медіа, якщо збереглися
+    media_ids = context.user_data.pop("media_message_ids", None)
+    if media_ids and chat_id:
+        for mid in media_ids:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+            except Exception:
+                pass
+
+    if os.path.exists(str(photo_path)) and chat_id:
         if query and query.message:
             if query.message.photo:
                 try:
@@ -144,6 +205,7 @@ async def _send_or_edit_photo(
                         parse_mode=ParseMode.HTML,
                     )
                     context.user_data["media_message_ids"] = [query.message.message_id]
+                    context.user_data["last_bot_msg_id"] = query.message.message_id
                     return
                 except Exception:
                     pass
@@ -161,6 +223,7 @@ async def _send_or_edit_photo(
                 parse_mode=ParseMode.HTML,
             )
             context.user_data["media_message_ids"] = [sent_msg.message_id]
+            context.user_data["last_bot_msg_id"] = sent_msg.message_id
         return
 
     await _send_or_edit(update, context, caption, reply_markup)
@@ -169,7 +232,7 @@ async def _send_or_edit_photo(
 # ================= 1. ГОЛОВНИЙ ХАБ РОЗДІЛУ ОРЕНДИ =================
 
 async def show_rental_hub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Головне меню розділу '🚋 Електронна оренда ретро-трамвая' (доступне тільки Валентину)."""
+    """Головне меню розділу '🚋 Оренда електротранспорту' (доступне тільки Валентину)."""
     user = update.effective_user
     if not user or not is_rental_access_allowed(user.id):
         if update.callback_query:
@@ -183,7 +246,7 @@ async def show_rental_hub(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     contracts_badge = f" ({len(active_orders)})" if active_orders else ""
 
     text = (
-        "🚋 <b>ЕЛЕКТРОННА ОРЕНДА РЕТРО-ТРАМВАЯ КП «ОМЕТ»</b>\n"
+        "🚋 <b>ОРЕНДА ЕЛЕКТРОТРАНСПОРТУ КП «ОМЕТ»</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "✅ Точний розрахунок.\n"
         "✅ Безпека руху.\n"
@@ -555,7 +618,11 @@ async def rental_handle_wait_selected(update: Update, context: ContextTypes.DEFA
 
 # ================= 4. КРОК 3: ВИБІР ДАТИ ТА БАЖАНОГО ЧАСУ ПОДАЧІ =================
 
-async def _render_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def _render_date_selection(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
     draft = _get_draft(context)
     min_date = datetime.date.today() + datetime.timedelta(days=3)
 
@@ -587,6 +654,9 @@ async def _render_date_selection(update: Update, context: ContextTypes.DEFAULT_T
         "• Оберіть бажану дату кнопкою нижче;\n"
         "• Або <b>напишіть дату повідомленням</b> у форматі <code>ДД.ММ.РРРР</code> (наприклад: <code>28.05.2026</code>):"
     )
+    if error_msg:
+        text = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + text
+
     await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
     return States.RENTAL_SELECT_DATE
 
@@ -607,28 +677,37 @@ async def rental_handle_date_text(update: Update, context: ContextTypes.DEFAULT_
 
     raw = msg.text.strip()
     try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    try:
         parsed_date = datetime.datetime.strptime(raw, "%d.%m.%Y").date()
     except ValueError:
-        await msg.reply_text(
-            "⚠️ Будь ласка, введіть дату у форматі <code>ДД.ММ.РРРР</code> (наприклад, <code>25.05.2026</code>).",
-            parse_mode=ParseMode.HTML,
+        return await _render_date_selection(
+            update,
+            context,
+            error_msg="Будь ласка, введіть дату у форматі ДД.ММ.РРРР (наприклад, 28.05.2026).",
         )
-        return States.RENTAL_SELECT_DATE
 
     min_date = datetime.date.today() + datetime.timedelta(days=3)
     if parsed_date < min_date:
-        await msg.reply_text(
-            f"⚠️ Мінімальний термін замовлення — не менше ніж за 3 дні (найближча дата: <b>{min_date.strftime('%d.%m.%Y')}</b>).",
-            parse_mode=ParseMode.HTML,
+        return await _render_date_selection(
+            update,
+            context,
+            error_msg=f"Мінімальний термін замовлення — не менше ніж за 3 дні (найближча дата: {min_date.strftime('%d.%m.%Y')}).",
         )
-        return States.RENTAL_SELECT_DATE
 
     draft = _get_draft(context)
     draft["rental_date"] = parsed_date.strftime("%d.%m.%Y")
     return await _render_slot_selection(update, context)
 
 
-async def _render_slot_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def _render_slot_selection(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
     draft = _get_draft(context)
     date_str = draft["rental_date"]
     pickup = draft.get("pickup_stop", "пл. Старосінна")
@@ -653,6 +732,9 @@ async def _render_slot_selection(update: Update, context: ContextTypes.DEFAULT_T
         f"Обране кільце посадки: <b>{pickup}</b>\n\n"
         f"Оберіть бажаний час подачі ретро-вагона зі стандартних вікон або вкажіть власний час:"
     )
+    if error_msg:
+        text = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + text
+
     await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
     return States.RENTAL_SELECT_SLOT
 
@@ -683,13 +765,18 @@ async def rental_handle_custom_time_input(update: Update, context: ContextTypes.
         return States.RENTAL_ENTER_CUSTOM_TIME
 
     raw_t = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
     match = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", raw_t)
     if not match:
-        await msg.reply_text(
-            "⚠️ Будь ласка, введіть час у форматі <code>ГГ:ХХ</code> (наприклад, <code>15:30</code>).",
-            parse_mode=ParseMode.HTML,
+        return await _render_slot_selection(
+            update,
+            context,
+            error_msg="Будь ласка, введіть коректний час у форматі ГГ:ХХ (наприклад: 15:30).",
         )
-        return States.RENTAL_ENTER_CUSTOM_TIME
 
     h, m = int(match.group(1)), int(match.group(2))
     formatted_t = f"{h:02d}:{m:02d}"
@@ -922,12 +1009,14 @@ async def _render_customer_type_selection(update: Update, context: ContextTypes.
     return States.RENTAL_SELECT_CUSTOMER_TYPE
 
 
-async def rental_handle_customer_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    chosen_type = query.data.split(":", 1)[1]
+async def _render_customer_name_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Відображає запит на введення назви або ПІБ замовника."""
     draft = _get_draft(context)
-    draft["customer_type"] = chosen_type
+    chosen_type = draft.get("customer_type", "individual")
 
     if chosen_type == "legal_entity":
         prompt_text = (
@@ -951,9 +1040,52 @@ async def rental_handle_customer_type_selected(update: Update, context: ContextT
             "(наприклад: <code>Перепелиця Олег Олександрович</code>):"
         )
 
-    keyboard = [[InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")]]
+    if error_msg:
+        prompt_text = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt_text
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
     await _send_or_edit(update, context, prompt_text, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_CUSTOMER_NAME
+
+
+async def rental_handle_customer_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+        chosen_type = query.data.split(":", 1)[1]
+        draft = _get_draft(context)
+        draft["customer_type"] = chosen_type
+
+    return await _render_customer_name_input(update, context)
+
+
+async def _render_customer_phone_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Відображає запит на введення контактного номера телефону."""
+    draft = _get_draft(context)
+    cust_type = draft.get("customer_type", "individual")
+
+    phone_prompt = (
+        "📞 Введіть <b>контактний номер телефону</b> уповноваженої особи (наприклад, <code>+380501234567</code>):"
+        if cust_type == "legal_entity"
+        else "📞 Введіть Ваш <b>контактний номер телефону</b> (наприклад, <code>+380501234567</code>):"
+    )
+
+    if error_msg:
+        phone_prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + phone_prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити назву / ПІБ", callback_data="rental_back_name")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, phone_prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_CUSTOMER_PHONE
 
 
 async def rental_handle_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -962,36 +1094,30 @@ async def rental_handle_name_input(update: Update, context: ContextTypes.DEFAULT
         return States.RENTAL_ENTER_CUSTOMER_NAME
 
     name_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
     if len(name_val) < 3:
-        await msg.reply_text("⚠️ Будь ласка, введіть коректну назву або ПІБ (мінімум 3 символи).")
-        return States.RENTAL_ENTER_CUSTOMER_NAME
+        return await _render_customer_name_input(
+            update,
+            context,
+            error_msg="Будь ласка, введіть коректну назву або ПІБ (мінімум 3 символи).",
+        )
 
     draft = _get_draft(context)
     draft["user_full_name"] = name_val
-    cust_type = draft.get("customer_type", "individual")
-
-    phone_prompt = (
-        "📞 Введіть <b>контактний номер телефону</b> уповноваженої особи (наприклад, <code>+380501234567</code>):"
-        if cust_type == "legal_entity"
-        else "📞 Введіть Ваш <b>контактний номер телефону</b> (наприклад, <code>+380501234567</code>):"
-    )
-    await msg.reply_text(phone_prompt, parse_mode=ParseMode.HTML)
-    return States.RENTAL_ENTER_CUSTOMER_PHONE
+    return await _render_customer_phone_input(update, context)
 
 
-async def rental_handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    msg = update.message
-    if not msg or not msg.text:
-        return States.RENTAL_ENTER_CUSTOMER_PHONE
-
-    phone_val = msg.text.strip()
-    digits = re.sub(r"\D", "", phone_val)
-    if len(digits) < 9:
-        await msg.reply_text("⚠️ Некоректний номер телефону. Введіть номер у форматі <code>+380XXXXXXXXX</code>.", parse_mode=ParseMode.HTML)
-        return States.RENTAL_ENTER_CUSTOMER_PHONE
-
+async def _render_customer_tax_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Відображає запит на введення коду ЄДРПОУ або РНОКПП."""
     draft = _get_draft(context)
-    draft["user_phone"] = phone_val
     cust_type = draft.get("customer_type", "individual")
 
     if cust_type == "legal_entity":
@@ -1010,11 +1136,40 @@ async def rental_handle_phone_input(update: Update, context: ContextTypes.DEFAUL
             "(або натисніть кнопку нижче, щоб заповнити при підписанні):"
         )
 
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("⏭️ Вказати під час підписання", callback_data="rental_tax_skip")]]
-    )
-    await msg.reply_text(tax_prompt, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+    if error_msg:
+        tax_prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + tax_prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Вказати під час підписання", callback_data="rental_tax_skip")],
+        [InlineKeyboardButton("⬅️ Змінити номер телефону", callback_data="rental_back_phone")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, tax_prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_CUSTOMER_TAX_ID
+
+
+async def rental_handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_CUSTOMER_PHONE
+
+    phone_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    digits = re.sub(r"\D", "", phone_val)
+    if len(digits) < 9:
+        return await _render_customer_phone_input(
+            update,
+            context,
+            error_msg="Некоректний номер телефону. Введіть номер у форматі +380XXXXXXXXX.",
+        )
+
+    draft = _get_draft(context)
+    draft["user_phone"] = phone_val
+    return await _render_customer_tax_input(update, context)
 
 
 async def rental_handle_tax_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1023,6 +1178,10 @@ async def rental_handle_tax_input(update: Update, context: ContextTypes.DEFAULT_
         await update.callback_query.answer()
         draft["user_tax_id"] = "Заповнюється при підписанні"
     elif update.message and update.message.text:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
         draft["user_tax_id"] = update.message.text.strip()
 
     return await _render_final_confirmation(update, context)
@@ -1069,6 +1228,7 @@ async def _render_final_confirmation(update: Update, context: ContextTypes.DEFAU
     )
     keyboard = [
         [InlineKeyboardButton("🚀 Підтвердити та оформити замовлення", callback_data="rental_confirm_create")],
+        [InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
     ]
     await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
@@ -1595,7 +1755,16 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
     kind = target["kind"]
     order = await db.get_rental_order(order_id)
     if not order:
-        await msg.reply_text("❌ Замовлення не знайдено.")
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        await _send_or_edit(
+            update,
+            context,
+            "❌ Замовлення не знайдено.",
+            InlineKeyboardMarkup([[InlineKeyboardButton("🚋 На головну оренди", callback_data="rental_hub")]]),
+        )
         return ConversationHandler.END
 
     file_id: Optional[str] = None
@@ -1610,8 +1779,36 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         file_name = f"Scan_{order.contract_number}.jpg"
         is_photo = True
     else:
-        await msg.reply_text("⚠️ Будь ласка, надішліть документ (файл .p7s / .pdf) або фотографію.")
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        prompt_text = (
+            "⚠️ <b>Будь ласка, надішліть документ (файл .p7s / .pdf) або фотографію.</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+        )
+        if kind == "signed_contract":
+            prompt_text += (
+                f"✍️ <b>ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ № {order.contract_number}</b>\n\n"
+                "Будь ласка, надішліть сюди у відповідь підписаний файл договору:\n"
+                "• <b>Електронний підпис:</b> файл із розширенням <code>.p7s</code> (Дія.Підпис / КЕП)\n"
+                "• <b>Паперовий примірник:</b> скан-копію або якісне фото кожної сторінки (.pdf / .jpg)."
+            )
+        else:
+            prompt_text += (
+                f"💳 <b>ЗАВАНТАЖЕННЯ КВИТАНЦІЇ ОПЛАТИ IBAN (Договір № {order.contract_number})</b>\n\n"
+                f"Будь ласка, надішліть файл квитанції або фото чека про переказ коштів на суму "
+                f"<b>{order.total_price_uah:.2f} грн</b> за офіційними реквізитами КП «ОМЕТ»."
+            )
+        keyboard = [[InlineKeyboardButton("⬅️ Скасувати завантаження", callback_data=f"rental_contract_view:{order.id}")]]
+        await _send_or_edit(update, context, prompt_text, InlineKeyboardMarkup(keyboard))
         return States.RENTAL_UPLOAD_SIGNED_DOC
+
+    # Видаляємо повідомлення користувача з надісланим документом для чистоти чату
+    try:
+        await msg.delete()
+    except Exception:
+        pass
 
     staff_chat_id = order.staff_chat_id or get_active_staff_chat_id()
 
@@ -1670,22 +1867,22 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         await post_or_update_staff_order_card(context, order.id)
         del context.user_data["rental_upload_target"]
 
-        await msg.reply_text(
+        confirm_text = (
             f"✅ <b>Підписаний договір № {order.contract_number} ({file_name}) успішно отримано!</b>\n\n"
-            f"Документ передано до Відділу правового супроводу КП «ОМЕТ» та зафіксовано в системі.",
-            reply_markup=InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            "💳 Завантажити квитанцію оплати IBAN",
-                            callback_data=f"rental_upload_payment:{order.id}",
-                        )
-                    ],
-                    [InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")],
-                ]
-            ),
-            parse_mode=ParseMode.HTML,
+            f"Документ передано до Відділу правового супроводу КП «ОМЕТ» та зафіксовано в системі."
         )
+        confirm_kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "💳 Завантажити квитанцію оплати IBAN",
+                        callback_data=f"rental_upload_payment:{order.id}",
+                    )
+                ],
+                [InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")],
+            ]
+        )
+        await _send_or_edit(update, context, confirm_text, confirm_kb)
         return ConversationHandler.END
 
     # kind == "payment_receipt"
@@ -1716,13 +1913,13 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
     await post_or_update_staff_order_card(context, order.id)
     del context.user_data["rental_upload_target"]
 
-    await msg.reply_text(
+    receipt_text = (
         f"✅ <b>Квитанцію оплати IBAN за Договором № {order.contract_number} успішно отримано!</b>\n\n"
         f"Документ передано до Бухгалтерії КП «ОМЕТ». Після підтвердження оплати та призначення вагона в депо "
-        f"Ви отримаєте електронний посадковий талон із QR-кодом.",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")]]
-        ),
-        parse_mode=ParseMode.HTML,
+        f"Ви отримаєте електронний посадковий талон із QR-кодом."
     )
+    receipt_kb = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")]]
+    )
+    await _send_or_edit(update, context, receipt_text, receipt_kb)
     return ConversationHandler.END
