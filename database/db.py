@@ -51,6 +51,11 @@ async def init_db():
                 except Exception:
                     pass
                 try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN staff_topic_messages_json TEXT DEFAULT '{}'"))
+                    print("✅ Migration: added staff_topic_messages_json column to rental_orders")
+                except Exception:
+                    pass
+                try:
                     await conn.execute(text("ALTER TABLE museum_bookings ADD COLUMN participants_details TEXT"))
                     print("✅ Migration: added participants_details column to museum_bookings")
                 except Exception:
@@ -637,6 +642,7 @@ class RentalOrder(Base):
     payment_file_id = Column(String, nullable=True)
     staff_chat_id = Column(BigInteger, nullable=True)
     staff_chat_message_id = Column(BigInteger, nullable=True)
+    staff_topic_messages_json = Column(Text, default="{}")
     safety_accepted_at = Column(DateTime, nullable=True)
     reminder_sent = Column(Boolean, default=False)
 
@@ -906,6 +912,40 @@ class Database:
             )
             await session.commit()
 
+    async def get_all_rental_slots_for_date(self, rental_date: str) -> list[RentalDateSlot]:
+        """Повертає всі слоти на дату (free, locked, booked) для перегляду та керування майстрами Депо."""
+        async with self.session_factory() as session:
+            res = await session.execute(
+                select(RentalDateSlot)
+                .where(RentalDateSlot.rental_date == rental_date)
+                .order_by(RentalDateSlot.slot_time.asc())
+            )
+            return list(res.scalars().all())
+
+    async def get_dates_with_free_slots(self) -> list[str]:
+        """Повертає перелік дат, де наявні вільні слоти ('free') для вибору замовниками або видалення в депо."""
+        async with self.session_factory() as session:
+            res = await session.execute(
+                select(RentalDateSlot.rental_date)
+                .where(RentalDateSlot.status == "free")
+                .distinct()
+            )
+            dates = [str(d) for d in res.scalars().all() if d]
+            return sorted(dates)
+
+    async def delete_rental_slot_by_id(self, slot_id: int) -> bool:
+        """Видаляє вільний слот за ідентифікатором. Якщо слот уже заброньовано або заблоковано, повертає False."""
+        async with self.session_factory() as session:
+            res = await session.execute(
+                select(RentalDateSlot).where(RentalDateSlot.id == slot_id)
+            )
+            slot = res.scalars().first()
+            if not slot or slot.status != "free":
+                return False
+            await session.delete(slot)
+            await session.commit()
+            return True
+
     async def create_rental_order(self, data: dict) -> RentalOrder:
         """Створює замовлення оренди, присвоює номер договору №XXXX-О та фіксує запис у журналі дій."""
         now_dt = datetime.datetime.now()
@@ -1123,3 +1163,120 @@ class Database:
         for order in expired_orders:
             await self.release_rental_slot_by_order(order.id)
         return expired_orders
+
+    async def get_recent_rental_orders(self, limit: int = 10) -> list[RentalOrder]:
+        """Повертає останні замовлення для вибору в аналітичному пульті."""
+        async with self.session_factory() as session:
+            res = await session.execute(
+                select(RentalOrder)
+                .order_by(RentalOrder.id.desc())
+                .limit(limit)
+            )
+            return list(res.scalars().all())
+
+    async def get_recent_audit_actions(self, limit: int = 10) -> list[RentalAuditLog]:
+        """Повертає останні дії персоналу для перегляду в темі 'Аналітика дій працівників'."""
+        async with self.session_factory() as session:
+            res = await session.execute(
+                select(RentalAuditLog)
+                .order_by(RentalAuditLog.id.desc())
+                .limit(limit)
+            )
+            return list(res.scalars().all())
+
+    async def get_rental_period_analytics(self, days: int = 7) -> dict:
+        """Розраховує агреговані аналітичні показники роботи модуля оренди за вказаний період (тиждень / місяць)."""
+        cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
+        async with self.session_factory() as session:
+            res = await session.execute(
+                select(RentalOrder).where(RentalOrder.created_at >= cutoff)
+            )
+            orders = list(res.scalars().all())
+            total_orders = len(orders)
+            completed_orders = sum(1 for o in orders if o.status == "completed")
+            cancelled_orders = sum(1 for o in orders if o.status in ("cancelled", "expired_36h"))
+            active_orders = total_orders - completed_orders - cancelled_orders
+            total_revenue_uah = sum(
+                float(o.total_price_uah or 0.0)
+                for o in orders
+                if o.status in ("completed", "paid_confirmed", "vehicle_assigned")
+            )
+            vat_uah = round(total_revenue_uah / 6.0, 2)
+            without_vat_uah = round(total_revenue_uah - vat_uah, 2)
+            total_km = sum(
+                float(o.total_distance_km or 0.0)
+                for o in orders
+                if o.status in ("completed", "vehicle_assigned")
+            )
+            mtv_count = sum(1 for o in orders if "МТВ" in (o.wagon_type or "") or "retro_mtv" in (o.wagon_type or "").lower())
+            open_914_count = sum(1 for o in orders if "914" in (o.wagon_type or "") or "відкритий" in (o.wagon_type or "").lower())
+
+            # Розрахунок середнього часу реакції підрозділів (SLA)
+            order_ids = [o.id for o in orders]
+            sla_data: dict[str, list[float]] = {
+                "vuptap": [],
+                "legal": [],
+                "accounting": [],
+                "depot": [],
+            }
+            if order_ids:
+                logs_res = await session.execute(
+                    select(RentalAuditLog)
+                    .where(RentalAuditLog.order_id.in_(order_ids))
+                    .order_by(RentalAuditLog.created_at.asc())
+                )
+                order_created_map = {o.id: o.created_at for o in orders if o.created_at}
+                for log in logs_res.scalars().all():
+                    created_at = order_created_map.get(log.order_id)
+                    if not created_at or not log.created_at:
+                        continue
+                    delta_min = max(0.0, (log.created_at - created_at).total_seconds() / 60.0)
+                    role = (log.actor_role or "").lower()
+                    if "служба руху" in role or "вуптап" in role or "traffic" in role:
+                        sla_data["vuptap"].append(delta_min)
+                    elif "юридич" in role or "legal" in role:
+                        sla_data["legal"].append(delta_min)
+                    elif "бухгалтер" in role or "accounting" in role:
+                        sla_data["accounting"].append(delta_min)
+                    elif "депо" in role or "depot" in role or "врм" in role:
+                        sla_data["depot"].append(delta_min)
+
+            avg_sla = {
+                k: round(sum(v) / len(v), 1) if v else None
+                for k, v in sla_data.items()
+            }
+
+            return {
+                "days": days,
+                "total_orders": total_orders,
+                "completed_orders": completed_orders,
+                "cancelled_orders": cancelled_orders,
+                "active_orders": active_orders,
+                "total_revenue_uah": total_revenue_uah,
+                "vat_uah": vat_uah,
+                "without_vat_uah": without_vat_uah,
+                "total_km": total_km,
+                "mtv_count": mtv_count,
+                "open_914_count": open_914_count,
+                "avg_sla_min": avg_sla,
+            }
+
+    async def get_order_timeline_analytics(self, order_id: int) -> dict | None:
+        """Повертає деталізований аналітичний хронометраж замовлення з таймлайном дій підрозділів."""
+        async with self.session_factory() as session:
+            res_ord = await session.execute(
+                select(RentalOrder).where(RentalOrder.id == order_id)
+            )
+            order = res_ord.scalars().first()
+            if not order:
+                return None
+            res_logs = await session.execute(
+                select(RentalAuditLog)
+                .where(RentalAuditLog.order_id == order_id)
+                .order_by(RentalAuditLog.created_at.asc(), RentalAuditLog.id.asc())
+            )
+            logs = list(res_logs.scalars().all())
+            return {
+                "order": order,
+                "logs": logs,
+            }

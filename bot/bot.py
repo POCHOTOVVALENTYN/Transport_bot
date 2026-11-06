@@ -149,8 +149,14 @@ from handlers.rental_client_handlers import (
 from handlers.rental_staff_handlers import (
     check_rental_timeouts_job,
     cmd_add_rental_role,
+    cmd_analytics_panel,
+    cmd_bind_topic,
     cmd_chatid,
+    cmd_depot_slots_panel,
     cmd_set_rental_chat,
+    cmd_topics_status,
+    handle_analytics_callback,
+    handle_depot_slots_callback,
     handle_rental_staff_callback,
     handle_staff_group_text_input,
 )
@@ -236,6 +242,10 @@ class TransportBot:
         self.app.add_handler(CommandHandler("chatid", cmd_chatid))
         self.app.add_handler(CommandHandler("set_rental_chat", cmd_set_rental_chat))
         self.app.add_handler(CommandHandler("add_rental_role", cmd_add_rental_role))
+        self.app.add_handler(CommandHandler("bind_topic", cmd_bind_topic))
+        self.app.add_handler(CommandHandler("topics_status", cmd_topics_status))
+        self.app.add_handler(CommandHandler("depot_slots", cmd_depot_slots_panel))
+        self.app.add_handler(CommandHandler("analytics", cmd_analytics_panel))
 
         admin_conv = ConversationHandler(
             entry_points=[
@@ -807,6 +817,8 @@ class TransportBot:
         self.app.add_handler(CallbackQueryHandler(rental_handle_delete_file, pattern="^rental_del_file$"))
         self.app.add_handler(CallbackQueryHandler(handle_client_pick_order_slot, pattern="^rental_pick_order_slot:\\d+:.+$"))
         self.app.add_handler(CallbackQueryHandler(handle_rental_staff_callback, pattern="^rental_staff:"))
+        self.app.add_handler(CallbackQueryHandler(handle_depot_slots_callback, pattern="^depot_slots:"))
+        self.app.add_handler(CallbackQueryHandler(handle_analytics_callback, pattern="^rental_analytics:"))
 
         # --- ОБРОБНИКИ МЕНЮ 1-ГО РІВНЯ ---
         self.app.add_handler(CallbackQueryHandler(realtime_transport, pattern="^realtime_transport$"))
