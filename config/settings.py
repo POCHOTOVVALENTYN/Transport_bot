@@ -115,11 +115,18 @@ SMTP_LEGAL_EMAIL = os.getenv("SMTP_LEGAL_EMAIL", SMTP_TARGET_EMAIL)
 # 9. МОДУЛЬ ОРЕНДИ ТРАМВАЇВ ТА ТРОЛЕЙБУСІВ
 # ===============================================
 VALENTIN_ADMIN_ID = 830196453
-# Поки RENTAL_PUBLIC_ENABLED = False, розділ оренди бачить виключно Валентин (830196453)
+# Поки RENTAL_PUBLIC_ENABLED = False, розділ оренди бачать лише дозволені користувачі
 RENTAL_PUBLIC_ENABLED = os.getenv("RENTAL_PUBLIC_ENABLED", "False") == "True"
 RENTAL_ALLOWED_USER_IDS = [
     VALENTIN_ADMIN_ID,
+    7453894165,
 ]
+_allowed_env = os.getenv("RENTAL_ALLOWED_USER_IDS", "")
+if _allowed_env:
+    for _uid in _allowed_env.split(","):
+        _uid = _uid.strip()
+        if _uid.isdigit():
+            RENTAL_ALLOWED_USER_IDS.append(int(_uid))
 
 # ID спільного службового чату 6 підрозділів КП (якщо 0 — картки дублюються Валентину в особисті для тестування)
 RENTAL_STAFF_CHAT_ID = int(os.getenv("RENTAL_STAFF_CHAT_ID", "-1004341305179"))

@@ -39,9 +39,10 @@ from services.rental_documents_service import (
 
 @pytest.mark.asyncio
 async def test_valentin_only_visibility_guard():
-    """Перевіряє, що новий розділ оренди бачить виключно Валентин (830196453)."""
+    """Перевіряє, що новий розділ оренди бачать лише авторизовані користувачі."""
     assert RENTAL_PUBLIC_ENABLED is False
     assert is_rental_access_allowed(VALENTIN_ADMIN_ID) is True
+    assert is_rental_access_allowed(7453894165) is True
     assert is_rental_access_allowed(111222333) is False
 
     valentin_kb = await get_main_menu_keyboard(VALENTIN_ADMIN_ID)
@@ -49,6 +50,12 @@ async def test_valentin_only_visibility_guard():
         btn.callback_data for row in valentin_kb.inline_keyboard for btn in row
     ]
     assert "rental_hub" in valentin_callbacks
+
+    tester_kb = await get_main_menu_keyboard(7453894165)
+    tester_callbacks = [
+        btn.callback_data for row in tester_kb.inline_keyboard for btn in row
+    ]
+    assert "rental_hub" in tester_callbacks
 
     regular_kb = await get_main_menu_keyboard(111222333)
     regular_callbacks = [

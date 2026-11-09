@@ -25,7 +25,7 @@ async def get_main_menu_keyboard(user_id: int):
         [InlineKeyboardButton("🏛️ Музей КП 'ОМЕТ'", callback_data="museum_menu")],
         [InlineKeyboardButton("🏢 Про підприємство", callback_data="company_menu")]
     ]
-    # 0. Розділ Оренди трамваїв і тролейбусів — видимий ЛИШЕ Валентину (830196453) на етапі закритого запуску
+    # 0. Розділ Оренди трамваїв і тролейбусів — видимий авторизованим тестувальникам на етапі закритого запуску
     if is_rental_access_allowed(user_id):
         keyboard.append(
             [InlineKeyboardButton("🚋 Оренда електротранспорту", callback_data="rental_hub")]

@@ -69,7 +69,7 @@ _PENDING_STAFF_INPUT: Dict[Tuple[int, int], Dict[str, Any]] = {}
 def is_rental_access_allowed(user_id: int) -> bool:
     """
     Перевіряє, чи має користувач доступ до нового розділу оренди.
-    Поки RENTAL_PUBLIC_ENABLED = False, розділ бачить ВИКЛЮЧНО Валентин (830196453).
+    Поки RENTAL_PUBLIC_ENABLED = False, розділ бачать лише авторизовані користувачі (RENTAL_ALLOWED_USER_IDS).
     """
     if RENTAL_PUBLIC_ENABLED:
         return True
