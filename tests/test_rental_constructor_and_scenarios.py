@@ -440,17 +440,28 @@ async def test_full_wizard_conversation_flow():
     s4 = await rental_handle_pickup_loop_selected(make_update(f"rental_loop_pick:{starosinna_idx}"), context)
     assert s4 == States.RENTAL_SELECT_VIA_LOOPS
 
-    # Додаємо проміжне кільце: Аркадія та натискаємо 'Готово'
-    await rental_handle_via_loop_selected(make_update(f"rental_loop_via:{arcadia_idx}"), context)
+    # Додаємо проміжне кільце: Аркадія
+    s_alight = await rental_handle_via_loop_selected(make_update(f"rental_loop_via:{arcadia_idx}"), context)
+    assert s_alight == States.RENTAL_VIA_PROMPT_DROPOFF
+
+    # Підтверджуємо висадку пасажирів на кільці
+    s_wait = await client_handlers.rental_handle_via_alighting_selected(make_update("rental_via_alight:yes"), context)
+    assert s_wait == States.RENTAL_VIA_PROMPT_WAIT_MINUTES
+
+    # Обираємо 5 хв стоянки
+    s_via_hub = await client_handlers.rental_handle_via_wait_selected(make_update("rental_via_wait:5"), context)
+    assert s_via_hub == States.RENTAL_SELECT_VIA_LOOPS
+
+    # Натискаємо 'Готово' (перейти до кінцевої)
     s5 = await rental_handle_via_done(make_update("rental_via_done"), context)
     assert s5 == States.RENTAL_SELECT_DROPOFF_LOOP
 
-    # Обираємо кільце висадки: пл. Старосінна
+    # Обираємо кільце висадки: пл. Старосінна -> переходить на дашборд маршруту
     s6 = await rental_handle_dropoff_loop_selected(make_update(f"rental_loop_drop:{starosinna_idx}"), context)
-    assert s6 == States.RENTAL_SELECT_WAIT_TIME
+    assert s6 == States.RENTAL_ROUTE_EDITOR_DASHBOARD
 
-    # Обираємо час стоянки: 5 хв
-    s7 = await rental_handle_wait_selected(make_update("rental_wait:5"), context)
+    # Підтверджуємо маршрут на дашборді -> переходить до вибору дати
+    s7 = await client_handlers._render_date_selection(make_update("rental_route_confirm"), context)
     assert s7 == States.RENTAL_SELECT_DATE
 
     # 3. Обираємо дату поїздки: кнопкою на 4 дні вперед
@@ -606,3 +617,20 @@ def test_linear_stop_pickup_route_calculation() -> None:
     )
     assert breakdown.total_price_uah > 0
     assert breakdown.billable_minutes >= 60
+
+
+def test_stop_directional_options_and_dashboard_editing() -> None:
+    """Перевіряє генерацію варіантів напрямку руху для зупинок та структуру проміжних точок."""
+    from services.tram_rental_service import get_stop_directional_options
+
+    # Для двосторонньої зупинки 'вул. Канатна' має бути мінімум 2 напрямки
+    kanatna_opts = get_stop_directional_options("вул. Канатна", "TRAM")
+    assert len(kanatna_opts) >= 2
+    directions = [opt["direction"] for opt in kanatna_opts]
+    assert any("Музичної" in d or "Аркад" in d for d in directions)
+
+    # Для кінцевого розворотного кільця 'Аркадія' — 1 варіант
+    arcadia_opts = get_stop_directional_options("Аркадія", "TRAM")
+    assert len(arcadia_opts) == 1
+    assert arcadia_opts[0]["platform_id"] != ""
+

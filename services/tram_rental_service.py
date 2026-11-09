@@ -565,6 +565,7 @@ class RentalCalculationInput(BaseModel):
     via_loops: List[str] = Field(default_factory=list)
     loop_wait_minutes: int = Field(default=10, ge=0, le=120)
     wait_minutes_at_loop: Optional[int] = None
+    total_wait_minutes: Optional[int] = None
     departure_time: Optional[str] = None
     day_type: DayType = "WORKDAY"
     customer_name: Optional[str] = "Служба руху КП «ОМЕТ»"
@@ -1272,6 +1273,54 @@ def search_tram_stops(query_text: str, transport_type: str = "TRAM", limit: int 
     return results[:limit]
 
 
+def get_stop_directional_options(stop_name: str, transport_type: str = "TRAM") -> List[Dict[str, Any]]:
+    """
+    Повертає варіанти напрямку руху для вказаної зупинки на основі платформ та топології Wialon.
+    Якщо зупинка двостороння або має розгалуження, формує варіанти із вказівкою наступної ключової зупинки.
+    """
+    if not stop_name:
+        return []
+    net = get_wialon_transit_network()
+    vt = (transport_type or "TRAM").upper()
+    norm = normalize_stop_name(stop_name)
+    platforms = [
+        p for p in net.platforms_by_vt.get(vt, {}).values()
+        if normalize_stop_name(p.get("name", "")) == norm
+    ]
+    if not platforms:
+        return [{"stop_name": stop_name, "platform_id": "", "display_name": stop_name, "direction": ""}]
+
+    if len(platforms) == 1:
+        p = platforms[0]
+        return [{"stop_name": p["name"], "platform_id": str(p["stop_id"]), "display_name": p["name"], "direction": ""}]
+
+    options: List[Dict[str, Any]] = []
+    seen_targets: Set[str] = set()
+    for p in platforms:
+        pid = str(p["stop_id"])
+        out_edges = net.adj.get(vt, {}).get(pid, [])
+        next_stops = [
+            net.platforms_by_vt.get(vt, {}).get(e["to_stop_id"], {}).get("name", "")
+            for e in out_edges
+            if e["to_stop_id"] in net.platforms_by_vt.get(vt, {})
+            and normalize_stop_name(net.platforms_by_vt[vt][e["to_stop_id"]].get("name", "")) != norm
+        ]
+        next_unique = [ns for ns in dict.fromkeys(next_stops) if ns]
+        next_target = next_unique[0] if next_unique else ""
+        if next_target and next_target not in seen_targets:
+            seen_targets.add(next_target)
+            options.append({
+                "stop_name": p["name"],
+                "platform_id": pid,
+                "display_name": f"{p['name']} ➡️ до {next_target}",
+                "direction": f"до {next_target}",
+            })
+
+    if not options:
+        return [{"stop_name": stop_name, "platform_id": "", "display_name": stop_name, "direction": ""}]
+    return options
+
+
 def get_all_districts() -> List[str]:
     """Повертає перелік усіх 6 районів для групування зупинок."""
     return list(TRAM_DISTRICTS.keys())
@@ -1603,7 +1652,10 @@ def calculate_tram_rental_trip(calc_input: RentalCalculationInput) -> RentalCalc
         else:
             combined_path.extend(leg["path"][1:])
 
-    total_wait_min = calc_input.loop_wait_minutes * len(ordered_loops)
+    if calc_input.total_wait_minutes is not None:
+        total_wait_min = max(0, calc_input.total_wait_minutes)
+    else:
+        total_wait_min = calc_input.loop_wait_minutes * len(ordered_loops)
     via_display = " -> ".join(ordered_loops) if ordered_loops else None
 
     phase_2_detailed = build_annotated_stops_path(
