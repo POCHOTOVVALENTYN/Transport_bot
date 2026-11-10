@@ -156,6 +156,34 @@ from handlers.rental_client_handlers import (
     _render_slot_selection,
     _render_stop_selection_hub,
     _render_wialon_calculation_and_extras,
+    _render_individual_name_input,
+    _render_individual_phone_input,
+    _render_individual_passport_input,
+    _render_individual_address_input,
+    _render_individual_tax_input,
+    rental_handle_individual_passport_input,
+    rental_handle_individual_address_input,
+    rental_handle_individual_tax_input,
+    _render_fop_name_input,
+    _render_fop_tax_input,
+    _render_fop_address_input,
+    _render_fop_edr_input,
+    _render_fop_phone_input,
+    rental_handle_fop_name_input,
+    rental_handle_fop_tax_input,
+    rental_handle_fop_address_input,
+    rental_handle_fop_edr_input,
+    rental_handle_fop_phone_input,
+    _render_legal_edrpou_input,
+    _render_legal_name_input,
+    _render_legal_address_input,
+    _render_legal_signer_input,
+    _render_legal_phone_input,
+    rental_handle_legal_edrpou_input,
+    rental_handle_legal_name_input,
+    rental_handle_legal_address_input,
+    rental_handle_legal_signer_input,
+    rental_handle_legal_phone_input,
 )
 from handlers.rental_staff_handlers import (
     check_rental_timeouts_job,
@@ -790,21 +818,95 @@ class TransportBot:
                     CallbackQueryHandler(rental_handle_customer_type_selected, pattern="^rental_cust_type:"),
                     CallbackQueryHandler(_render_safety_briefing, pattern="^rental_back_safety$"),
                 ],
+                # Гілка 1: Фізична особа
                 States.RENTAL_ENTER_CUSTOMER_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_name_input),
                     CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
                 States.RENTAL_ENTER_CUSTOMER_PHONE: [
-                    CallbackQueryHandler(_render_customer_name_input, pattern="^rental_back_name$"),
+                    CallbackQueryHandler(_render_individual_name_input, pattern="^rental_back_name$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_phone_input),
                 ],
-                States.RENTAL_ENTER_CUSTOMER_TAX_ID: [
-                    CallbackQueryHandler(rental_handle_tax_input, pattern="^rental_tax_skip$"),
-                    CallbackQueryHandler(_render_customer_phone_input, pattern="^rental_back_phone$"),
+                States.RENTAL_ENTER_INDIVIDUAL_PASSPORT: [
+                    CallbackQueryHandler(rental_handle_individual_passport_input, pattern="^rental_passp_skip$"),
+                    CallbackQueryHandler(_render_individual_phone_input, pattern="^rental_back_phone$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_tax_input),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_individual_passport_input),
                 ],
+                States.RENTAL_ENTER_INDIVIDUAL_ADDRESS: [
+                    CallbackQueryHandler(_render_individual_passport_input, pattern="^rental_back_passport$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_individual_address_input),
+                ],
+                States.RENTAL_ENTER_INDIVIDUAL_TAX_ID: [
+                    CallbackQueryHandler(_render_individual_address_input, pattern="^rental_back_indiv_addr$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_individual_tax_input),
+                ],
+                States.RENTAL_ENTER_CUSTOMER_TAX_ID: [
+                    CallbackQueryHandler(_render_individual_address_input, pattern="^rental_back_indiv_addr$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_individual_tax_input),
+                ],
+
+                # Гілка 2: ФОП
+                States.RENTAL_ENTER_FOP_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_name_input),
+                    CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+                States.RENTAL_ENTER_FOP_TAX_ID: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_tax_input),
+                    CallbackQueryHandler(_render_fop_name_input, pattern="^rental_back_fop_name$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+                States.RENTAL_ENTER_FOP_ADDRESS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_address_input),
+                    CallbackQueryHandler(_render_fop_tax_input, pattern="^rental_back_fop_tax$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+                States.RENTAL_ENTER_FOP_EDR_DOC: [
+                    CallbackQueryHandler(rental_handle_fop_edr_input, pattern="^rental_fop_edr_std$"),
+                    CallbackQueryHandler(_render_fop_address_input, pattern="^rental_back_fop_addr$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_edr_input),
+                ],
+                States.RENTAL_ENTER_FOP_PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_phone_input),
+                    CallbackQueryHandler(_render_fop_edr_input, pattern="^rental_back_fop_edr$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+
+                # Гілка 3: Юридична особа
+                States.RENTAL_ENTER_LEGAL_EDRPOU: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_edrpou_input),
+                    CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+                States.RENTAL_ENTER_LEGAL_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_name_input),
+                    CallbackQueryHandler(_render_legal_edrpou_input, pattern="^rental_back_legal_edrpou$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+                States.RENTAL_ENTER_LEGAL_ADDRESS: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_address_input),
+                    CallbackQueryHandler(_render_legal_name_input, pattern="^rental_back_legal_name$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+                States.RENTAL_ENTER_LEGAL_SIGNER: [
+                    CallbackQueryHandler(rental_handle_legal_signer_input, pattern="^rental_legal_signer_std$"),
+                    CallbackQueryHandler(_render_legal_address_input, pattern="^rental_back_legal_addr$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_signer_input),
+                ],
+                States.RENTAL_ENTER_LEGAL_PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_phone_input),
+                    CallbackQueryHandler(_render_legal_signer_input, pattern="^rental_back_legal_signer$"),
+                    CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
+                ],
+
                 States.RENTAL_FINAL_CONFIRM: [
                     CallbackQueryHandler(rental_finalize_order, pattern="^rental_confirm_create$"),
                     CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),

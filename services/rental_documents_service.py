@@ -334,13 +334,10 @@ def generate_rental_iban_invoice_pdf(
     contract_number = str(order_data.get("contract_number", "2026-0001-О"))
     safe_num = contract_number.replace("/", "_").replace(" ", "_")
     pdf_path = str(out_dir / f"IBAN_Invoice_{safe_num}.pdf")
-    qr_path = str(out_dir / f"qr_iban_{safe_num}.png")
 
     created_date = str(order_data.get("contract_date") or datetime.datetime.now().strftime("%d.%m.%Y"))
     total_price = float(order_data.get("total_price_uah", 0.0))
     purpose = build_nbu_iban_payment_purpose(contract_number, created_date)
-    qr_payload = build_nbu_iban_qr_payload(contract_number, created_date, total_price)
-    _create_qr_png(qr_payload, qr_path)
 
     pdf = FPDF(orientation="P", unit="mm", format="A4")
     pdf.set_auto_page_break(auto=True, margin=12)
@@ -371,75 +368,61 @@ def generate_rental_iban_invoice_pdf(
     )
     pdf.ln(3)
 
-    # Блок реквізитів Отримувача та QR-код праворуч
+    # 1. Блок банківських реквізитів Отримувача (на всю ширину 190 мм)
     top_y = pdf.get_y()
     pdf.set_fill_color(255, 255, 255)
     pdf.set_draw_color(80, 80, 80)
-    pdf.rect(10, top_y, 132, 46, "DF")
+    pdf.rect(10, top_y, 190, 48, "DF")
 
     pdf.set_xy(13, top_y + 2)
     pdf.set_font("DejaVu", "B", 9.5)
-    pdf.cell(126, 5, "РЕКВІЗИТИ ОТРИМУВАЧА (ВИКОНАВЦЯ):", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(184, 5, "РЕКВІЗИТИ ОТРИМУВАЧА (ВИКОНАВЦЯ):", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(13)
     pdf.set_font("DejaVu", "", 8.5)
-    pdf.cell(126, 5, f"Отримувач: {RENTAL_IBAN_COMPANY_NAME}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(184, 5, f"Отримувач: {RENTAL_IBAN_COMPANY_NAME} | Код ЄДРПОУ: {RENTAL_IBAN_EDRPOU}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(13)
-    pdf.cell(126, 5, f"Код ЄДРПОУ: {RENTAL_IBAN_EDRPOU}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_x(13)
-    pdf.set_font("DejaVu", "B", 9)
-    pdf.cell(126, 5, f"Рахунок IBAN: {RENTAL_IBAN_ACCOUNT}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("DejaVu", "B", 9.5)
+    pdf.cell(184, 5, f"Розрахунковий рахунок IBAN: {RENTAL_IBAN_ACCOUNT}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(13)
     pdf.set_font("DejaVu", "", 8.5)
-    pdf.cell(126, 5, f"Банк: {RENTAL_IBAN_BANK_NAME}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(184, 5, f"Обслуговуючий банк: {RENTAL_IBAN_BANK_NAME} | МФО: {RENTAL_BANK_MFO}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(13)
-    pdf.cell(126, 5, f"Юридична адреса: {RENTAL_IBAN_COMPANY_ADDRESS}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(184, 5, f"Юридична адреса: {RENTAL_IBAN_COMPANY_ADDRESS}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
     cust_type = str(order_data.get("customer_type") or "individual").lower()
     full_name = str(order_data.get("user_full_name") or "Замовник").strip()
     tax_id = str(order_data.get("user_tax_id") or "").strip()
     phone = str(order_data.get("user_phone") or "").strip()
+    addr = str(order_data.get("user_address") or "").strip()
 
     if cust_type in ("legal_entity", "company", "юридична особа"):
-        payer_label = f"Платник (Юрособа): {full_name} | ЄДРПОУ {tax_id}"
+        payer_label = f"Платник (Юридична особа): {full_name} | ЄДРПОУ: {tax_id} | Тел.: {phone}"
     elif cust_type in ("fop", "фоп"):
-        payer_label = f"Платник (ФОП): {full_name} | РНОКПП {tax_id}"
+        payer_label = f"Платник (ФОП): {full_name} | РНОКПП: {tax_id} | Тел.: {phone}"
     else:
-        tax_str = f" | РНОКПП {tax_id}" if tax_id and tax_id != "—" else ""
-        payer_label = f"Платник (Фізособа): {full_name} ({phone}){tax_str}"
+        tax_str = f" | РНОКПП: {tax_id}" if tax_id and tax_id != "—" else ""
+        payer_label = f"Платник (Фізична особа): {full_name} | Тел.: {phone}{tax_str}"
 
     pdf.set_x(13)
-    pdf.cell(
-        126,
-        5,
-        payer_label[:68],
-        new_x=XPos.LMARGIN,
-        new_y=YPos.NEXT,
-    )
+    pdf.set_font("DejaVu", "B", 8.5)
+    pdf.cell(184, 5, payer_label[:110], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    if addr and addr != "заповнюється при підписанні":
+        pdf.set_x(13)
+        pdf.set_font("DejaVu", "", 8)
+        pdf.cell(184, 5, f"Адреса: {addr}"[:110], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    # QR-код НБУ праворуч
-    if os.path.exists(qr_path):
-        pdf.image(qr_path, x=148, y=top_y, w=46, h=46)
-    pdf.set_xy(144, top_y + 46)
-    pdf.set_font("DejaVu", "B", 6.8)
-    pdf.multi_cell(
-        50,
-        3.2,
-        "Для швидкої оплати відкрийте сканер QR у додатку банку\n(Приват24 / Monobank / Ощад24)",
-        align="C",
-    )
-
-    pdf.set_y(top_y + 54)
-
-    # Призначення платежу (обов'язковий блок)
+    # 2. Призначення платежу (обов'язковий блок із захистом від виходу тексту за межі)
+    box_y = top_y + 51
     pdf.set_fill_color(255, 255, 255)
     pdf.set_draw_color(80, 80, 80)
-    pdf.rect(10, pdf.get_y(), 190, 16, "DF")
-    pdf.set_xy(13, pdf.get_y() + 2)
+    pdf.rect(10, box_y, 190, 18, "DF")
+    pdf.set_xy(13, box_y + 2)
     pdf.set_font("DejaVu", "B", 8.5)
-    pdf.cell(0, 5, "ОБОВ'ЯЗКОВЕ ПРИЗНАЧЕННЯ ПЛАТЕЖУ (копіюється автоматично з QR-коду):", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(184, 4.5, "ОБОВ'ЯЗКОВЕ ПРИЗНАЧЕННЯ ПЛАТЕЖУ ПРИ ОПЛАТІ:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_x(13)
-    pdf.set_font("DejaVu", "B", 8.2)
-    pdf.cell(0, 6, purpose, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(5)
+    pdf.set_font("DejaVu", "B", 7.8)
+    pdf.multi_cell(184, 4.2, purpose)
+    pdf.set_y(box_y + 21)
 
     # Таблиця послуг (суворий монохром)
     pdf.set_fill_color(245, 245, 245)
@@ -511,12 +494,8 @@ def generate_rental_iban_invoice_pdf(
         4.5,
         "Примітка: Після здійснення оплати за реквізитами IBAN надішліть квитанцію (PDF або скріншот) у розділі "
         "«Діючі договори та замовлення» офіційного Telegram-бота КП «Одесміськелектротранс». "
-        "Бухгалтерія підприємства перевіряє зарахування коштів та активує наряд на випуск вагона з депо.",
+        "Бухгалтерія підприємства перевіряє зарахування коштів.",
     )
-    pdf.ln(6)
-    pdf.set_font("DejaVu", "B", 9)
-    pdf.cell(110, 5, f"{RENTAL_IBAN_DIRECTOR_TITLE}:")
-    pdf.cell(80, 5, f"____________________ {RENTAL_IBAN_DIRECTOR_NAME}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     pdf.output(pdf_path)
     return pdf_path
@@ -891,7 +870,7 @@ def generate_rental_contract_pdf(
 
     # 3. Розділ 1
     pdf.set_font(fn, "B", 9)
-    pdf.cell(0, 4.8, "1. ПРЕДМЕТ ТА ЗАГАЛЬНІ УМОВИ ДОГОВОРУ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.8, "1. ПРЕДМЕТ ТА ЗАГАЛЬНІ УМОВИ ДОГОВОРУ", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
@@ -899,12 +878,13 @@ def generate_rental_contract_pdf(
         f"1.1. Замовник оплачує, а Виконавець зобов’язується надати послугу по перевезенню "
         f"електричним транспортом – а саме: транспортний засіб – {wagon_contract_label}, по маршруту: {route_str}.\n"
         f"1.2. Надання послуг підтверджується складанням актів надання послуг.",
+        align="J",
     )
     pdf.ln(2)
 
     # 4. Розділ 2
     pdf.set_font(fn, "B", 9)
-    pdf.cell(0, 4.8, "2. ОБОВ'ЯЗКИ ТА ПРАВА СТОРІН", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.8, "2. ОБОВ'ЯЗКИ ТА ПРАВА СТОРІН", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
@@ -916,12 +896,13 @@ def generate_rental_contract_pdf(
         f"послуги з урахуванням часу затримки руху транспортного засобу.\n"
         f"2.4. Замовнику забороняється при користуванні трамваєм перевищення рівнів шуму, установлених "
         f"санітарними нормами на захищених об’єктах, для відповідного часу доби.",
+        align="J",
     )
     pdf.ln(2)
 
     # 5. Розділ 3
     pdf.set_font(fn, "B", 9)
-    pdf.cell(0, 4.8, "3. ОПЛАТА ПОСЛУГ І ПОРЯДОК ЇХ ПРИЙМАННЯ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.8, "3. ОПЛАТА ПОСЛУГ І ПОРЯДОК ЇХ ПРИЙМАННЯ", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
@@ -933,12 +914,13 @@ def generate_rental_contract_pdf(
         f"3.3. Плата за надання послуг по перевезенню здійснюється Замовником в безготівковій формі у розмірі "
         f"100% передоплати шляхом перерахування коштів відповідно до встановленого рахунку протягом трьох "
         f"банківських днів з моменту підписання Договору на розрахунковий рахунок Виконавця згідно розділу 7 даного Договору.",
+        align="J",
     )
     pdf.ln(2)
 
     # 6. Розділ 4
     pdf.set_font(fn, "B", 9)
-    pdf.cell(0, 4.8, "4. ВІДПОВІДАЛЬНІСТЬ СТОРІН", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.8, "4. ВІДПОВІДАЛЬНІСТЬ СТОРІН", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
@@ -956,24 +938,26 @@ def generate_rental_contract_pdf(
         "4.4. Сторони погодили, що у разі ненадання послуг Виконавцем з його вини чи надання послуг не у повному "
         "обсязі, розмір відповідальності Виконавця не може перевищувати розміру плати за надання послуг "
         "встановленого цим Договором.",
+        align="J",
     )
     pdf.ln(2)
 
     # 7. Розділ 5
     pdf.set_font(fn, "B", 9)
-    pdf.cell(0, 4.8, "5. ОБСТАВИНИ НЕПЕРЕБОРНОЇ СИЛИ (ФОРС-МАЖОР)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.8, "5. ОБСТАВИНИ НЕПЕРЕБОРНОЇ СИЛИ (ФОРС-МАЖОР)", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
         4.1,
         "5.1. Сторони звільняються від відповідальності за цим Договором, якщо невиконання або неналежне "
         "виконання зобов'язань було обумовлено настанням форс-мажорних обставин, що мають бути документально підтверджені.",
+        align="J",
     )
     pdf.ln(2)
 
     # 8. Розділ 6
     pdf.set_font(fn, "B", 9)
-    pdf.cell(0, 4.8, "6. СТРОК ДІЇ ДОГОВОРУ ТА ІНШІ УМОВИ", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.8, "6. СТРОК ДІЇ ДОГОВОРУ ТА ІНШІ УМОВИ", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font(fn, "", 8.5)
     pdf.multi_cell(
         0,
@@ -985,12 +969,13 @@ def generate_rental_contract_pdf(
         "6.4. Усі правовідносини, що виникають у зв'язку з виконанням умов цього Договору і не врегульовані ним, "
         "регламентуються нормами чинного в Україні законодавства.\n"
         "6.5. Цей Договір складений українською мовою, у 2-х примірниках, кожний з яких має однакову юридичну силу.",
+        align="J",
     )
     pdf.ln(3)
 
     # 9. Розділ 7: Двоколонкова таблиця реквізитів
     pdf.set_font(fn, "B", 9)
-    pdf.cell(0, 4.8, "7. ЮРИДИЧНІ АДРЕСИ СТОРІН:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.8, "7. ЮРИДИЧНІ АДРЕСИ СТОРІН:", align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
     y_pos = pdf.get_y()

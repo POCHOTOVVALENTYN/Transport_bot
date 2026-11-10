@@ -1673,37 +1673,20 @@ async def _render_customer_type_selection(update: Update, context: ContextTypes.
     return States.RENTAL_SELECT_CUSTOMER_TYPE
 
 
-async def _render_customer_name_input(
+# ================= ГІЛКА 1: ФІЗИЧНА ОСОБА =================
+
+async def _render_individual_name_input(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     error_msg: Optional[str] = None,
 ) -> int:
-    """Відображає запит на введення назви або ПІБ замовника."""
-    draft = _get_draft(context)
-    chosen_type = draft.get("customer_type", "individual")
-
-    if chosen_type == "legal_entity":
-        prompt_text = (
-            "🏢 <b>ЮРИДИЧНА ОСОБА</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "Введіть <b>повне найменування організації та ПІБ підписанта</b>\n"
-            "(наприклад: <code>ТОВ «Одеса Тур», в особі директора Коваленка І.І.</code>):"
-        )
-    elif chosen_type == "fop":
-        prompt_text = (
-            "💼 <b>ФОП (ПІДПРИЄМЕЦЬ)</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "Введіть <b>ПІБ підприємця повністю</b>\n"
-            "(наприклад: <code>Коваленко Іван Іванович</code>):"
-        )
-    else:
-        prompt_text = (
-            "🚶 <b>ФІЗИЧНА ОСОБА</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "Введіть <b>Ваше ПІБ повністю</b>\n"
-            "(наприклад: <code>Перепелиця Олег Олександрович</code>):"
-        )
-
+    """Відображає запит на введення ПІБ фізичної особи."""
+    prompt_text = (
+        "🚶 <b>ФІЗИЧНА ОСОБА (ГРОМАДЯНИН)</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть <b>Ваше ПІБ повністю</b>\n"
+        "(наприклад: <code>Перепелиця Олег Олександрович</code>):"
+    )
     if error_msg:
         prompt_text = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt_text
 
@@ -1715,6 +1698,10 @@ async def _render_customer_name_input(
     return States.RENTAL_ENTER_CUSTOMER_NAME
 
 
+async def _render_customer_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE, error_msg: Optional[str] = None) -> int:
+    return await _render_individual_name_input(update, context, error_msg=error_msg)
+
+
 async def rental_handle_customer_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     if query:
@@ -1723,33 +1710,34 @@ async def rental_handle_customer_type_selected(update: Update, context: ContextT
         draft = _get_draft(context)
         draft["customer_type"] = chosen_type
 
-    return await _render_customer_name_input(update, context)
+    chosen = draft.get("customer_type", "individual")
+    if chosen == "legal_entity":
+        return await _render_legal_edrpou_input(update, context)
+    if chosen == "fop":
+        return await _render_fop_name_input(update, context)
+    return await _render_individual_name_input(update, context)
 
 
-async def _render_customer_phone_input(
+async def _render_individual_phone_input(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     error_msg: Optional[str] = None,
 ) -> int:
-    """Відображає запит на введення контактного номера телефону."""
-    draft = _get_draft(context)
-    cust_type = draft.get("customer_type", "individual")
-
-    phone_prompt = (
-        "📞 Введіть <b>контактний номер телефону</b> уповноваженої особи (наприклад, <code>+380501234567</code>):"
-        if cust_type == "legal_entity"
-        else "📞 Введіть Ваш <b>контактний номер телефону</b> (наприклад, <code>+380501234567</code>):"
-    )
-
+    """Відображає запит на введення контактного номера телефону громадянина."""
+    phone_prompt = "📞 Введіть Ваш <b>контактний номер телефону</b> (наприклад: <code>+380501234567</code>):"
     if error_msg:
         phone_prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + phone_prompt
 
     keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити назву / ПІБ", callback_data="rental_back_name")],
+        [InlineKeyboardButton("⬅️ Змінити ПІБ", callback_data="rental_back_name")],
         [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
     ]
     await _send_or_edit(update, context, phone_prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_CUSTOMER_PHONE
+
+
+async def _render_customer_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE, error_msg: Optional[str] = None) -> int:
+    return await _render_individual_phone_input(update, context, error_msg=error_msg)
 
 
 async def rental_handle_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1764,52 +1752,15 @@ async def rental_handle_name_input(update: Update, context: ContextTypes.DEFAULT
         pass
 
     if len(name_val) < 3:
-        return await _render_customer_name_input(
+        return await _render_individual_name_input(
             update,
             context,
-            error_msg="Будь ласка, введіть коректну назву або ПІБ (мінімум 3 символи).",
+            error_msg="Будь ласка, введіть коректне ПІБ (мінімум 3 символи).",
         )
 
     draft = _get_draft(context)
     draft["user_full_name"] = name_val
-    return await _render_customer_phone_input(update, context)
-
-
-async def _render_customer_tax_input(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    error_msg: Optional[str] = None,
-) -> int:
-    """Відображає запит на введення коду ЄДРПОУ або РНОКПП."""
-    draft = _get_draft(context)
-    cust_type = draft.get("customer_type", "individual")
-
-    if cust_type == "legal_entity":
-        tax_prompt = (
-            "🏢 Введіть <b>код ЄДРПОУ підприємства</b> (8 цифр) для формування Рахунку IBAN та Договору "
-            "(або натисніть кнопку нижче, щоб заповнити при підписанні):"
-        )
-    elif cust_type == "fop":
-        tax_prompt = (
-            "🪪 Введіть <b>РНОКПП (ІПН ФОП)</b> (10 цифр) для зазначення в Договорі та Рахунку "
-            "(або натисніть кнопку нижче, щоб заповнити при підписанні):"
-        )
-    else:
-        tax_prompt = (
-            "🪪 Введіть <b>РНОКПП (ІПН)</b> (10 цифр) для реквізитів Договору перевезення "
-            "(або натисніть кнопку нижче, щоб заповнити при підписанні):"
-        )
-
-    if error_msg:
-        tax_prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + tax_prompt
-
-    keyboard = [
-        [InlineKeyboardButton("⏭️ Вказати під час підписання", callback_data="rental_tax_skip")],
-        [InlineKeyboardButton("⬅️ Змінити номер телефону", callback_data="rental_back_phone")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
-    await _send_or_edit(update, context, tax_prompt, InlineKeyboardMarkup(keyboard))
-    return States.RENTAL_ENTER_CUSTOMER_TAX_ID
+    return await _render_individual_phone_input(update, context)
 
 
 async def rental_handle_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1825,7 +1776,7 @@ async def rental_handle_phone_input(update: Update, context: ContextTypes.DEFAUL
 
     digits = re.sub(r"\D", "", phone_val)
     if len(digits) < 9:
-        return await _render_customer_phone_input(
+        return await _render_individual_phone_input(
             update,
             context,
             error_msg="Некоректний номер телефону. Введіть номер у форматі +380XXXXXXXXX.",
@@ -1833,21 +1784,594 @@ async def rental_handle_phone_input(update: Update, context: ContextTypes.DEFAUL
 
     draft = _get_draft(context)
     draft["user_phone"] = phone_val
-    return await _render_customer_tax_input(update, context)
+    return await _render_individual_passport_input(update, context)
 
 
-async def rental_handle_tax_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def _render_individual_passport_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує паспорт або ID-картку фізичної особи з можливістю заповнити при підписанні."""
+    prompt = (
+        "🪪 <b>ПАСПОРТНІ ДАНІ ЗАМОВНИКА</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть серію та номер паспорта громадянина України або номер ID-картки\n"
+        "(наприклад: <code>паспорт КМ 123456, виданий Приморським РВ</code> або <code>ID-картка №001234567</code>):\n\n"
+        "<i>Також Ви можете вказати ці дані безпосередньо при особистому підписанні.</i>"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Вказати під час підписання", callback_data="rental_passp_skip")],
+        [InlineKeyboardButton("⬅️ Змінити номер телефону", callback_data="rental_back_phone")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_INDIVIDUAL_PASSPORT
+
+
+async def rental_handle_individual_passport_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     draft = _get_draft(context)
     if update.callback_query:
         await update.callback_query.answer()
-        draft["user_tax_id"] = "Заповнюється при підписанні"
+        draft["user_passport"] = "Вказується при підписанні"
     elif update.message and update.message.text:
         try:
             await update.message.delete()
         except Exception:
             pass
-        draft["user_tax_id"] = update.message.text.strip()
+        draft["user_passport"] = update.message.text.strip()
 
+    return await _render_individual_address_input(update, context)
+
+
+async def _render_individual_address_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує офіційну адресу реєстрації місця проживання фізичної особи (обов'язково)."""
+    prompt = (
+        "📍 <b>АДРЕСА РЕЄСТРАЦІЇ (ПРОПИСКА)</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть офіційну адресу реєстрації місця проживання (згідно паспорта або витягу)\n"
+        "(наприклад: <code>65000, м. Одеса, вул. Канатна, 15, кв. 10</code>):"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити паспортні дані", callback_data="rental_back_passport")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_INDIVIDUAL_ADDRESS
+
+
+async def rental_handle_individual_address_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_INDIVIDUAL_ADDRESS
+
+    addr_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    if len(addr_val) < 5:
+        return await _render_individual_address_input(
+            update,
+            context,
+            error_msg="Введіть повну адресу (місто, вулиця, будинок). Мінімум 5 символів.",
+        )
+
+    draft = _get_draft(context)
+    draft["user_address"] = addr_val
+    return await _render_individual_tax_input(update, context)
+
+
+async def _render_individual_tax_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує РНОКПП (ІПН) фізичної особи — обов'язково 10 цифр."""
+    prompt = (
+        "🪪 <b>РНОКПП (ІПН) ЗАМОВНИКА</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть Ваш реєстраційний номер облікової картки платника податків (рівно 10 цифр):"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити адресу реєстрації", callback_data="rental_back_indiv_addr")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_INDIVIDUAL_TAX_ID
+
+
+async def _render_customer_tax_input(update: Update, context: ContextTypes.DEFAULT_TYPE, error_msg: Optional[str] = None) -> int:
+    return await _render_individual_tax_input(update, context, error_msg=error_msg)
+
+
+async def rental_handle_individual_tax_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_INDIVIDUAL_TAX_ID
+
+    tax_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    digits = re.sub(r"\D", "", tax_val)
+    if len(digits) != 10:
+        return await _render_individual_tax_input(
+            update,
+            context,
+            error_msg="РНОКПП має складатися рівно з 10 цифр. Перевірте та повторіть введення.",
+        )
+
+    draft = _get_draft(context)
+    draft["user_tax_id"] = digits
+    return await _render_final_confirmation(update, context)
+
+
+async def rental_handle_tax_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    return await rental_handle_individual_tax_input(update, context)
+
+
+# ================= ГІЛКА 2: ФОП (ПІДПРИЄМЕЦЬ) =================
+
+async def _render_fop_name_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує ПІБ фізичної особи-підприємця."""
+    prompt = (
+        "💼 <b>ФОП (ПІДПРИЄМЕЦЬ)</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть <b>ПІБ підприємця повністю</b>\n"
+        "(наприклад: <code>Коваленко Сергій Васильович</code>):"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_FOP_NAME
+
+
+async def rental_handle_fop_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_FOP_NAME
+
+    name_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    if len(name_val) < 3:
+        return await _render_fop_name_input(
+            update,
+            context,
+            error_msg="Будь ласка, введіть ПІБ підприємця (мінімум 3 символи).",
+        )
+
+    draft = _get_draft(context)
+    clean_name = re.sub(r"^(фоп|фізична особа-підприємець)\s+", "", name_val, flags=re.IGNORECASE).strip()
+    draft["user_full_name"] = clean_name
+    return await _render_fop_tax_input(update, context)
+
+
+async def _render_fop_tax_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує РНОКПП (ІПН ФОП) — рівно 10 цифр."""
+    prompt = (
+        "🪪 <b>РНОКПП (ІПН ФОП)</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть <b>РНОКПП підприємця (10 цифр)</b> для зазначення в Договорі та Рахунку:"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити ПІБ ФОП", callback_data="rental_back_fop_name")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_FOP_TAX_ID
+
+
+async def rental_handle_fop_tax_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_FOP_TAX_ID
+
+    tax_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    digits = re.sub(r"\D", "", tax_val)
+    if len(digits) != 10:
+        return await _render_fop_tax_input(
+            update,
+            context,
+            error_msg="РНОКПП ФОП має містити рівно 10 цифр. Повторіть введення.",
+        )
+
+    draft = _get_draft(context)
+    draft["user_tax_id"] = digits
+    return await _render_fop_address_input(update, context)
+
+
+async def _render_fop_address_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує податкову адресу реєстрації ФОП (обов'язково)."""
+    prompt = (
+        "📍 <b>ПОДАТКОВА АДРЕСА РЕЄСТРАЦІЇ ФОП</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть офіційну податкову адресу реєстрації підприємця\n"
+        "(наприклад: <code>65012, м. Одеса, вул. Рішельєвська, 28, кв. 4</code>):"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити РНОКПП ФОП", callback_data="rental_back_fop_tax")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_FOP_ADDRESS
+
+
+async def rental_handle_fop_address_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_FOP_ADDRESS
+
+    addr_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    if len(addr_val) < 5:
+        return await _render_fop_address_input(
+            update,
+            context,
+            error_msg="Введіть повну податкову адресу ФОП (мінімум 5 символів).",
+        )
+
+    draft = _get_draft(context)
+    draft["user_address"] = addr_val
+    return await _render_fop_edr_input(update, context)
+
+
+async def _render_fop_edr_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує підставу діяльності ФОП (Виписка з ЄДР)."""
+    prompt = (
+        "📄 <b>ПІДСТАВА ДІЯЛЬНОСТІ ФОП</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Оберіть стандартне формулювання для договору або введіть номер і дату виписки з ЄДР вручну:"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("📄 Згідно Виписки з ЄДР (стандартно)", callback_data="rental_fop_edr_std")],
+        [InlineKeyboardButton("⬅️ Змінити податкову адресу", callback_data="rental_back_fop_addr")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_FOP_EDR_DOC
+
+
+async def rental_handle_fop_edr_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    draft = _get_draft(context)
+    if update.callback_query:
+        await update.callback_query.answer()
+        draft["foundation_doc"] = "Виписки з Єдиного державного реєстру"
+    elif update.message and update.message.text:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+        draft["foundation_doc"] = update.message.text.strip()
+
+    return await _render_fop_phone_input(update, context)
+
+
+async def _render_fop_phone_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує контактний телефон ФОП."""
+    prompt = "📞 Введіть <b>контактний номер телефону підприємця</b> (наприклад: <code>+380671234567</code>):"
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити підставу діяльності", callback_data="rental_back_fop_edr")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_FOP_PHONE
+
+
+async def rental_handle_fop_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_FOP_PHONE
+
+    phone_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    digits = re.sub(r"\D", "", phone_val)
+    if len(digits) < 9:
+        return await _render_fop_phone_input(
+            update,
+            context,
+            error_msg="Некоректний номер телефону. Введіть номер у форматі +380XXXXXXXXX.",
+        )
+
+    draft = _get_draft(context)
+    draft["user_phone"] = phone_val
+    return await _render_final_confirmation(update, context)
+
+
+# ================= ГІЛКА 3: ЮРИДИЧНА ОСОБА =================
+
+async def _render_legal_edrpou_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує код ЄДРПОУ організації (8 цифр)."""
+    prompt = (
+        "🏢 <b>ЮРИДИЧНА ОСОБА</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть <b>код ЄДРПОУ організації</b> (рівно 8 цифр):"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_LEGAL_EDRPOU
+
+
+async def rental_handle_legal_edrpou_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_LEGAL_EDRPOU
+
+    val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    digits = re.sub(r"\D", "", val)
+    if len(digits) != 8:
+        return await _render_legal_edrpou_input(
+            update,
+            context,
+            error_msg="Код ЄДРПОУ має містити рівно 8 цифр. Повторіть введення.",
+        )
+
+    draft = _get_draft(context)
+    draft["user_tax_id"] = digits
+    return await _render_legal_name_input(update, context)
+
+
+async def _render_legal_name_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує повне найменування юридичної особи."""
+    prompt = (
+        "🏢 <b>НАЙМЕНУВАННЯ ПІДПРИЄМСТВА / ОРГАНІЗАЦІЇ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть <b>повне найменування юридичної особи</b>\n"
+        "(наприклад: <code>ТОВ «Одеський Туристичний Центр»</code>):"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити код ЄДРПОУ", callback_data="rental_back_legal_edrpou")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_LEGAL_NAME
+
+
+async def rental_handle_legal_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_LEGAL_NAME
+
+    name_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    if len(name_val) < 3:
+        return await _render_legal_name_input(
+            update,
+            context,
+            error_msg="Найменування компанії має містити щонайменше 3 символи.",
+        )
+
+    draft = _get_draft(context)
+    draft["user_full_name"] = name_val
+    draft["company_name"] = name_val
+    return await _render_legal_address_input(update, context)
+
+
+async def _render_legal_address_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує офіційну юридичну адресу організації за ЄДР."""
+    prompt = (
+        "📍 <b>ЮРИДИЧНА АДРЕСА ОРГАНІЗАЦІЇ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть офіційну юридичну адресу підприємства за ЄДР\n"
+        "(наприклад: <code>вул. Водопровідна, 1, м. Одеса, 65007</code>):"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити назву компанії", callback_data="rental_back_legal_name")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_LEGAL_ADDRESS
+
+
+async def rental_handle_legal_address_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_LEGAL_ADDRESS
+
+    addr_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    if len(addr_val) < 5:
+        return await _render_legal_address_input(
+            update,
+            context,
+            error_msg="Введіть повну юридичну адресу підприємства (мінімум 5 символів).",
+        )
+
+    draft = _get_draft(context)
+    draft["user_address"] = addr_val
+    return await _render_legal_signer_input(update, context)
+
+
+async def _render_legal_signer_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує інформацію про підписанта та документ повноважень юридичної особи."""
+    prompt = (
+        "✍️ <b>ПІДПИСАНТ ТА ПІДСТАВА ПОВНОВАЖЕНЬ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Введіть посаду та ПІБ підписанта, а також документ-підставу\n"
+        "(наприклад: <code>директор Коваленко Іван Іванович, діє на підставі Статуту</code>):"
+    )
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("📄 За замовчуванням: директор на підставі Статуту", callback_data="rental_legal_signer_std")],
+        [InlineKeyboardButton("⬅️ Змінити юридичну адресу", callback_data="rental_back_legal_addr")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_LEGAL_SIGNER
+
+
+async def rental_handle_legal_signer_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    draft = _get_draft(context)
+    if update.callback_query:
+        await update.callback_query.answer()
+        draft["signer_title"] = "директора"
+        draft["signer_name"] = draft.get("user_full_name", "Керівник")
+        draft["foundation_doc"] = "Статуту"
+    elif update.message and update.message.text:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+        raw = update.message.text.strip()
+        draft["signer_name"] = raw
+        draft["signer_title"] = "директора"
+        draft["foundation_doc"] = "Статуту"
+
+    return await _render_legal_phone_input(update, context)
+
+
+async def _render_legal_phone_input(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    error_msg: Optional[str] = None,
+) -> int:
+    """Запитує контактний номер телефону уповноваженої особи / секретаріату юрособи."""
+    prompt = "📞 Введіть <b>контактний номер телефону</b> уповноваженої особи (наприклад: <code>+380487175400</code>):"
+    if error_msg:
+        prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Змінити підписанта", callback_data="rental_back_legal_signer")],
+        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    ]
+    await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_ENTER_LEGAL_PHONE
+
+
+async def rental_handle_legal_phone_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    msg = update.message
+    if not msg or not msg.text:
+        return States.RENTAL_ENTER_LEGAL_PHONE
+
+    phone_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    digits = re.sub(r"\D", "", phone_val)
+    if len(digits) < 7:
+        return await _render_legal_phone_input(
+            update,
+            context,
+            error_msg="Некоректний номер телефону. Введіть телефон організації.",
+        )
+
+    draft = _get_draft(context)
+    draft["user_phone"] = phone_val
     return await _render_final_confirmation(update, context)
 
 
@@ -1856,39 +2380,67 @@ async def _render_final_confirmation(update: Update, context: ContextTypes.DEFAU
     via_str = " ➡️ ".join(draft.get("via_loops") or []) or "прямий рейс"
     scenario_ua = (
         "📱 Електронний договір (Дія.Підпис / КЕП)"
-        if draft["signing_scenario"] == "kep"
+        if draft.get("signing_scenario", "kep") == "kep"
         else f"🏢 Паперовий в Управлінні КП (вул. Водопровідна, 1 — ліміт {RENTAL_PAPER_LOCK_HOURS} год)"
     )
 
-    h_part = draft["billable_minutes"] // 60
-    m_part = draft["billable_minutes"] % 60
-    billable_label = f"{draft['billable_minutes']} хв ({h_part} год {m_part:02d} хв)" if m_part else f"{h_part} год ({draft['billable_minutes']} хв)"
+    billable = int(draft.get("billable_minutes") or 60)
+    h_part = billable // 60
+    m_part = billable % 60
+    billable_label = f"{billable} хв ({h_part} год {m_part:02d} хв)" if m_part else f"{h_part} год ({billable} хв)"
     min_note = " (застосовано мін. замовлення 1 год)" if draft.get("total_duration_min", 0) < 60 else ""
 
-    cust_type_label = {
-        "individual": "🚶 Фізична особа",
-        "fop": "💼 ФОП",
-        "legal_entity": "🏢 Юридична особа",
-    }.get(draft.get("customer_type", "individual"), "🚶 Фізична особа")
+    cust_type = draft.get("customer_type", "individual")
+    if cust_type == "legal_entity":
+        cust_summary = (
+            f"🏢 <b>Замовник (Юридична особа):</b> {draft.get('user_full_name', 'Замовник')}\n"
+            f"🔢 <b>Код ЄДРПОУ:</b> <code>{draft.get('user_tax_id', '—')}</code> | 📞 <b>Телефон:</b> {draft.get('user_phone', '—')}\n"
+            f"📍 <b>Юридична адреса:</b> {draft.get('user_address', '—')}\n"
+            f"✍️ <b>Підписант:</b> {draft.get('signer_name', draft.get('user_full_name', 'Керівник'))}\n"
+        )
+    elif cust_type == "fop":
+        cust_summary = (
+            f"💼 <b>Замовник (ФОП):</b> {draft.get('user_full_name', 'Підприємець')}\n"
+            f"🪪 <b>РНОКПП (ІПН ФОП):</b> <code>{draft.get('user_tax_id', '—')}</code> | 📞 <b>Телефон:</b> {draft.get('user_phone', '—')}\n"
+            f"📍 <b>Податкова адреса:</b> {draft.get('user_address', '—')}\n"
+            f"📄 <b>Підстава:</b> {draft.get('foundation_doc', 'Виписка з ЄДР')}\n"
+        )
+    else:
+        passp_label = draft.get("user_passport") or "Вказується при підписанні"
+        cust_summary = (
+            f"👤 <b>Замовник (Фізична особа):</b> {draft.get('user_full_name', 'Громадянин')}\n"
+            f"📞 <b>Телефон:</b> {draft.get('user_phone', '—')} | 🪪 <b>РНОКПП:</b> <code>{draft.get('user_tax_id', '—')}</code>\n"
+            f"📍 <b>Адреса реєстрації:</b> {draft.get('user_address', '—')}\n"
+            f"🪪 <b>Паспорт/ID:</b> {passp_label}\n"
+        )
+
+    wagon_label = draft.get("wagon_title") or "Ретро-трамвай МТВ-82"
+    r_date = draft.get("rental_date") or "узгоджується"
+    r_slot = draft.get("rental_time_slot") or "узгоджується"
+    p_stop = draft.get("pickup_stop") or "пл. Старосінна"
+    d_stop = draft.get("dropoff_stop") or "пл. Старосінна"
+    t_dist = float(draft.get("total_distance_km") or 0.0)
+    t_dur = int(draft.get("total_duration_min") or 60)
+    t_price = float(draft.get("total_price_uah") or 0.0)
+    vat_amt = float(draft.get("vat_20_uah") or (t_price - round(t_price / 1.2, 2)))
 
     text = (
         "📑 <b>ПЕРЕВІРКА ТА ПІДТВЕРДЖЕННЯ ЗАМОВЛЕННЯ ОРЕНДИ</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Замовник ({cust_type_label}):</b> {draft['user_full_name']}\n"
-        f"📞 <b>Телефон:</b> {draft['user_phone']} | <b>РНОКПП/ЄДРПОУ:</b> {draft.get('user_tax_id')}\n"
-        f"🚊 <b>Транспорт:</b> {draft['wagon_title']}\n"
-        f"📅 <b>Дата та час:</b> <b>{draft['rental_date']}</b> о <b>{draft['rental_time_slot']}</b>\n"
-        f"🗺️ <b>Маршрут:</b> {draft['pickup_stop']} ➡️ [{via_str}] ➡️ {draft['dropoff_stop']}\n"
-        f"📏 <b>Пофазний баланс:</b> {draft['total_distance_km']:.2f} км | {draft['total_duration_min']} хв "
+        f"{cust_summary}"
+        f"🚊 <b>Транспорт:</b> {wagon_label}\n"
+        f"📅 <b>Дата та час:</b> <b>{r_date}</b> о <b>{r_slot}</b>\n"
+        f"🗺️ <b>Маршрут:</b> {p_stop} ➡️ [{via_str}] ➡️ {d_stop}\n"
+        f"📏 <b>Пофазний баланс:</b> {t_dist:.2f} км | {t_dur} хв "
         f"(до оплати: {billable_label}{min_note})\n"
         f"📝 <b>Формат договору:</b> {scenario_ua}\n"
-        f"💳 <b>Загальна сума до оплати:</b> <b>{format_money_ua(draft['total_price_uah'])} грн</b> "
-        f"(у т.ч. ПДВ 20%: {format_money_ua(draft.get('vat_20_uah', 0.0))} грн)\n"
+        f"💳 <b>Загальна сума до оплати:</b> <b>{format_money_ua(t_price)} грн</b> "
+        f"(у т.ч. ПДВ 20%: {format_money_ua(vat_amt)} грн)\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "Після підтвердження бот миттєво згенерує для Вас:\n"
-        "1. <b>Договір оренди (PDF)</b>;\n"
-        "2. <b>Рахунок-фактуру IBAN із QR-кодом НБУ (PDF)</b>;\n"
-        "3. <b>Маршрутний лист Служби руху Wialon (PDF)</b>."
+        "1. <b>Договір оренди (PDF)</b>\n"
+        "2. <b>Офіційний рахунок-фактуру IBAN (PDF)</b>\n"
+        "3. <b>Маршрутний лист Служби руху КП «ОМЕТ» (PDF)</b>."
     )
     keyboard = [
         [InlineKeyboardButton("🚀 Підтвердити та оформити замовлення", callback_data="rental_confirm_create")],
@@ -1913,6 +2465,11 @@ async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TY
             "user_phone": draft["user_phone"],
             "user_tax_id": draft.get("user_tax_id"),
             "customer_type": draft.get("customer_type", "individual"),
+            "company_name": draft.get("company_name"),
+            "user_passport": draft.get("user_passport"),
+            "user_address": draft.get("user_address"),
+            "signer_name": draft.get("signer_name"),
+            "foundation_doc": draft.get("foundation_doc"),
             "transport_type": draft["transport_type"],
             "wagon_type": draft["wagon_title"],
             "depot_code": draft["depot_code"],
@@ -2022,6 +2579,11 @@ async def _send_order_pdf_package(
         "user_tax_id": order.user_tax_id,
         "user_email": order.user_email,
         "customer_type": getattr(order, "customer_type", "individual"),
+        "company_name": getattr(order, "company_name", None),
+        "user_passport": getattr(order, "user_passport", None),
+        "user_address": getattr(order, "user_address", None),
+        "signer_name": getattr(order, "signer_name", None),
+        "foundation_doc": getattr(order, "foundation_doc", None),
         "transport_type": order.transport_type,
         "wagon_type": order.wagon_type,
         "depot_code": order.depot_code,
@@ -2063,6 +2625,8 @@ async def _send_order_pdf_package(
                 via_loops=via_loops,
                 intermediate_turning_loop=via_loops[0] if via_loops else None,
                 wait_minutes_at_loop=order.wait_minutes,
+                total_wait_minutes=order.wait_minutes,
+                departure_time=order.rental_time_slot or "12:00",
             )
         )
         route_pdf = generate_rental_route_sheet_pdf(calc_out, wagon_title=order.wagon_type)
@@ -2073,8 +2637,8 @@ async def _send_order_pdf_package(
 
         for path_str, caption_str in [
             (contract_pdf, f"📄 Договір оренди № {order.contract_number} (Adobe PDF)"),
-            (invoice_pdf, f"💳 Рахунок IBAN з QR-кодом НБУ (Договір № {order.contract_number})"),
-            (route_pdf, f"🗺️ Маршрутний лист Служби руху Wialon (№ {order.contract_number})"),
+            (invoice_pdf, f"💳 Офіційний рахунок-фактура IBAN (Договір № {order.contract_number})"),
+            (route_pdf, f"🗺️ Маршрутний лист Служби руху КП «ОМЕТ» (№ {order.contract_number})"),
         ]:
             if os.path.exists(path_str):
                 with open(path_str, "rb") as f_doc:

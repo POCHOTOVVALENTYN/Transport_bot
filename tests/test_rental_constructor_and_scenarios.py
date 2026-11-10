@@ -492,19 +492,27 @@ async def test_full_wizard_conversation_flow():
 
     # Обираємо статус: Юридична особа
     s12 = await rental_handle_customer_type_selected(make_update("rental_cust_type:legal_entity"), context)
-    assert s12 == States.RENTAL_ENTER_CUSTOMER_NAME
-
-    # Вводимо назву компанії
-    s13 = await rental_handle_name_input(make_update(message_text="ТОВ «Одеський Трамвай»"), context)
-    assert s13 == States.RENTAL_ENTER_CUSTOMER_PHONE
-
-    # Вводимо телефон
-    s14 = await rental_handle_phone_input(make_update(message_text="+380487001122"), context)
-    assert s14 == States.RENTAL_ENTER_CUSTOMER_TAX_ID
+    assert s12 == States.RENTAL_ENTER_LEGAL_EDRPOU
 
     # Вводимо ЄДРПОУ
-    s15 = await rental_handle_tax_input(make_update(message_text="44556677"), context)
-    assert s15 == States.RENTAL_FINAL_CONFIRM
+    s13 = await client_handlers.rental_handle_legal_edrpou_input(make_update(message_text="44556677"), context)
+    assert s13 == States.RENTAL_ENTER_LEGAL_NAME
+
+    # Вводимо назву компанії
+    s14 = await client_handlers.rental_handle_legal_name_input(make_update(message_text="ТОВ «Одеський Трамвай»"), context)
+    assert s14 == States.RENTAL_ENTER_LEGAL_ADDRESS
+
+    # Вводимо юридичну адресу
+    s15 = await client_handlers.rental_handle_legal_address_input(make_update(message_text="м. Одеса, вул. Водопровідна, 1"), context)
+    assert s15 == States.RENTAL_ENTER_LEGAL_SIGNER
+
+    # Підтверджуємо підписанта
+    s16 = await client_handlers.rental_handle_legal_signer_input(make_update("rental_legal_signer_std"), context)
+    assert s16 == States.RENTAL_ENTER_LEGAL_PHONE
+
+    # Вводимо телефон
+    s17 = await client_handlers.rental_handle_legal_phone_input(make_update(message_text="+380487001122"), context)
+    assert s17 == States.RENTAL_FINAL_CONFIRM
 
     # 7. Фінальне підтвердження та створення замовлення
     fin_update = make_update("rental_confirm_create")
@@ -532,6 +540,88 @@ async def test_full_wizard_conversation_flow():
     ]
     assert all(fn.endswith(".pdf") for fn in sent_filenames)
     assert not any(fn.endswith(".docx") for fn in sent_filenames)
+
+
+@pytest.mark.asyncio
+async def test_individual_and_fop_customer_flows():
+    """Тестує повні сценарії збору реквізитів для фізичної особи та ФОП."""
+    import handlers.rental_client_handlers as ch
+
+    def make_up(callback_data=None, message_text=None):
+        up = MagicMock()
+        up.effective_user.id = VALENTIN_ADMIN_ID
+        up.effective_chat.id = VALENTIN_ADMIN_ID
+        if callback_data:
+            q = MagicMock()
+            q.data = callback_data
+            q.answer = AsyncMock()
+            q.edit_message_text = AsyncMock()
+            q.edit_message_caption = AsyncMock()
+            q.message.delete = AsyncMock()
+            q.message.photo = None
+            up.callback_query = q
+            up.message = None
+        elif message_text:
+            m = MagicMock()
+            m.text = message_text
+            m.reply_text = AsyncMock()
+            up.message = m
+            up.callback_query = None
+        return up
+
+    # 1. Фізична особа
+    ctx_indiv = MagicMock()
+    ctx_indiv.user_data = {}
+    msg_obj = MagicMock()
+    msg_obj.message_id = 1234
+    ctx_indiv.bot.send_message = AsyncMock(return_value=msg_obj)
+    ctx_indiv.bot.edit_message_text = AsyncMock()
+    ch._get_draft(ctx_indiv)["wagon_key"] = "retro"
+
+    s_type_indiv = await ch.rental_handle_customer_type_selected(make_up("rental_cust_type:individual"), ctx_indiv)
+    assert s_type_indiv == States.RENTAL_ENTER_CUSTOMER_NAME
+
+    s_name = await ch.rental_handle_name_input(make_up(message_text="Перепелиця Олег Олександрович"), ctx_indiv)
+    assert s_name == States.RENTAL_ENTER_CUSTOMER_PHONE
+    assert ctx_indiv.user_data["rental_draft"]["user_full_name"] == "Перепелиця Олег Олександрович"
+
+    s_phone = await ch.rental_handle_phone_input(make_up(message_text="+380501234567"), ctx_indiv)
+    assert s_phone == States.RENTAL_ENTER_INDIVIDUAL_PASSPORT
+
+    s_pass = await ch.rental_handle_individual_passport_input(make_up("rental_passp_skip"), ctx_indiv)
+    assert s_pass == States.RENTAL_ENTER_INDIVIDUAL_ADDRESS
+
+    s_addr = await ch.rental_handle_individual_address_input(make_up(message_text="м. Одеса, вул. Канатна, 15, кв. 10"), ctx_indiv)
+    assert s_addr == States.RENTAL_ENTER_INDIVIDUAL_TAX_ID
+
+    s_tax = await ch.rental_handle_individual_tax_input(make_up(message_text="1234567890"), ctx_indiv)
+    assert s_tax == States.RENTAL_FINAL_CONFIRM
+    assert ctx_indiv.user_data["rental_draft"]["user_tax_id"] == "1234567890"
+
+    # 2. ФОП
+    ctx_fop = MagicMock()
+    ctx_fop.user_data = {}
+    ctx_fop.bot.send_message = AsyncMock(return_value=msg_obj)
+    ctx_fop.bot.edit_message_text = AsyncMock()
+    ch._get_draft(ctx_fop)["wagon_key"] = "retro"
+
+    s_type_fop = await ch.rental_handle_customer_type_selected(make_up("rental_cust_type:fop"), ctx_fop)
+    assert s_type_fop == States.RENTAL_ENTER_FOP_NAME
+
+    s_fop_name = await ch.rental_handle_fop_name_input(make_up(message_text="Коваленко Сергій Васильович"), ctx_fop)
+    assert s_fop_name == States.RENTAL_ENTER_FOP_TAX_ID
+
+    s_fop_tax = await ch.rental_handle_fop_tax_input(make_up(message_text="9876543210"), ctx_fop)
+    assert s_fop_tax == States.RENTAL_ENTER_FOP_ADDRESS
+
+    s_fop_addr = await ch.rental_handle_fop_address_input(make_up(message_text="м. Одеса, вул. Рішельєвська, 28"), ctx_fop)
+    assert s_fop_addr == States.RENTAL_ENTER_FOP_EDR_DOC
+
+    s_fop_edr = await ch.rental_handle_fop_edr_input(make_up("rental_fop_edr_std"), ctx_fop)
+    assert s_fop_edr == States.RENTAL_ENTER_FOP_PHONE
+
+    s_fop_phone = await ch.rental_handle_fop_phone_input(make_up(message_text="+380671234567"), ctx_fop)
+    assert s_fop_phone == States.RENTAL_FINAL_CONFIRM
 
 
 def test_stop_search_and_popular_catalog() -> None:

@@ -51,6 +51,13 @@ async def init_db():
                 except Exception:
                     pass
                 try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN IF NOT EXISTS user_passport VARCHAR"))
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN IF NOT EXISTS user_address VARCHAR"))
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN IF NOT EXISTS signer_name VARCHAR"))
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN IF NOT EXISTS foundation_doc VARCHAR"))
+                except Exception:
+                    pass
+                try:
                     await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN staff_topic_messages_json TEXT DEFAULT '{}'"))
                     print("✅ Migration: added staff_topic_messages_json column to rental_orders")
                 except Exception:
@@ -569,6 +576,10 @@ class RentalOrder(Base):
     user_tax_id = Column(String, nullable=True)                    # РНОКПП або ЄДРПОУ
     customer_type = Column(String, default="individual")           # "individual", "fop", "company"
     company_name = Column(String, nullable=True)
+    user_passport = Column(String, nullable=True)
+    user_address = Column(String, nullable=True)
+    signer_name = Column(String, nullable=True)
+    foundation_doc = Column(String, nullable=True)
 
     # Параметри транспорту та маршруту (Wialon)
     transport_type = Column(String, nullable=False)                # "TRAM" або "TROLLEYBUS"
@@ -982,6 +993,10 @@ class Database:
                 user_tax_id=data.get("user_tax_id"),
                 customer_type=str(data.get("customer_type", "individual")),
                 company_name=data.get("company_name"),
+                user_passport=data.get("user_passport"),
+                user_address=data.get("user_address"),
+                signer_name=data.get("signer_name"),
+                foundation_doc=data.get("foundation_doc"),
                 transport_type=str(data.get("transport_type", "TRAM")),
                 wagon_type=str(data.get("wagon_type", "Ретро-трамвай МТВ-82")),
                 depot_code=str(data.get("depot_code", "ВРМ")),
