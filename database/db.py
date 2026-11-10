@@ -51,10 +51,23 @@ async def init_db():
                 except Exception:
                     pass
                 try:
-                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN IF NOT EXISTS user_passport VARCHAR"))
-                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN IF NOT EXISTS user_address VARCHAR"))
-                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN IF NOT EXISTS signer_name VARCHAR"))
-                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN IF NOT EXISTS foundation_doc VARCHAR"))
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN user_passport VARCHAR"))
+                    print("✅ Migration: added user_passport column to rental_orders")
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN user_address VARCHAR"))
+                    print("✅ Migration: added user_address column to rental_orders")
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN signer_name VARCHAR"))
+                    print("✅ Migration: added signer_name column to rental_orders")
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN foundation_doc VARCHAR"))
+                    print("✅ Migration: added foundation_doc column to rental_orders")
                 except Exception:
                     pass
                 try:

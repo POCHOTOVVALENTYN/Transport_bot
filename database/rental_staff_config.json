@@ -3,9 +3,9 @@
   "roles": {},
   "topics": {
     "vuptap": null,
-    "depot": null,
-    "accounting": null,
-    "legal": null,
-    "analytics": null
+    "depot": 15,
+    "accounting": 14,
+    "legal": 13,
+    "analytics": 20
   }
 }

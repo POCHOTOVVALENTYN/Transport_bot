@@ -35,6 +35,7 @@ from database.db import Database, RentalOrder
 from handlers.rental_staff_handlers import (
     STATUS_LABELS_UA,
     get_active_staff_chat_id,
+    get_staff_topic_thread_id,
     is_rental_access_allowed,
     post_or_update_staff_order_card,
 )
@@ -2665,7 +2666,7 @@ async def _send_order_pdf_package(
             f"<i>(у т.ч. ПДВ 20%: {vat_val:.2f} грн)</i>\n\n"
             f"• <b>Призначення платежу:</b>\n<code>{purpose}</code>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 <i>Порада: у додатках Приват24 / Monobank / Ощад24 можна також просто відсканувати QR-код з надісланого вище PDF-рахунку.</i>"
+            "📱 <i>Порада: скопіюйте IBAN та призначення платежу одним дотиком для швидкої оплати у додатку Вашого банку.</i>"
         )
         await context.bot.send_message(
             chat_id=chat_id,
@@ -3077,18 +3078,26 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         except Exception as email_err:
             logger.warning(f"Не вдалося надіслати файл договору на email Юрвідділу: {email_err}")
 
-        # Дублюємо файл у спільний штабний чат
+        # Дублюємо файл у профільну тему Юридичного відділу
         caption_staff = (
             f"✍️ <b>ОТРИМАНО ПІДПИСАНИЙ ДОГОВІР № {order.contract_number}</b>\n"
             f"👤 Замовник: {order.user_full_name} ({order.user_phone})\n"
             f"📎 Файл: <code>{file_name}</code>\n"
-            f"⚖️ Для погодження натисніть <b>«⚖️ Юрвідділ: Договір ОК»</b> на картці замовлення."
+            f"⚖️ Для погодження натисніть <b>«⚖️ Договір перевірено та погоджено»</b> на картці замовлення."
         )
+        legal_thread_id = get_staff_topic_thread_id("legal")
+        send_doc_kwargs: Dict[str, Any] = {
+            "chat_id": staff_chat_id,
+            "caption": caption_staff,
+            "parse_mode": ParseMode.HTML,
+        }
+        if legal_thread_id is not None:
+            send_doc_kwargs["message_thread_id"] = legal_thread_id
         try:
             if is_photo:
-                await context.bot.send_photo(chat_id=staff_chat_id, photo=file_id, caption=caption_staff, parse_mode=ParseMode.HTML)
+                await context.bot.send_photo(photo=file_id, **send_doc_kwargs)
             else:
-                await context.bot.send_document(chat_id=staff_chat_id, document=file_id, caption=caption_staff, parse_mode=ParseMode.HTML)
+                await context.bot.send_document(document=file_id, **send_doc_kwargs)
         except Exception as st_err:
             logger.warning(f"Не вдалося переслати підписаний договір у штабний чат: {st_err}")
 
@@ -3128,13 +3137,21 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         f"💳 <b>ОТРИМАНО КВИТАНЦІЮ ОПЛАТИ IBAN ЗА ДОГОВОРОМ № {order.contract_number}</b>\n"
         f"👤 Замовник: {order.user_full_name} ({order.user_phone})\n"
         f"💰 Сума за договором: <b>{order.total_price_uah:.2f} грн</b>\n"
-        f"Для підтвердження зарахування коштів натисніть <b>«💳 Бухгалтерія: IBAN оплачено»</b> на картці замовлення."
+        f"Для підтвердження зарахування коштів натисніть <b>«💳 Оплату IBAN зараховано (100%)»</b> на картці замовлення."
     )
+    acc_thread_id = get_staff_topic_thread_id("accounting")
+    send_acc_kwargs: Dict[str, Any] = {
+        "chat_id": staff_chat_id,
+        "caption": caption_acc,
+        "parse_mode": ParseMode.HTML,
+    }
+    if acc_thread_id is not None:
+        send_acc_kwargs["message_thread_id"] = acc_thread_id
     try:
         if is_photo:
-            await context.bot.send_photo(chat_id=staff_chat_id, photo=file_id, caption=caption_acc, parse_mode=ParseMode.HTML)
+            await context.bot.send_photo(photo=file_id, **send_acc_kwargs)
         else:
-            await context.bot.send_document(chat_id=staff_chat_id, document=file_id, caption=caption_acc, parse_mode=ParseMode.HTML)
+            await context.bot.send_document(document=file_id, **send_acc_kwargs)
     except Exception as st_err:
         logger.warning(f"Не вдалося переслати квитанцію у штабний чат: {st_err}")
 

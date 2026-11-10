@@ -26,6 +26,8 @@ from telegram.ext import ContextTypes
 
 from config.settings import (
     RENTAL_ALLOWED_USER_IDS,
+    RENTAL_IBAN_ACCOUNT,
+    RENTAL_IBAN_EDRPOU,
     RENTAL_PAPER_LOCK_HOURS,
     RENTAL_PUBLIC_ENABLED,
     RENTAL_STAFF_CHAT_ID,
@@ -179,17 +181,21 @@ async def send_to_staff_topic(
         return None
 
 
-def has_staff_role(user_id: int, role_key: str) -> bool:
-    """Перевіряє наявність ролі у співробітника. Валентин має повний доступ до всіх 6 ролей."""
+def has_staff_role(user_id: int, role_key: str, chat_id: Optional[int] = None) -> bool:
+    """Перевіряє наявність ролі у співробітника. Валентин та учасники закритої штабної групи мають доступ."""
     uid = int(user_id)
-    if uid == VALENTIN_ADMIN_ID:
+    if uid == VALENTIN_ADMIN_ID or uid in RENTAL_ALLOWED_USER_IDS:
         return True
     base_ids = RENTAL_STAFF_ROLES.get(role_key, [])
     if uid in base_ids:
         return True
     cfg = _load_runtime_staff_config()
-    extra_ids = cfg.get("roles", {}).get(role_key, [])
-    return uid in [int(x) for x in extra_ids]
+    extra_ids = [int(x) for x in cfg.get("roles", {}).get(role_key, [])]
+    if uid in extra_ids:
+        return True
+    if chat_id is not None and int(chat_id) == get_active_staff_chat_id() and not extra_ids:
+        return True
+    return False
 
 
 def check_two_step_confirmation(user_id: int, order_id: int, action_key: str, window_sec: float = 10.0) -> bool:
@@ -593,7 +599,7 @@ async def post_or_update_staff_order_card(
                 )
             except Exception:
                 pass
-        elif order.status in ("paid_confirmed", "vehicle_assigned", "completed"):
+        else:
             try:
                 sent_d = await context.bot.send_message(
                     chat_id=target_chat_id,
@@ -654,16 +660,17 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
         return
 
     # 1. Перевірка ролі підрозділу (RBAC)
+    chat_id_for_rbac = update.effective_chat.id if update.effective_chat else None
     req_role_key, role_label = ACTION_REQUIRED_ROLE.get(action, ("traffic_service", "Штаб"))
     if action == "depot_assign":
         if order.transport_type == "TROLLEYBUS":
-            allowed = has_staff_role(user_id, "depot_trolley") or has_staff_role(user_id, "depot_tram")
+            allowed = has_staff_role(user_id, "depot_trolley", chat_id_for_rbac) or has_staff_role(user_id, "depot_tram", chat_id_for_rbac)
             role_label = "Тролейбусне депо"
         else:
-            allowed = has_staff_role(user_id, "depot_tram")
+            allowed = has_staff_role(user_id, "depot_tram", chat_id_for_rbac)
             role_label = f"Депо {order.depot_code}"
     else:
-        allowed = has_staff_role(user_id, req_role_key)
+        allowed = has_staff_role(user_id, req_role_key, chat_id_for_rbac)
 
     if not allowed:
         await query.answer(
@@ -672,8 +679,8 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
         )
         return
 
-    # 2. Двоетапний захист від випадкового натискання (протягом 10 секунд)
-    if not check_two_step_confirmation(user_id, order_id, action):
+    # 2. Двоетапний захист від випадкового натискання (протягом 10 секунд) — не блокуємо для кнопок відкриття діалогу вводу
+    if action not in ("depot_assign", "add_slots") and not check_two_step_confirmation(user_id, order_id, action):
         await query.answer(
             f"⚠️ Підтвердження дії ({role_label}):\n"
             f"Натисніть цю саму кнопку ЩЕ РАЗ протягом 10 секунд, щоб підтвердити дію за договором №{order.contract_number}.",
@@ -718,6 +725,7 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
 
     if action == "add_slots":
         chat_id = update.effective_chat.id
+        thread_id = getattr(query.message, "message_thread_id", None) if query.message else None
         _PENDING_STAFF_INPUT[(chat_id, user_id)] = {
             "mode": "slots",
             "order_id": order.id,
@@ -725,15 +733,18 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
             "transport_type": order.transport_type,
         }
         await query.answer("Введіть вільні часові слоти у чат")
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=(
+        prompt_kwargs: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": (
                 f"🕒 <b>Додавання вільних слотів у пул на дату {order.rental_date}</b> (для Договору №{order.contract_number}):\n\n"
                 f"Напишіть у відповідь вільні години подачі через кому (наприклад: <code>11:00, 14:00, 16:30</code>).\n"
                 f"<i>Усі додані слоти збережуться в базі: коли перший клієнт обере один слот, решта залишаться доступними для наступних клієнтів!</i>"
             ),
-            parse_mode=ParseMode.HTML,
-        )
+            "parse_mode": ParseMode.HTML,
+        }
+        if thread_id is not None:
+            prompt_kwargs["message_thread_id"] = thread_id
+        await context.bot.send_message(**prompt_kwargs)
         return
 
     if action == "legal_ok":
@@ -827,21 +838,25 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
 
     if action == "depot_assign":
         chat_id = update.effective_chat.id
+        thread_id = getattr(query.message, "message_thread_id", None) if query.message else get_staff_topic_thread_id("depot")
         _PENDING_STAFF_INPUT[(chat_id, user_id)] = {
             "mode": "depot",
             "order_id": order.id,
         }
         await query.answer("Введіть бортовий номер та ПІБ водія у чат")
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=(
+        depot_prompt_kwargs: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": (
                 f"🚋 <b>Призначення рухомого складу та водія ({order.depot_code}) для Договору №{order.contract_number}:</b>\n\n"
                 f"Надішліть одним повідомленням через кому:\n"
                 f"<code>Бортовий №, ПІБ водія, Телефон водія</code>\n"
                 f"Наприклад: <code>914, Коваленко Олександр Петрович, +380501112233</code>"
             ),
-            parse_mode=ParseMode.HTML,
-        )
+            "parse_mode": ParseMode.HTML,
+        }
+        if thread_id is not None:
+            depot_prompt_kwargs["message_thread_id"] = thread_id
+        await context.bot.send_message(**depot_prompt_kwargs)
         return
 
     if action == "complete":
@@ -1296,13 +1311,13 @@ async def check_rental_timeouts_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def is_rental_staff_member(user_id: int, chat_id: Optional[int] = None) -> bool:
     """Перевіряє, чи має користувач повноваження співробітника штабу оренди."""
-    if user_id == VALENTIN_ADMIN_ID:
+    if int(user_id) == VALENTIN_ADMIN_ID or int(user_id) in RENTAL_ALLOWED_USER_IDS:
         return True
-    if chat_id is not None and chat_id == get_active_staff_chat_id():
+    if chat_id is not None and int(chat_id) == get_active_staff_chat_id():
         return True
     cfg = _load_runtime_staff_config()
     for role_uids in cfg.get("roles", {}).values():
-        if user_id in role_uids:
+        if int(user_id) in [int(x) for x in role_uids]:
             return True
     return False
 
