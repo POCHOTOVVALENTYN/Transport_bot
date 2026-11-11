@@ -38,6 +38,7 @@ from handlers.rental_staff_handlers import (
     get_staff_topic_thread_id,
     is_rental_access_allowed,
     post_or_update_staff_order_card,
+    send_to_staff_topic,
 )
 from services.rental_documents_service import (
     RENTAL_EXTRA_SERVICES,
@@ -2500,11 +2501,11 @@ async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TY
         }
     )
 
-    # Генеруємо та надсилаємо повний пакет документів (DOCX + PDF) та реквізити IBAN
-    await _send_order_pdf_package(context, user.id, order)
-
     # Публікуємо живу картку в штабному чаті 6 підрозділів
     await post_or_update_staff_order_card(context, order.id)
+
+    # Генеруємо та надсилаємо повний пакет документів (DOCX + PDF) клієнту та у тему Юридичного відділу
+    await _send_order_pdf_package(context, user.id, order, send_to_legal_topic=True)
 
     deadline_str = (
         order.slot_lock_expires_at.strftime("%d.%m.%Y %H:%M")
@@ -2520,7 +2521,7 @@ async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         next_step_hint = (
             "📱 <b>Електронний договір (КЕП / Дія.Підпис):</b> підпишіть отриманий файл Договору "
-            "у «Дії» або «Вчасно» та завантажте підписаний файл (<code>.p7s</code> або PDF з КЕП) "
+            "у «Дії» або іншому сервісі КЕП та завантажте підписаний файл (<code>.p7s</code> або PDF з КЕП) "
             "у розділі <b>«📂 Діючі договори та замовлення»</b>."
         )
 
@@ -2528,9 +2529,9 @@ async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TY
         f"✅ <b>ЗАМОВЛЕННЯ УСПІШНО ОФОРМЛЕНО! ДОГОВІР № {order.contract_number}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"Вище Вам надіслано офіційні документи (PDF):\n"
-        f"1️⃣ Договір оренди № {order.contract_number} (PDF);\n"
-        f"2️⃣ Рахунок IBAN із QR-кодом НБУ на суму <b>{format_money_ua(order.total_price_uah)} грн</b>;\n"
-        f"3️⃣ Маршрутний лист Служби руху Wialon (PDF).\n\n"
+        f"1️⃣ Договір оренди № {order.contract_number} (PDF)\n"
+        f"2️⃣ Офіційний рахунок-фактура IBAN на суму <b>{format_money_ua(order.total_price_uah)} грн</b>\n"
+        f"3️⃣ Маршрутний лист Служби руху КП «ОМЕТ» (PDF).\n\n"
         f"{next_step_hint}"
     )
     keyboard = [
@@ -2544,6 +2545,12 @@ async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TY
             InlineKeyboardButton(
                 f"💳 Завантажити квитанцію оплати IBAN",
                 callback_data=f"rental_upload_payment:{order.id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "✏️ Виправити реквізити договору",
+                callback_data=f"rental_fix_requisites:{order.id}",
             )
         ],
         [
@@ -2563,8 +2570,9 @@ async def _send_order_pdf_package(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     order: RentalOrder,
+    send_to_legal_topic: bool = False,
 ) -> None:
-    """Генерує та надсилає клієнту 4 файли (Договір DOCX та PDF, Рахунок IBAN з QR НБУ, Маршрутний лист) та реквізити для швидкого копіювання."""
+    """Генерує та надсилає клієнту 4 файли (Договір DOCX та PDF, Рахунок IBAN, Маршрутний лист) та реквізити для швидкого копіювання."""
     via_loops: List[str] = []
     try:
         via_loops = json.loads(order.via_loops_json or "[]")
@@ -2650,6 +2658,26 @@ async def _send_order_pdf_package(
                         caption=caption_str,
                         reply_markup=del_file_kb,
                     )
+
+        # Автоматично дублюємо проєкт Договору (PDF + редагований DOCX) у тему Юридичного відділу
+        if send_to_legal_topic:
+            for legal_doc_path, legal_doc_label in [
+                (contract_pdf, f"📄 Проєкт Договору № {order.contract_number} (PDF) — {order.user_full_name}"),
+                (contract_docx, f"📝 Редагований шаблон Договору № {order.contract_number} (DOCX) — для правок Юрвідділу"),
+            ]:
+                if os.path.exists(legal_doc_path):
+                    try:
+                        with open(legal_doc_path, "rb") as l_doc:
+                            await send_to_staff_topic(
+                                context,
+                                "legal",
+                                text="",
+                                document=l_doc,
+                                filename=os.path.basename(legal_doc_path),
+                                caption=legal_doc_label,
+                            )
+                    except Exception as l_err:
+                        logger.warning(f"Не вдалося надіслати проєкт договору у тему legal: {l_err}")
 
         # Повідомлення для швидкої оплати (копіювання реквізитів в 1 клік)
         contract_d = order.created_at.strftime("%d.%m.%Y") if order.created_at else datetime.datetime.now().strftime("%d.%m.%Y")
@@ -2836,14 +2864,27 @@ async def show_rental_contract_detail(update: Update, context: ContextTypes.DEFA
                 callback_data=f"rental_upload_payment:{order.id}",
             )
         ],
-        [
-            InlineKeyboardButton(
-                "📥 Отримати мої документи повторно (PDF)",
-                callback_data=f"rental_resend_docs:{order.id}",
-            )
-        ],
-        [InlineKeyboardButton("⬅️ До списку договорів", callback_data="rental_my_contracts")],
     ]
+    if not order.legal_approved_by and order.status not in ("cancelled", "expired_36h", "completed"):
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    "✏️ Виправити реквізити та перегенерувати договір",
+                    callback_data=f"rental_fix_requisites:{order.id}",
+                )
+            ]
+        )
+    buttons.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    "📥 Отримати мої документи повторно (PDF)",
+                    callback_data=f"rental_resend_docs:{order.id}",
+                )
+            ],
+            [InlineKeyboardButton("⬅️ До списку договорів", callback_data="rental_my_contracts")],
+        ]
+    )
     await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
 
 
@@ -3167,4 +3208,166 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         [[InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")]]
     )
     await _send_or_edit(update, context, receipt_text, receipt_kb)
+    return ConversationHandler.END
+
+
+# ================= 10. ВИПРАВЛЕННЯ РЕКВІЗИТІВ ТА ПЕРЕГЕНЕРАЦІЯ ДОГОВОРУ ЗА ЗАУВАЖЕННЯМИ ЮРВІДДІЛУ =================
+
+FIX_FIELD_LABELS_UA: Dict[str, str] = {
+    "name": "👤 ПІБ замовника / Повне найменування",
+    "tax_id": "📑 РНОКПП (ІПН) або Код ЄДРПОУ",
+    "passport": "🪪 Паспорт / ID-картка (для фізичної особи)",
+    "address": "🏠 Адреса реєстрації / Банківські реквізити",
+    "signer": "✍️ Підписант та підстава дії (Статут / Виписка з ЄДР)",
+    "phone": "📞 Контактний телефон",
+}
+
+
+async def rental_start_fix_requisites(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Відкриває меню вибору реквізиту для оперативного виправлення та перегенерації PDF-договору."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    order_id = int(query.data.split(":")[1])
+    order = await db.get_rental_order(order_id)
+    if not order or order.user_id != update.effective_user.id:
+        if query:
+            await query.answer("Договір не знайдено.", show_alert=True)
+        return ConversationHandler.END
+
+    cust_type = getattr(order, "customer_type", "individual") or "individual"
+    text = (
+        f"✏️ <b>ВИПРАВЛЕННЯ РЕКВІЗИТІВ ДОГОВОРУ № {order.contract_number}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Поточні реквізити у договорі:\n"
+        f"• <b>ПІБ / Назва:</b> {order.company_name or order.user_full_name}\n"
+        f"• <b>РНОКПП / ЄДРПОУ:</b> <code>{order.user_tax_id or '—'}</code>\n"
+    )
+    if cust_type == "individual":
+        text += f"• <b>Паспорт / ID-картка:</b> <code>{getattr(order, 'user_passport', None) or '—'}</code>\n"
+    text += f"• <b>Адреса / Реквізити:</b> {getattr(order, 'user_address', None) or '—'}\n"
+    if cust_type in ("fop", "legal_entity"):
+        text += f"• <b>Підписант / Виписка ЄДР:</b> {getattr(order, 'signer_name', None) or '—'}\n"
+    text += (
+        f"• <b>Телефон:</b> <code>{order.user_phone}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Оберіть поле, яке потрібно відкоригувати (після збереження бот автоматично перегенерує оновлений PDF-договір):"
+    )
+
+    kb_rows: List[List[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("👤 Змінити ПІБ / Назву організації", callback_data=f"rental_fix_field:{order.id}:name")],
+        [InlineKeyboardButton("📑 Змінити РНОКПП / ЄДРПОУ", callback_data=f"rental_fix_field:{order.id}:tax_id")],
+    ]
+    if cust_type == "individual":
+        kb_rows.append([InlineKeyboardButton("🪪 Змінити Паспорт / ID-картку", callback_data=f"rental_fix_field:{order.id}:passport")])
+    kb_rows.append([InlineKeyboardButton("🏠 Змінити Адресу / Банківські реквізити", callback_data=f"rental_fix_field:{order.id}:address")])
+    if cust_type in ("fop", "legal_entity"):
+        kb_rows.append([InlineKeyboardButton("✍️ Змінити Підписанта / Виписку з ЄДР", callback_data=f"rental_fix_field:{order.id}:signer")])
+    kb_rows.append([InlineKeyboardButton("📞 Змінити Телефон", callback_data=f"rental_fix_field:{order.id}:phone")])
+    kb_rows.append([InlineKeyboardButton("⬅️ Назад до договору", callback_data=f"rental_contract_view:{order.id}")])
+
+    await _send_or_edit(update, context, text, InlineKeyboardMarkup(kb_rows))
+    return States.RENTAL_EDIT_REQUISITES
+
+
+async def rental_select_fix_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Запитує нове значення обраного реквізиту у клієнта."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+
+    parts = query.data.split(":")
+    order_id = int(parts[1])
+    field_key = parts[2]
+    order = await db.get_rental_order(order_id)
+    if not order or order.user_id != update.effective_user.id:
+        return ConversationHandler.END
+
+    context.user_data["rental_fix_target"] = {
+        "order_id": order.id,
+        "field": field_key,
+    }
+    label = FIX_FIELD_LABELS_UA.get(field_key, field_key)
+    prompt_text = (
+        f"✏️ <b>ОНОВЛЕННЯ РЕКВІЗИТУ ({label})</b>\n"
+        f"Договір: <b>№ {order.contract_number}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Введіть нове коректне значення у відповідь:"
+    )
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Скасувати", callback_data=f"rental_fix_requisites:{order.id}")]
+    ])
+    await _send_or_edit(update, context, prompt_text, kb)
+    return States.RENTAL_EDIT_REQUISITES
+
+
+async def rental_receive_fixed_requisite(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Зберігає виправлений реквізит, перегенеровує PDF + DOCX договір і надсилає клієнту та в Юридичний відділ."""
+    msg = update.message
+    target = context.user_data.get("rental_fix_target")
+    if not msg or not msg.text or not target:
+        return ConversationHandler.END
+
+    new_val = msg.text.strip()
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    order_id = int(target["order_id"])
+    field_key = target["field"]
+    order = await db.get_rental_order(order_id)
+    if not order or len(new_val) < 2:
+        return States.RENTAL_EDIT_REQUISITES
+
+    updates: Dict[str, Any] = {}
+    cust_type = getattr(order, "customer_type", "individual") or "individual"
+    if field_key == "name":
+        updates["user_full_name"] = new_val
+        if cust_type in ("fop", "legal_entity"):
+            updates["company_name"] = new_val
+    elif field_key == "tax_id":
+        updates["user_tax_id"] = new_val
+    elif field_key == "passport":
+        updates["user_passport"] = new_val
+    elif field_key == "address":
+        updates["user_address"] = new_val
+    elif field_key == "signer":
+        updates["signer_name"] = new_val
+        updates["foundation_doc"] = new_val
+    elif field_key == "phone":
+        updates["user_phone"] = new_val
+
+    if order.status == "revision_requested":
+        updates["status"] = "awaiting_signature"
+
+    updated_order = await db.update_rental_order_fields(order.id, updates)
+    label_ua = FIX_FIELD_LABELS_UA.get(field_key, field_key)
+    await db.add_rental_audit_log(
+        order_id=order.id,
+        actor_id=order.user_id,
+        actor_name=order.user_full_name,
+        actor_role="Клієнт",
+        action="CLIENT_REQUISITES_UPDATED",
+        details=f"Оновлено реквізит ({label_ua}): {new_val}",
+    )
+    del context.user_data["rental_fix_target"]
+
+    if updated_order:
+        await post_or_update_staff_order_card(context, updated_order.id)
+        await _send_order_pdf_package(context, updated_order.user_id, updated_order, send_to_legal_topic=True)
+
+    done_text = (
+        f"✅ <b>Реквізити Договору № {order.contract_number} успішно оновлено!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Вище Вам надіслано <b>перегенерований пакет документів (PDF)</b> із виправленими даними, "
+        f"а оновлений проєкт договору автоматично передано до Відділу правового супроводу КП «ОМЕТ»."
+    )
+    done_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📤 Завантажити підписаний договір (.p7s / скан)", callback_data=f"rental_upload_signed:{order.id}")],
+        [InlineKeyboardButton("✏️ Змінити ще одне поле реквізитів", callback_data=f"rental_fix_requisites:{order.id}")],
+        [InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")],
+    ])
+    await _send_or_edit(update, context, done_text, done_kb)
     return ConversationHandler.END

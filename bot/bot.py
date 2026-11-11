@@ -184,6 +184,9 @@ from handlers.rental_client_handlers import (
     rental_handle_legal_address_input,
     rental_handle_legal_signer_input,
     rental_handle_legal_phone_input,
+    rental_start_fix_requisites,
+    rental_select_fix_field,
+    rental_receive_fixed_requisite,
 )
 from handlers.rental_staff_handlers import (
     check_rental_timeouts_job,
@@ -920,10 +923,12 @@ class TransportBot:
             allow_reentry=True,
         )
 
-        # --- ДІАЛОГ ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ (.P7S / СКАН) ТА КВИТАНЦІЇ IBAN ---
+        # --- ДІАЛОГ ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ (.P7S / СКАН), КВИТАНЦІЇ IBAN ТА ВИПРАВЛЕННЯ РЕКВІЗИТІВ ---
         rental_upload_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(rental_start_upload_document, pattern="^rental_upload_(signed|payment):\\d+$"),
+                CallbackQueryHandler(rental_start_fix_requisites, pattern="^rental_fix_requisites:\\d+$"),
+                CallbackQueryHandler(rental_select_fix_field, pattern="^rental_fix_field:\\d+:[a-z_]+$"),
             ],
             states={
                 States.RENTAL_UPLOAD_SIGNED_DOC: [
@@ -932,6 +937,12 @@ class TransportBot:
                         rental_receive_uploaded_document,
                     ),
                     CallbackQueryHandler(show_rental_contract_detail, pattern="^rental_contract_view:\\d+$"),
+                ],
+                States.RENTAL_EDIT_REQUISITES: [
+                    CallbackQueryHandler(rental_select_fix_field, pattern="^rental_fix_field:\\d+:[a-z_]+$"),
+                    CallbackQueryHandler(rental_start_fix_requisites, pattern="^rental_fix_requisites:\\d+$"),
+                    CallbackQueryHandler(show_rental_contract_detail, pattern="^rental_contract_view:\\d+$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, rental_receive_fixed_requisite),
                 ],
             },
             fallbacks=[

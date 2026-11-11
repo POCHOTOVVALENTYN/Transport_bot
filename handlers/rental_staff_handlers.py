@@ -220,6 +220,7 @@ STATUS_LABELS_UA: Dict[str, str] = {
     "awaiting_slot_choice": "🕒 Слоти надано — клієнт обирає час",
     "awaiting_signature": "✍️ Очікує підписання договору клієнтом (контроль 36 год)",
     "signed_uploaded": "📄 Підписаний договір завантажено (перевірка Юрвідділу та оплати)",
+    "revision_requested": "⚠️ Повернуто Юрвідділом на доопрацювання (правки)",
     "legal_approved": "⚖️ Договір погоджено Юрвідділом — очікує підтвердження IBAN",
     "paid_confirmed": "💳 Оплату IBAN підтверджено — очікує призначення вагона та водія в депо",
     "vehicle_assigned": "✅ Вагон та водія призначено (посадковий талон видано)",
@@ -227,6 +228,14 @@ STATUS_LABELS_UA: Dict[str, str] = {
     "expired_36h": "⌛ Скасовано автоматично (перевищено ліміт 36 год)",
     "cancelled": "🚫 Скасовано",
 }
+
+
+def _format_safety_client_stamp(order: RentalOrder) -> str:
+    """Повертає штамп електронного ознайомлення клієнта з правилами пожежної та технічної безпеки."""
+    safety_dt = getattr(order, "safety_accepted_at", None)
+    if safety_dt:
+        return f"✅ Прийнято клієнтом {safety_dt.strftime('%d.%m.%Y о %H:%M')}"
+    return "✅ Прийнято електронно під час оформлення"
 
 
 async def format_vuptap_summary_card_text(order: RentalOrder) -> str:
@@ -252,8 +261,17 @@ async def format_vuptap_summary_card_text(order: RentalOrder) -> str:
         deadline_str = order.slot_lock_expires_at.strftime("%d.%m.%Y %H:%M")
 
     traffic_mark = f"✅ {order.traffic_approved_by}" if order.traffic_approved_by else "⏳ очікує"
-    vuptap_mark = f"✅ {order.vuptap_approved_by}" if order.vuptap_approved_by else "⏳ очікує"
-    legal_mark = f"✅ {order.legal_approved_by}" if order.legal_approved_by else "⏳ очікує"
+    vuptap_mark = (
+        f"✅ {order.vuptap_approved_by} (ПБ, вогнегасники, інструктаж ОК)"
+        if order.vuptap_approved_by
+        else "⏳ очікує перевірки ПБ та інструктажу"
+    )
+    if order.status == "revision_requested":
+        legal_mark = "⚠️ Повернуто замовнику на доопрацювання (правки)"
+    elif order.legal_approved_by:
+        legal_mark = f"✅ {order.legal_approved_by}"
+    else:
+        legal_mark = "⏳ очікує"
     acc_mark = f"✅ {order.accounting_approved_by}" if order.accounting_approved_by else "⏳ очікує"
     if order.assigned_board_number:
         depot_mark = (
@@ -270,11 +288,12 @@ async def format_vuptap_summary_card_text(order: RentalOrder) -> str:
         "fop": "💼 ФОП",
         "legal_entity": "🏢 Юрособа",
     }.get(getattr(order, "customer_type", "individual") or "individual", "🚶 Фізособа")
+    safety_stamp = _format_safety_client_stamp(order)
 
     logs_block = ""
     if logs:
         log_items = []
-        for l in logs[:5]:
+        for l in logs[:6]:
             t_str = l.created_at.strftime("%H:%M") if l.created_at else ""
             log_items.append(f"• <i>{t_str}</i> <b>{l.actor_role}</b>: {l.details}")
         logs_block = "━━━━━━━━━━━━━━━━━━━━\n📜 <b>ДЕТАЛІЗОВАНИЙ ЖУРНАЛ ЗАМОВЛЕННЯ (AUDIT TRAIL):</b>\n" + "\n".join(log_items) + "\n"
@@ -288,22 +307,23 @@ async def format_vuptap_summary_card_text(order: RentalOrder) -> str:
         f"📅 <b>Дата та час подачі:</b> <b>{order.rental_date}</b> о <b>{order.rental_time_slot or 'ОЧІКУЄ СЛОТУ В ДЕПО'}</b>\n"
         f"⏳ <b>Контроль броні слоту:</b> до <b>{deadline_str}</b>\n"
         f"📝 <b>Формат договору:</b> {scenario_str}\n"
+        f"🔥 <b>Правила ПБ та експлуатації:</b> {safety_stamp}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🚊 <b>Рухомий склад:</b> <b>{order.wagon_type}</b> (Депо: <b>{order.depot_code}</b>)\n"
-        f"🗺️ <b>Маршрут Wialon:</b> {route_chain}\n"
+        f"🗺️ <b>Маршрут:</b> {route_chain}\n"
         f"📏 <b>Телеметрія:</b> <b>{order.total_distance_km:.2f} км</b> | <b>{order.total_duration_min} хв</b>\n"
         f"💰 <b>Сума за договором:</b> <b>{order.total_price_uah:,.2f} грн</b> "
         f"(без ПДВ: {without_vat:,.2f} грн, ПДВ 20%: {vat_val:,.2f} грн)\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🏛️ <b>СТАТУСИ ПОГОДЖЕНЬ ПІДРОЗДІЛІВ КП «ОМЕТ»:</b>\n"
         f"1️⃣ 🚦 ВУПтаП (Графік руху): {traffic_mark}\n"
-        f"2️⃣ 🛡️ ВУПтаП (Безпека руху): {vuptap_mark}\n"
+        f"2️⃣ 🔥 ВУПтаП / Депо (Пожежна та тех. безпека): {vuptap_mark}\n"
         f"3️⃣ ⚖️ Юридичний відділ: {legal_mark}\n"
         f"4️⃣ 💳 Бухгалтерія (IBAN): {acc_mark}\n"
         f"5️⃣ 🚋 Депо ({order.depot_code}): {depot_mark}\n"
         f"{logs_block}"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💬 <i>Reply з «Коментар: текст» надішле офіційне повідомлення клієнту.</i>"
+        f"💬 <i>Використовуйте кнопки нижче для швидкого коментаря клієнту або службової примітки.</i>"
     )
 
 
@@ -319,9 +339,14 @@ def build_vuptap_order_keyboard(order: RentalOrder) -> InlineKeyboardMarkup:
         if not order.traffic_approved_by:
             row1.append(InlineKeyboardButton("🚦 Погодити графік", callback_data=f"rental_staff:traffic_ok:{oid}"))
         if not order.vuptap_approved_by:
-            row1.append(InlineKeyboardButton("🛡️ Інструктаж безпеки", callback_data=f"rental_staff:vuptap_ok:{oid}"))
+            row1.append(InlineKeyboardButton("🔥 ПБ та інструктаж ОК", callback_data=f"rental_staff:vuptap_ok:{oid}"))
         if row1:
             rows.append(row1)
+
+        rows.append([
+            InlineKeyboardButton("💬 Коментар клієнту", callback_data=f"rental_staff:comment_client:{oid}:vuptap"),
+            InlineKeyboardButton("📌 Примітка штабу", callback_data=f"rental_staff:comment_internal:{oid}:vuptap"),
+        ])
 
         rows.append([
             InlineKeyboardButton("🏁 Рейс виконано", callback_data=f"rental_staff:complete:{oid}"),
@@ -335,32 +360,52 @@ build_staff_order_keyboard = build_vuptap_order_keyboard
 
 async def format_legal_card_text(order: RentalOrder) -> str:
     """Формує картку договору для теми 'Відділ правового супроводу господарської діяльності'."""
+    cust_type = getattr(order, "customer_type", "individual") or "individual"
     cust_type_label = {
         "individual": "🚶 Фізична особа",
         "fop": "💼 ФОП",
         "legal_entity": "🏢 Юридична особа",
-    }.get(getattr(order, "customer_type", "individual") or "individual", "🚶 Фізична особа")
+    }.get(cust_type, "🚶 Фізична особа")
     scenario_str = (
         "📱 Електронний (КЕП / Дія.Підпис .p7s)"
         if order.signing_scenario == "kep"
         else "🏢 Паперовий в Управлінні КП (вул. Водопровідна, 1 — ліміт 36 год)"
     )
     deadline_str = order.slot_lock_expires_at.strftime("%d.%m.%Y %H:%M") if order.slot_lock_expires_at else "—"
-    status_doc = "✅ Завантажено клієнтом" if order.signed_file_id else "⏳ Очікується від клієнта"
-    approval_str = f"✅ Погоджено: {order.legal_approved_by}" if order.legal_approved_by else "⏳ Очікує перевірки"
+    status_doc = f"✅ Завантажено ({order.signed_file_name or 'файл'})" if order.signed_file_id else "⏳ Очікується від клієнта"
+    if order.status == "revision_requested":
+        approval_str = "⚠️ Повернуто замовнику на доопрацювання (очікує виправлення)"
+    elif order.legal_approved_by:
+        approval_str = f"✅ Погоджено ({order.legal_approved_by})"
+    else:
+        approval_str = "⏳ Очікує правової перевірки"
+
+    req_lines = [
+        f"• <b>ПІБ / Назва:</b> {order.company_name or order.user_full_name}",
+        f"• <b>РНОКПП / ЄДРПОУ:</b> <code>{order.user_tax_id or '—'}</code>",
+    ]
+    if getattr(order, "user_passport", None):
+        req_lines.append(f"• <b>Паспорт / ID-картка:</b> <code>{order.user_passport}</code>")
+    if getattr(order, "user_address", None):
+        req_lines.append(f"• <b>Адреса / Реквізити:</b> {order.user_address}")
+    if getattr(order, "signer_name", None):
+        req_lines.append(f"• <b>Підписант / Виписка ЄДР:</b> {order.signer_name}")
+    req_block = "\n".join(req_lines)
 
     return (
         f"⚖️ <b>ЮРИДИЧНИЙ ВІДДІЛ: ДОГОВІР ОРЕНДИ № {order.contract_number}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Замовник:</b> {order.user_full_name} ({cust_type_label})\n"
+        f"👤 <b>Статус замовника:</b> {cust_type_label}\n"
         f"📞 <b>Телефон:</b> <code>{order.user_phone}</code>\n"
-        f"📑 <b>РНОКПП / ЄДРПОУ:</b> <code>{order.user_tax_id or 'заповнюється при підписанні'}</code>\n"
-        f"📝 <b>Формат договору:</b> {scenario_str}\n"
+        f"📋 <b>Реквізити у договорі:</b>\n{req_block}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📝 <b>Формат підписання:</b> {scenario_str}\n"
+        f"🔥 <b>Акцепт правил ПБ:</b> {_format_safety_client_stamp(order)}\n"
         f"⏳ <b>Контроль броні (36 год):</b> до <b>{deadline_str}</b>\n"
         f"📁 <b>Підписаний примірник клієнта:</b> {status_doc}\n"
         f"⚖️ <b>Висновок Юрвідділу:</b> <b>{approval_str}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💬 <i>Reply з «Коментар: текст» надішле зауваження до договору клієнту.</i>"
+        f"💡 <i>Ви можете погодити договір, повернути його на правки клієнту або надіслати коментар кнопками нижче.</i>"
     )
 
 
@@ -372,9 +417,17 @@ def build_legal_order_keyboard(order: RentalOrder) -> InlineKeyboardMarkup:
         if not order.legal_approved_by:
             rows.append([InlineKeyboardButton("⚖️ Договір перевірено та погоджено", callback_data=f"rental_staff:legal_ok:{oid}")])
             if order.signing_scenario == "paper":
-                rows.append([InlineKeyboardButton("✍️ Підпис на Водопровідній, 1", callback_data=f"rental_staff:legal_ok:{oid}")])
+                rows.append([InlineKeyboardButton("✍️ Підписано паперово (Водопровідна, 1)", callback_data=f"rental_staff:legal_ok:{oid}")])
+            rows.append([InlineKeyboardButton("⚠️ Повернути на правки клієнту", callback_data=f"rental_staff:legal_revision:{oid}")])
         else:
-            rows.append([InlineKeyboardButton("✅ Договір погоджено Юрвідділом", callback_data=f"rental_staff:legal_ok:{oid}")])
+            rows.append([
+                InlineKeyboardButton("✅ Договір погоджено Юрвідділом", callback_data=f"rental_staff:legal_ok:{oid}"),
+                InlineKeyboardButton("⚠️ Повернути на правки", callback_data=f"rental_staff:legal_revision:{oid}"),
+            ])
+        rows.append([
+            InlineKeyboardButton("💬 Коментар клієнту", callback_data=f"rental_staff:comment_client:{oid}:legal"),
+            InlineKeyboardButton("📌 Примітка штабу", callback_data=f"rental_staff:comment_internal:{oid}:legal"),
+        ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -415,6 +468,10 @@ def build_accounting_order_keyboard(order: RentalOrder) -> InlineKeyboardMarkup:
             rows.append([InlineKeyboardButton("💳 Оплату IBAN зараховано (100%)", callback_data=f"rental_staff:acc_ok:{oid}")])
         else:
             rows.append([InlineKeyboardButton("✅ Оплату підтверджено Бухгалтерією", callback_data=f"rental_staff:acc_ok:{oid}")])
+        rows.append([
+            InlineKeyboardButton("💬 Коментар клієнту", callback_data=f"rental_staff:comment_client:{oid}:accounting"),
+            InlineKeyboardButton("📌 Примітка штабу", callback_data=f"rental_staff:comment_internal:{oid}:accounting"),
+        ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -427,17 +484,24 @@ async def format_depot_card_text(order: RentalOrder) -> str:
         if order.assigned_board_number
         else "⏳ Очікує призначення борта та водія"
     )
+    fire_safety_status = (
+        f"✅ Перевірено ({order.vuptap_approved_by}: вогнегасники ВП-5/ВВК-3,5, аптечка, башмаки, інструктаж водія)"
+        if order.vuptap_approved_by
+        else "⏳ Потребує перевірки вогнегасників, аптечки та цільового інструктажу перед виїздом"
+    )
     return (
         f"🚋 <b>{status_header} (ДОГОВІР № {order.contract_number})</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🚊 <b>Рухомий склад:</b> <b>{order.wagon_type}</b> (База: <b>{order.depot_code}</b>)\n"
         f"📅 <b>Дата рейсу:</b> <b>{order.rental_date}</b> о <b>{order.rental_time_slot or 'час погоджується'}</b>\n"
-        f"📍 <b>Кільце подачі під посадку:</b> <b>{order.pickup_stop}</b>\n"
-        f"📍 <b>Кільце висадки:</b> {order.dropoff_stop}\n"
+        f"📍 <b>Початкова зупинка посадки:</b> <b>{order.pickup_stop}</b>\n"
+        f"📍 <b>Кінцева зупинка маршруту:</b> {order.dropoff_stop}\n"
         f"⏱️ <b>Тривалість:</b> {order.total_duration_min} хв (подача: {order.duration_pull_out_min} хв, заїзд: {order.duration_pull_in_min} хв)\n"
-        f"🛣️ <b>Пробіг за Wialon:</b> {order.total_distance_km:.2f} км\n"
+        f"🛣️ <b>Пробіг за маршрутом:</b> {order.total_distance_km:.2f} км\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"👨‍✈️ <b>Призначений екіпаж:</b> {assigned_info}\n"
+        f"🔥 <b>Пожежна та тех. безпека (ПБ):</b> {fire_safety_status}\n"
+        f"🛡️ <b>Акцепт ПБ замовником:</b> {_format_safety_client_stamp(order)}\n"
         f"📋 <b>Готовність:</b> Договір: {'✅' if order.legal_approved_by else '⏳'} | Оплата IBAN: {'✅' if order.accounting_approved_by else '⏳'}"
     )
 
@@ -451,6 +515,12 @@ def build_depot_order_keyboard(order: RentalOrder) -> InlineKeyboardMarkup:
             rows.append([InlineKeyboardButton(f"🚋 Призначити вагон і водія ({order.depot_code})", callback_data=f"rental_staff:depot_assign:{oid}")])
         else:
             rows.append([InlineKeyboardButton(f"✏️ Змінити борт/водія (№{order.assigned_board_number})", callback_data=f"rental_staff:depot_assign:{oid}")])
+        if not order.vuptap_approved_by:
+            rows.append([InlineKeyboardButton("🔥 Підтвердити ПБ (вогнегасник, аптечка, інструктаж)", callback_data=f"rental_staff:vuptap_ok:{oid}")])
+        rows.append([
+            InlineKeyboardButton("💬 Коментар клієнту", callback_data=f"rental_staff:comment_client:{oid}:depot"),
+            InlineKeyboardButton("📌 Примітка штабу", callback_data=f"rental_staff:comment_internal:{oid}:depot"),
+        ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -629,12 +699,30 @@ ACTION_REQUIRED_ROLE: Dict[str, Tuple[str, str]] = {
     "traffic_ok": ("traffic_service", "Служба руху"),
     "add_slots": ("traffic_service", "Служба руху"),
     "legal_ok": ("legal_dept", "Юридичний відділ"),
-    "vuptap_ok": ("vuptap_dept", "ВУПтаП"),
+    "legal_revision": ("legal_dept", "Юридичний відділ"),
+    "vuptap_ok": ("vuptap_dept", "ВУПтаП / Депо (ПБ)"),
     "acc_ok": ("accounting_dept", "Бухгалтерія"),
     "depot_assign": ("depot_tram", "Депо"),
+    "comment_client": ("traffic_service", "Штаб КП ОМЕТ"),
+    "comment_internal": ("traffic_service", "Штаб КП ОМЕТ"),
     "complete": ("traffic_service", "Служба руху"),
     "cancel": ("traffic_service", "Служба руху"),
 }
+
+PROMPT_ONLY_ACTIONS = ("depot_assign", "add_slots", "legal_revision", "comment_client", "comment_internal")
+
+
+def _resolve_department_label(topic_key: Optional[str], thread_id: Optional[int] = None) -> str:
+    """Визначає назву підрозділу КП «ОМЕТ» за ключем теми або ID потоку (thread_id)."""
+    if topic_key and topic_key in TOPIC_TITLES_UA:
+        return TOPIC_TITLES_UA[topic_key]
+    if thread_id is not None:
+        cfg = _load_runtime_staff_config()
+        topics_map = cfg.get("topics", {})
+        for k, tid in topics_map.items():
+            if tid is not None and int(tid) == int(thread_id):
+                return TOPIC_TITLES_UA.get(k, "Оперативний штаб КП «ОМЕТ»")
+    return "Оперативний штаб КП «ОМЕТ»"
 
 
 async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -650,6 +738,7 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
 
     action = parts[1]
     order_id = int(parts[2])
+    topic_key_arg = parts[3] if len(parts) > 3 else None
     user = update.effective_user
     user_id = user.id
     actor_name = user.full_name or user.username or str(user_id)
@@ -669,6 +758,14 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
         else:
             allowed = has_staff_role(user_id, "depot_tram", chat_id_for_rbac)
             role_label = f"Депо {order.depot_code}"
+    elif action == "vuptap_ok":
+        allowed = (
+            has_staff_role(user_id, "vuptap_dept", chat_id_for_rbac)
+            or has_staff_role(user_id, "depot_tram", chat_id_for_rbac)
+            or has_staff_role(user_id, "traffic_service", chat_id_for_rbac)
+        )
+    elif action in ("comment_client", "comment_internal"):
+        allowed = is_rental_staff_member(user_id, chat_id_for_rbac)
     else:
         allowed = has_staff_role(user_id, req_role_key, chat_id_for_rbac)
 
@@ -680,7 +777,7 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
         return
 
     # 2. Двоетапний захист від випадкового натискання (протягом 10 секунд) — не блокуємо для кнопок відкриття діалогу вводу
-    if action not in ("depot_assign", "add_slots") and not check_two_step_confirmation(user_id, order_id, action):
+    if action not in PROMPT_ONLY_ACTIONS and not check_two_step_confirmation(user_id, order_id, action):
         await query.answer(
             f"⚠️ Підтвердження дії ({role_label}):\n"
             f"Натисніть цю саму кнопку ЩЕ РАЗ протягом 10 секунд, щоб підтвердити дію за договором №{order.contract_number}.",
@@ -689,6 +786,7 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
         return
 
     now_dt = datetime.datetime.now()
+    thread_id = getattr(query.message, "message_thread_id", None) if query.message else None
 
     # 3. Виконання підтвердженої дії
     if action == "traffic_ok":
@@ -703,7 +801,7 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
             order_id=order.id,
             actor_id=user_id,
             actor_name=actor_name,
-            actor_role="Служба руху",
+            actor_role="🚦 Служба руху (ВУПтаП)",
             action="TRAFFIC_APPROVED",
             details=f"Погоджено маршрут та часовий слот {order.rental_date} ({order.rental_time_slot or 'за графіком'})",
         )
@@ -725,7 +823,6 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
 
     if action == "add_slots":
         chat_id = update.effective_chat.id
-        thread_id = getattr(query.message, "message_thread_id", None) if query.message else None
         _PENDING_STAFF_INPUT[(chat_id, user_id)] = {
             "mode": "slots",
             "order_id": order.id,
@@ -749,7 +846,7 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
 
     if action == "legal_ok":
         new_status = order.status
-        if order.status in ("awaiting_signature", "signed_uploaded"):
+        if order.status in ("awaiting_signature", "signed_uploaded", "revision_requested"):
             new_status = "legal_approved"
         await db.update_rental_order_fields(
             order.id,
@@ -763,7 +860,7 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
             order_id=order.id,
             actor_id=user_id,
             actor_name=actor_name,
-            actor_role="Юридичний відділ",
+            actor_role="⚖️ Юридичний відділ",
             action="LEGAL_APPROVED",
             details=f"Договір №{order.contract_number} перевірено та погоджено Юридичним відділом",
         )
@@ -782,6 +879,63 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
             pass
         return
 
+    if action == "legal_revision":
+        chat_id = update.effective_chat.id
+        target_thread = thread_id if thread_id is not None else get_staff_topic_thread_id("legal")
+        _PENDING_STAFF_INPUT[(chat_id, user_id)] = {
+            "mode": "legal_revision",
+            "order_id": order.id,
+            "thread_id": target_thread,
+        }
+        await query.answer("Введіть зауваження Юрвідділу у чат теми")
+        rev_kwargs: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": (
+                f"⚠️ <b>Повернення Договору №{order.contract_number} на доопрацювання (правки):</b>\n\n"
+                f"Напишіть одним повідомленням у цю тему перелік зауважень для замовника "
+                f"(наприклад: <i>«Уточніть серію/номер паспорта або ЄДРПОУ, завантажте підписаний файл .p7s»</i>).\n\n"
+                f"<i>Клієнт миттєво отримає Ваше зауваження разом із кнопками для виправлення реквізитів та повторного завантаження договору.</i>"
+            ),
+            "parse_mode": ParseMode.HTML,
+        }
+        if target_thread is not None:
+            rev_kwargs["message_thread_id"] = target_thread
+        await context.bot.send_message(**rev_kwargs)
+        return
+
+    if action in ("comment_client", "comment_internal"):
+        chat_id = update.effective_chat.id
+        dept_label = _resolve_department_label(topic_key_arg, thread_id)
+        _PENDING_STAFF_INPUT[(chat_id, user_id)] = {
+            "mode": action,
+            "order_id": order.id,
+            "topic_key": topic_key_arg or "vuptap",
+            "dept_label": dept_label,
+            "thread_id": thread_id,
+        }
+        if action == "comment_client":
+            await query.answer("Напишіть повідомлення для клієнта у чат")
+            prompt_txt = (
+                f"💬 <b>Повідомлення клієнту від підрозділу «{dept_label}» (Договір №{order.contract_number}):</b>\n\n"
+                f"Напишіть наступним повідомленням у цю тему текст, який потрібно передати замовнику (<b>{order.user_full_name}</b>)."
+            )
+        else:
+            await query.answer("Напишіть службову примітку для штабу у чат")
+            prompt_txt = (
+                f"📌 <b>Внутрішня службова примітка від «{dept_label}» (Договір №{order.contract_number}):</b>\n\n"
+                f"Напишіть наступним повідомленням службовий коментар. Він збережеться у Зведеній картці штабу (ВУПтаП) та журналі аудиту, "
+                f"але <b>не буде надсилатися клієнту</b>."
+            )
+        c_kwargs: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": prompt_txt,
+            "parse_mode": ParseMode.HTML,
+        }
+        if thread_id is not None:
+            c_kwargs["message_thread_id"] = thread_id
+        await context.bot.send_message(**c_kwargs)
+        return
+
     if action == "vuptap_ok":
         await db.update_rental_order_fields(
             order.id,
@@ -794,11 +948,11 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
             order_id=order.id,
             actor_id=user_id,
             actor_name=actor_name,
-            actor_role="ВУПтаП",
+            actor_role="🔥 Пожежна та тех. безпека (ВУПтаП / Депо)",
             action="VUPTAP_APPROVED",
-            details="Погоджено умови безпеки дорожнього руху та інструктаж",
+            details="Підтверджено пожежну та тех. безпеку (вогнегасник ВП-5/ВВК-3,5, аптечка, башмаки, цільовий інструктаж)",
         )
-        await query.answer("✅ ВУПтаП погодив безпеку руху!")
+        await query.answer("✅ Пожежну безпеку та інструктаж підтверджено!")
         await post_or_update_staff_order_card(context, order.id)
         return
 
@@ -816,7 +970,7 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
             order_id=order.id,
             actor_id=user_id,
             actor_name=actor_name,
-            actor_role="Бухгалтерія",
+            actor_role="💳 Бухгалтерія",
             action="PAYMENT_CONFIRMED",
             details=f"Підтверджено зарахування {order.total_price_uah:.2f} грн за реквізитами IBAN",
         )
@@ -838,7 +992,7 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
 
     if action == "depot_assign":
         chat_id = update.effective_chat.id
-        thread_id = getattr(query.message, "message_thread_id", None) if query.message else get_staff_topic_thread_id("depot")
+        target_depot_thread = thread_id if thread_id is not None else get_staff_topic_thread_id("depot")
         _PENDING_STAFF_INPUT[(chat_id, user_id)] = {
             "mode": "depot",
             "order_id": order.id,
@@ -854,8 +1008,8 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
             ),
             "parse_mode": ParseMode.HTML,
         }
-        if thread_id is not None:
-            depot_prompt_kwargs["message_thread_id"] = thread_id
+        if target_depot_thread is not None:
+            depot_prompt_kwargs["message_thread_id"] = target_depot_thread
         await context.bot.send_message(**depot_prompt_kwargs)
         return
 
@@ -937,22 +1091,27 @@ async def handle_rental_staff_callback(update: Update, context: ContextTypes.DEF
 async def handle_staff_group_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """
     Обробляє:
-    1) Очікуваний ввід часових слотів ('12:00, 15:00') від Служби руху;
-    2) Очікуваний ввід бортового номера та водія ('914, Коваленко О.П., +380...') від Депо;
-    3) Reply на картку замовлення з префіксом 'Коментар: ...' або 'Інфо: ...' для клієнта.
+    1) Очікуваний ввід часових слотів ('12:00, 15:00') від Служби руху
+    2) Очікуваний ввід бортового номера та водія ('914, Коваленко О.П., +380...') від Депо
+    3) Зауваження та правки від Юридичного відділу ('legal_revision')
+    4) Одноклікові коментарі клієнту ('comment_client') та внутрішні примітки штабу ('comment_internal')
+    5) Reply на картку замовлення з префіксом 'Коментар: ...' або 'Інфо: ...' для клієнта.
     Повертає True, якщо повідомлення було оброблено.
     """
     msg = update.message
-    if not msg or not msg.text or not update.effective_user or not update.effective_chat:
+    if not msg or not update.effective_user or not update.effective_chat:
+        return False
+    raw_text = msg.text or getattr(msg, "caption", None) or ""
+    if not raw_text and not getattr(msg, "document", None):
         return False
 
     chat_id = update.effective_chat.id
     user = update.effective_user
     user_id = user.id
     actor_name = user.full_name or user.username or str(user_id)
-    text = msg.text.strip()
+    text = raw_text.strip()
 
-    # 1. Перевіряємо активний режим вводу (слоти або призначення депо)
+    # 1. Перевіряємо активний режим вводу (слоти, депо, правки юристів, коментарі служб)
     pending = _PENDING_STAFF_INPUT.get((chat_id, user_id))
     if pending:
         mode = pending.get("mode")
@@ -987,7 +1146,7 @@ async def handle_staff_group_text_input(update: Update, context: ContextTypes.DE
                 order_id=0,
                 actor_id=user_id,
                 actor_name=actor_name,
-                actor_role="ДЕПО та ВРМ",
+                actor_role="🚋 ДЕПО та ВРМ",
                 action="SLOTS_ADDED",
                 details=f"Депо додало {len(added)} вільних слотів на {target_date}: {', '.join(valid_slots)}",
             )
@@ -1009,6 +1168,123 @@ async def handle_staff_group_text_input(update: Update, context: ContextTypes.DE
 
         if not order:
             await msg.reply_text("❌ Замовлення не знайдено.")
+            return True
+
+        if mode == "legal_revision":
+            rev_text = text or "Надіслано відредагований файл договору від Юридичного відділу"
+            await db.update_rental_order_fields(
+                order.id,
+                {
+                    "status": "revision_requested",
+                    "legal_approved_by": None,
+                    "legal_approved_at": None,
+                },
+            )
+            await db.add_rental_audit_log(
+                order_id=order.id,
+                actor_id=user_id,
+                actor_name=actor_name,
+                actor_role="⚖️ Юридичний відділ",
+                action="LEGAL_REVISION_REQUESTED",
+                details=f"Повернуто на доопрацювання: {rev_text}",
+            )
+            await post_or_update_staff_order_card(context, order.id)
+            client_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✏️ Виправити реквізити та перегенерувати договір", callback_data=f"rental_fix_requisites:{order.id}")],
+                [InlineKeyboardButton("📤 Завантажити виправлений договір (.p7s / скан)", callback_data=f"rental_upload_signed:{order.id}")],
+                [InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")],
+            ])
+            try:
+                if getattr(msg, "document", None):
+                    await context.bot.send_document(
+                        chat_id=order.user_id,
+                        document=msg.document.file_id,
+                        caption=f"📄 Відредагована редакція Договору № {order.contract_number} від Юридичного відділу КП «ОМЕТ»",
+                        parse_mode=ParseMode.HTML,
+                    )
+                await context.bot.send_message(
+                    chat_id=order.user_id,
+                    text=(
+                        f"⚠️ <b>Зауваження Відділу правового супроводу КП «ОМЕТ» за Договором № {order.contract_number}:</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                        f"<i>«{rev_text}»</i>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                        f"Будь ласка, скористайтеся кнопками нижче, щоб відкоригувати реквізити (система автоматично згенерує "
+                        f"оновлений PDF-договір) або завантажити виправлений підписаний файл:"
+                    ),
+                    reply_markup=client_kb,
+                    parse_mode=ParseMode.HTML,
+                )
+                await msg.reply_text(
+                    f"✅ Договір <b>№{order.contract_number}</b> переведено у статус «На доопрацюванні».\n"
+                    f"Зауваження та кнопки виправлення реквізитів надіслано замовнику.",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception as err:
+                await msg.reply_text(f"⚠️ Статус оновлено, але не вдалося доставити повідомлення клієнту: {err}")
+            return True
+
+        if mode == "comment_client":
+            dept_label = pending.get("dept_label") or _resolve_department_label(pending.get("topic_key"), getattr(msg, "message_thread_id", None))
+            await db.add_rental_audit_log(
+                order_id=order.id,
+                actor_id=user_id,
+                actor_name=actor_name,
+                actor_role=dept_label,
+                action="STAFF_COMMENT_CLIENT",
+                details=f"Повідомлення клієнту: {text}",
+            )
+            await post_or_update_staff_order_card(context, order.id)
+            client_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"📄 Переглянути договір №{order.contract_number}", callback_data=f"rental_contract_view:{order.id}")],
+            ])
+            try:
+                await context.bot.send_message(
+                    chat_id=order.user_id,
+                    text=(
+                        f"💬 <b>Офіційне повідомлення від підрозділу «{dept_label}» КП «ОМЕТ»</b>\n"
+                        f"Щодо Вашого Договору оренди <b>№ {order.contract_number}</b>:\n\n"
+                        f"<i>«{text}»</i>"
+                    ),
+                    reply_markup=client_kb,
+                    parse_mode=ParseMode.HTML,
+                )
+                await msg.reply_text(
+                    f"✅ Повідомлення від <b>{dept_label}</b> зафіксовано в журналі та надіслано клієнту.",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception as err:
+                await msg.reply_text(f"⚠️ Коментар збережено в журналі, але не вдалося доставити клієнту: {err}")
+            return True
+
+        if mode == "comment_internal":
+            dept_label = pending.get("dept_label") or _resolve_department_label(pending.get("topic_key"), getattr(msg, "message_thread_id", None))
+            await db.add_rental_audit_log(
+                order_id=order.id,
+                actor_id=user_id,
+                actor_name=actor_name,
+                actor_role=dept_label,
+                action="STAFF_INTERNAL_NOTE",
+                details=f"📌 Службова примітка: {text}",
+            )
+            await post_or_update_staff_order_card(context, order.id)
+            if pending.get("topic_key") != "vuptap":
+                try:
+                    await send_to_staff_topic(
+                        context,
+                        "vuptap",
+                        (
+                            f"📌 <b>Службова примітка по Договору № {order.contract_number}</b>\n"
+                            f"Підрозділ: <b>{dept_label}</b> ({actor_name})\n"
+                            f"Текст: <i>«{text}»</i>"
+                        ),
+                    )
+                except Exception:
+                    pass
+            await msg.reply_text(
+                f"📌 Внутрішню службову примітку збережено у Зведеній картці та журналі дій.",
+                parse_mode=ParseMode.HTML,
+            )
             return True
 
         if mode == "slots":
@@ -1033,7 +1309,7 @@ async def handle_staff_group_text_input(update: Update, context: ContextTypes.DE
                 order_id=order.id,
                 actor_id=user_id,
                 actor_name=actor_name,
-                actor_role="Служба руху",
+                actor_role="🚦 Служба руху",
                 action="SLOTS_ADDED",
                 details=f"Додано вільні слоти на {order.rental_date}: {', '.join(all_free)}",
             )
@@ -1101,14 +1377,16 @@ async def handle_staff_group_text_input(update: Update, context: ContextTypes.DE
                 order_id=order.id,
                 actor_id=user_id,
                 actor_name=actor_name,
-                actor_role=f"Депо {order.depot_code}",
+                actor_role=f"🚋 Депо {order.depot_code}",
                 action="VEHICLE_ASSIGNED",
                 details=f"Призначено борт №{board_num}, водій: {driver_name} ({driver_phone})",
             )
             await post_or_update_staff_order_card(context, order.id)
 
-            # Генеруємо та надсилаємо клієнту електронний посадковий талон із QR-кодом
+            # Генеруємо та надсилаємо клієнту електронний посадковий талон із QR-кодом та пам'яткою ПБ
             if updated_order:
+                safety_dt = getattr(updated_order, "safety_accepted_at", None)
+                safety_str = safety_dt.strftime("%d.%m.%Y о %H:%M") if safety_dt else "Підтверджено електронно"
                 pass_pdf = generate_rental_boarding_pass_pdf(
                     {
                         "contract_number": updated_order.contract_number,
@@ -1123,6 +1401,7 @@ async def handle_staff_group_text_input(update: Update, context: ContextTypes.DE
                         "assigned_driver_phone": updated_order.assigned_driver_phone,
                         "user_full_name": updated_order.user_full_name,
                         "user_phone": updated_order.user_phone,
+                        "safety_accepted_at": safety_str,
                     }
                 )
                 try:
@@ -1136,8 +1415,9 @@ async def handle_staff_group_text_input(update: Update, context: ContextTypes.DE
                                 f"🚋 <b>Рухомий склад:</b> {updated_order.wagon_type}\n"
                                 f"🔢 <b>Бортовий номер:</b> <b>№ {board_num}</b>\n"
                                 f"👨‍✈️ <b>Водій:</b> {driver_name} (тел.: <code>{driver_phone}</code>)\n"
-                                f"📅 <b>Подача на кільце «{updated_order.pickup_stop}»:</b> {updated_order.rental_date} о {updated_order.rental_time_slot}\n\n"
-                                f"Покажіть цей талон або QR-код водієві під час посадки на розворотному кільці. Гарної поїздки!"
+                                f"📅 <b>Подача на зупинку «{updated_order.pickup_stop}»:</b> {updated_order.rental_date} о {updated_order.rental_time_slot}\n\n"
+                                f"🔥 <i>У документі також наведено обов'язкову пам'ятку з пожежної та електробезпеки для учасників поїздки.</i>\n"
+                                f"Покажіть цей талон або QR-код водієві під час посадки. Гарної поїздки!"
                             ),
                             parse_mode=ParseMode.HTML,
                         )
@@ -1146,7 +1426,7 @@ async def handle_staff_group_text_input(update: Update, context: ContextTypes.DE
 
             await msg.reply_text(
                 f"✅ Борт <b>№{board_num}</b> та водія <b>{driver_name}</b> призначено! "
-                f"Клієнту автоматично надіслано електронний посадковий талон із QR-кодом.",
+                f"Клієнту автоматично надіслано електронний посадковий талон із QR-кодом та пам'яткою ПБ.",
                 parse_mode=ParseMode.HTML,
             )
             return True
@@ -1162,11 +1442,12 @@ async def handle_staff_group_text_input(update: Update, context: ContextTypes.DE
                 contract_number = m_contract.group(1)
                 order = await db.get_rental_order_by_contract(contract_number)
                 if order:
+                    dept_label = _resolve_department_label(None, getattr(msg, "message_thread_id", None))
                     await db.add_rental_audit_log(
                         order_id=order.id,
                         actor_id=user_id,
                         actor_name=actor_name,
-                        actor_role="Повідомлення штабу",
+                        actor_role=dept_label,
                         action="STAFF_COMMENT",
                         details=f"Коментар клієнту: {comment_body}",
                     )
@@ -1175,7 +1456,7 @@ async def handle_staff_group_text_input(update: Update, context: ContextTypes.DE
                         await context.bot.send_message(
                             chat_id=order.user_id,
                             text=(
-                                f"💬 <b>Офіційне повідомлення від КП «Одесміськелектротранс»</b>\n"
+                                f"💬 <b>Офіційне повідомлення від підрозділу «{dept_label}» КП «ОМЕТ»</b>\n"
                                 f"Щодо Вашого Договору оренди <b>№ {order.contract_number}</b>:\n\n"
                                 f"<i>«{comment_body}»</i>"
                             ),
@@ -1700,6 +1981,7 @@ async def render_recent_orders_menu() -> Tuple[str, InlineKeyboardMarkup]:
         "vehicle_assigned": "🚋",
         "paid_confirmed": "💳",
         "legal_approved": "⚖️",
+        "revision_requested": "⚠️",
         "awaiting_payment": "⏳",
         "awaiting_signature": "✍️",
         "pending_slots": "🕒",

@@ -533,11 +533,13 @@ async def test_full_wizard_conversation_flow():
     assert created_order.rental_time_slot == "14:30"
     assert created_order.contract_number.endswith("-О")
 
-    # Перевіряємо, що бот надіслав документи (тільки 3 файли PDF, без DOCX для клієнта)
-    assert context.bot.send_document.call_count == 3
-    sent_filenames = [
-        call.kwargs.get("filename") for call in context.bot.send_document.call_args_list
+    # Перевіряємо, що бот надіслав документи (3 файли PDF для клієнта + 2 файли Договору PDF/DOCX у тему Юрвідділу)
+    assert context.bot.send_document.call_count in (3, 5)
+    client_calls = [
+        call for call in context.bot.send_document.call_args_list if call.kwargs.get("chat_id") == user_id
     ]
+    assert len(client_calls) == 3
+    sent_filenames = [call.kwargs.get("filename") for call in client_calls]
     assert all(fn.endswith(".pdf") for fn in sent_filenames)
     assert not any(fn.endswith(".docx") for fn in sent_filenames)
 
