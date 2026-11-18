@@ -76,6 +76,36 @@ async def init_db():
                 except Exception:
                     pass
                 try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN depot_time_approved_by VARCHAR"))
+                    print("✅ Migration: added depot_time_approved_by column to rental_orders")
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN depot_time_approved_at DATETIME"))
+                    print("✅ Migration: added depot_time_approved_at column to rental_orders")
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN proposed_times_json TEXT DEFAULT '[]'"))
+                    print("✅ Migration: added proposed_times_json column to rental_orders")
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN signed_files_json TEXT DEFAULT '[]'"))
+                    print("✅ Migration: added signed_files_json column to rental_orders")
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN payment_files_json TEXT DEFAULT '[]'"))
+                    print("✅ Migration: added payment_files_json column to rental_orders")
+                except Exception:
+                    pass
+                try:
+                    await conn.execute(text("ALTER TABLE rental_orders ADD COLUMN countersigned_files_json TEXT DEFAULT '[]'"))
+                    print("✅ Migration: added countersigned_files_json column to rental_orders")
+                except Exception:
+                    pass
+                try:
                     await conn.execute(text("ALTER TABLE museum_bookings ADD COLUMN participants_details TEXT"))
                     print("✅ Migration: added participants_details column to museum_bookings")
                 except Exception:
@@ -661,9 +691,15 @@ class RentalOrder(Base):
     assigned_driver_phone = Column(String, nullable=True)
 
     # Прикріплені файли Telegram та ID картки в штабному чаті
+    depot_time_approved_by = Column(String, nullable=True)
+    depot_time_approved_at = Column(DateTime, nullable=True)
+    proposed_times_json = Column(Text, default="[]")
     signed_file_id = Column(String, nullable=True)
     signed_file_name = Column(String, nullable=True)
+    signed_files_json = Column(Text, default="[]")
     payment_file_id = Column(String, nullable=True)
+    payment_files_json = Column(Text, default="[]")
+    countersigned_files_json = Column(Text, default="[]")
     staff_chat_id = Column(BigInteger, nullable=True)
     staff_chat_message_id = Column(BigInteger, nullable=True)
     staff_topic_messages_json = Column(Text, default="{}")

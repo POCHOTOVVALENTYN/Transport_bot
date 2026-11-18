@@ -514,11 +514,18 @@ async def test_full_wizard_conversation_flow():
     s17 = await client_handlers.rental_handle_legal_phone_input(make_update(message_text="+380487001122"), context)
     assert s17 == States.RENTAL_FINAL_CONFIRM
 
-    # 7. Фінальне підтвердження та створення замовлення
+    # 6.1. Тестуємо точкове редагування окремого поля з екрану фінальної перевірки (без повторного вводу всіх полів)
+    s_edit = await client_handlers.rental_handle_draft_edit_field(make_update("rental_draft_edit:phone"), context)
+    assert s_edit == States.RENTAL_ENTER_LEGAL_PHONE
+    s_edit_done = await client_handlers.rental_handle_legal_phone_input(make_update(message_text="+380487175400"), context)
+    assert s_edit_done == States.RENTAL_FINAL_CONFIRM
+    assert _get_draft(context)["user_phone"] == "+380487175400"
+
+    # 7. Фінальне підтвердження та передача заявки на Етап 1 (погодження часу в Депо)
     fin_update = make_update("rental_confirm_create")
     await rental_finalize_order(fin_update, context)
 
-    # Перевіряємо збереження замовлення в БД
+    # Перевіряємо збереження замовлення в БД зі статусом 'pending_depot_time'
     orders = await mock_db.get_user_active_rental_orders(user_id)
     assert len(orders) == 1
     created_order = orders[0]
@@ -528,13 +535,21 @@ async def test_full_wizard_conversation_flow():
     assert created_order.dropoff_stop == "пл. Старосінна"
     assert created_order.customer_type == "legal_entity"
     assert created_order.user_tax_id == "44556677"
+    assert created_order.user_phone == "+380487175400"
     assert created_order.signing_scenario == "kep"
     assert created_order.rental_date == future_date
     assert created_order.rental_time_slot == "14:30"
+    assert created_order.status == "pending_depot_time"
     assert created_order.contract_number.endswith("-О")
 
-    # Перевіряємо, що бот надіслав документи (3 файли PDF для клієнта + 2 файли Договору PDF/DOCX у тему Юрвідділу)
-    assert context.bot.send_document.call_count in (3, 5)
+    # До погодження часу в Депо PDF-документи клієнту ще НЕ надсилаються
+    assert context.bot.send_document.call_count == 0
+
+    # 8. Етап 2: Депо погоджує час подачі -> бот генерує та надсилає клієнту 3 PDF-документи
+    from handlers.rental_staff_handlers import deliver_approved_contract_package_to_client
+    await deliver_approved_contract_package_to_client(context, created_order)
+
+    assert context.bot.send_document.call_count == 3
     client_calls = [
         call for call in context.bot.send_document.call_args_list if call.kwargs.get("chat_id") == user_id
     ]

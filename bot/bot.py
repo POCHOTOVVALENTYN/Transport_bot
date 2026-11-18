@@ -184,6 +184,10 @@ from handlers.rental_client_handlers import (
     rental_handle_legal_address_input,
     rental_handle_legal_signer_input,
     rental_handle_legal_phone_input,
+    rental_handle_draft_edit_field,
+    rental_handle_back_to_final_confirm,
+    rental_finish_upload_batch,
+    rental_clear_upload_batch,
     rental_start_fix_requisites,
     rental_select_fix_field,
     rental_receive_fixed_requisite,
@@ -824,31 +828,37 @@ class TransportBot:
                 # Гілка 1: Фізична особа
                 States.RENTAL_ENTER_CUSTOMER_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_name_input),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
                 States.RENTAL_ENTER_CUSTOMER_PHONE: [
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_individual_name_input, pattern="^rental_back_name$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_phone_input),
                 ],
                 States.RENTAL_ENTER_INDIVIDUAL_PASSPORT: [
                     CallbackQueryHandler(rental_handle_individual_passport_input, pattern="^rental_passp_skip$"),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_individual_phone_input, pattern="^rental_back_phone$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_individual_passport_input),
                 ],
                 States.RENTAL_ENTER_INDIVIDUAL_ADDRESS: [
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_individual_passport_input, pattern="^rental_back_passport$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_individual_address_input),
                 ],
                 States.RENTAL_ENTER_INDIVIDUAL_TAX_ID: [
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_individual_address_input, pattern="^rental_back_indiv_addr$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_individual_tax_input),
                 ],
                 States.RENTAL_ENTER_CUSTOMER_TAX_ID: [
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_individual_address_input, pattern="^rental_back_indiv_addr$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_individual_tax_input),
@@ -857,27 +867,32 @@ class TransportBot:
                 # Гілка 2: ФОП
                 States.RENTAL_ENTER_FOP_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_name_input),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
                 States.RENTAL_ENTER_FOP_TAX_ID: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_tax_input),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_fop_name_input, pattern="^rental_back_fop_name$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
                 States.RENTAL_ENTER_FOP_ADDRESS: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_address_input),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_fop_tax_input, pattern="^rental_back_fop_tax$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
                 States.RENTAL_ENTER_FOP_EDR_DOC: [
                     CallbackQueryHandler(rental_handle_fop_edr_input, pattern="^rental_fop_edr_std$"),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_fop_address_input, pattern="^rental_back_fop_addr$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_edr_input),
                 ],
                 States.RENTAL_ENTER_FOP_PHONE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_fop_phone_input),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_fop_edr_input, pattern="^rental_back_fop_edr$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
@@ -885,33 +900,39 @@ class TransportBot:
                 # Гілка 3: Юридична особа
                 States.RENTAL_ENTER_LEGAL_EDRPOU: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_edrpou_input),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
                 States.RENTAL_ENTER_LEGAL_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_name_input),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_legal_edrpou_input, pattern="^rental_back_legal_edrpou$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
                 States.RENTAL_ENTER_LEGAL_ADDRESS: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_address_input),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_legal_name_input, pattern="^rental_back_legal_name$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
                 States.RENTAL_ENTER_LEGAL_SIGNER: [
                     CallbackQueryHandler(rental_handle_legal_signer_input, pattern="^rental_legal_signer_std$"),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_legal_address_input, pattern="^rental_back_legal_addr$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_signer_input),
                 ],
                 States.RENTAL_ENTER_LEGAL_PHONE: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, rental_handle_legal_phone_input),
+                    CallbackQueryHandler(rental_handle_back_to_final_confirm, pattern="^rental_back_final_confirm$"),
                     CallbackQueryHandler(_render_legal_signer_input, pattern="^rental_back_legal_signer$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
 
                 States.RENTAL_FINAL_CONFIRM: [
                     CallbackQueryHandler(rental_finalize_order, pattern="^rental_confirm_create$"),
+                    CallbackQueryHandler(rental_handle_draft_edit_field, pattern="^rental_draft_edit:"),
                     CallbackQueryHandler(_render_customer_type_selection, pattern="^rental_back_cust_type$"),
                     CallbackQueryHandler(show_rental_hub, pattern="^rental_hub$"),
                 ],
@@ -936,6 +957,8 @@ class TransportBot:
                         (filters.Document.ALL | filters.PHOTO) & ~filters.COMMAND,
                         rental_receive_uploaded_document,
                     ),
+                    CallbackQueryHandler(rental_finish_upload_batch, pattern="^rental_upload_finish:\\d+$"),
+                    CallbackQueryHandler(rental_clear_upload_batch, pattern="^rental_upload_clear:\\d+$"),
                     CallbackQueryHandler(show_rental_contract_detail, pattern="^rental_contract_view:\\d+$"),
                 ],
                 States.RENTAL_EDIT_REQUISITES: [

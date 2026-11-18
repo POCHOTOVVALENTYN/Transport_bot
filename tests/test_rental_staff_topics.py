@@ -243,11 +243,28 @@ async def test_legal_revisions_fire_safety_and_department_comments():
             "total_price_uah": 4337.94,
             "depot_code": "ТД-1",
             "safety_accepted_at": now_dt,
-            "status": "awaiting_signature",
+            "status": "pending_depot_time",
         }
     )
 
-    # 1. Перевірка карток та клавіатур 4 підрозділів (наявність кнопок ПБ, правок юристів, коментарів)
+    # 1. Етап 1: Погодження часу подачі в Депо
+    depot_stage1_text = await format_depot_card_text(order)
+    assert "ЕТАП 1: ПОГОДЖЕННЯ ЧАСУ ПОДАЧІ ВАГОНА" in depot_stage1_text
+    d_stage1_kb = build_depot_order_keyboard(order)
+    d_stage1_callbacks = [b.callback_data for row in d_stage1_kb.inline_keyboard for b in row]
+    assert f"rental_staff:depot_time_ok:{order.id}" in d_stage1_callbacks
+    assert f"rental_staff:depot_time_alt:{order.id}" in d_stage1_callbacks
+    assert f"rental_staff:vuptap_ok:{order.id}" not in d_stage1_callbacks
+
+    # Переводимо у стан після погодження часу Депо
+    order = await db.update_rental_order_fields(
+        order.id,
+        {
+            "depot_time_approved_by": "Диспетчер ТД-1",
+            "status": "awaiting_signature",
+        },
+    )
+
     vuptap_text = await format_vuptap_summary_card_text(order)
     legal_text = await format_legal_card_text(order)
     acc_text = await format_accounting_card_text(order)
@@ -257,27 +274,26 @@ async def test_legal_revisions_fire_safety_and_department_comments():
     assert "КК 123456" in legal_text
     assert "м. Одеса, вул. Канатна, 10" in legal_text
     assert "UA903281680000000026000122581" in acc_text
-    assert "Пожежна та тех. безпека (ПБ):" in depot_text
+    assert "ЧАС ПОГОДЖЕНО" in depot_text
 
-    v_kb = build_vuptap_order_keyboard(order)
     l_kb = build_legal_order_keyboard(order)
-    a_kb = build_accounting_order_keyboard(order)
     d_kb = build_depot_order_keyboard(order)
 
     l_callbacks = [b.callback_data for row in l_kb.inline_keyboard for b in row]
+    assert f"rental_staff:legal_upload_dir:{order.id}" in l_callbacks
     assert f"rental_staff:legal_revision:{order.id}" in l_callbacks
     assert f"rental_staff:comment_client:{order.id}:legal" in l_callbacks
-    assert f"rental_staff:comment_internal:{order.id}:legal" in l_callbacks
 
     d_callbacks = [b.callback_data for row in d_kb.inline_keyboard for b in row]
-    assert f"rental_staff:vuptap_ok:{order.id}" in d_callbacks
-    assert f"rental_staff:comment_client:{order.id}:depot" in d_callbacks
+    assert f"rental_staff:depot_assign:{order.id}" in d_callbacks
+    assert f"rental_staff:vuptap_ok:{order.id}" not in d_callbacks
 
-    # 2. Сценарій повернення договору на правки Юридичним відділом
+    # 2. Сценарій повернення договору на правки Юридичним відділом (через попереднє підтвердження)
     bot_mock = SimpleNamespace(
         send_message=AsyncMock(return_value=SimpleNamespace(message_id=101)),
         edit_message_text=AsyncMock(),
         send_document=AsyncMock(return_value=SimpleNamespace(message_id=102)),
+        send_photo=AsyncMock(return_value=SimpleNamespace(message_id=103)),
     )
     context = SimpleNamespace(bot=bot_mock)
 
@@ -285,6 +301,7 @@ async def test_legal_revisions_fire_safety_and_department_comments():
         data=f"rental_staff:legal_revision:{order.id}",
         message=SimpleNamespace(message_thread_id=13),
         answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
     )
     update_rev_click = SimpleNamespace(
         callback_query=query_rev,
@@ -293,11 +310,12 @@ async def test_legal_revisions_fire_safety_and_department_comments():
     )
     await handle_rental_staff_callback(update_rev_click, context)
 
-    # Юрист вводить текст зауваження
+    # Юрист вводить текст зауваження -> отримує вікно перевірки перед відправкою
     msg_rev_input = SimpleNamespace(
         text="Уточніть орган, що видав паспорт КК 123456, та дату видачі.",
         caption=None,
         document=None,
+        photo=None,
         message_thread_id=13,
         reply_to_message=None,
         reply_text=AsyncMock(),
@@ -310,14 +328,29 @@ async def test_legal_revisions_fire_safety_and_department_comments():
     handled = await handle_staff_group_text_input(update_rev_text, context)
     assert handled is True
 
+    # Підтверджуємо відправку зауваження клієнту
+    query_confirm_rev = SimpleNamespace(
+        data=f"rental_staff:confirm_send_msg:{order.id}",
+        message=SimpleNamespace(message_thread_id=13),
+        answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    update_confirm_rev = SimpleNamespace(
+        callback_query=query_confirm_rev,
+        effective_user=SimpleNamespace(id=830196453, full_name="Юрист КП ОМЕТ", username="lawyer"),
+        effective_chat=SimpleNamespace(id=-1004341305179),
+    )
+    await handle_rental_staff_callback(update_confirm_rev, context)
+
     updated_order = await db.get_rental_order(order.id)
     assert updated_order.status == "revision_requested"
 
-    # 3. Сценарій коментаря клієнту від Бухгалтерії та внутрішньої примітки від Депо
+    # 3. Сценарій коментаря клієнту від Бухгалтерії (також із попереднім уточненням)
     query_comm = SimpleNamespace(
         data=f"rental_staff:comment_client:{order.id}:accounting",
         message=SimpleNamespace(message_thread_id=14),
         answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
     )
     update_comm_click = SimpleNamespace(
         callback_query=query_comm,
@@ -330,6 +363,7 @@ async def test_legal_revisions_fire_safety_and_department_comments():
         text="Будь ласка, вкажіть номер договору у призначенні платежу.",
         caption=None,
         document=None,
+        photo=None,
         message_thread_id=14,
         reply_to_message=None,
         reply_text=AsyncMock(),
@@ -341,7 +375,89 @@ async def test_legal_revisions_fire_safety_and_department_comments():
     )
     assert await handle_staff_group_text_input(update_comm_text, context) is True
 
-    logs = await db.get_rental_audit_logs(order.id, limit=10)
+    query_confirm_comm = SimpleNamespace(
+        data=f"rental_staff:confirm_send_msg:{order.id}",
+        message=SimpleNamespace(message_thread_id=14),
+        answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    update_confirm_comm = SimpleNamespace(
+        callback_query=query_confirm_comm,
+        effective_user=SimpleNamespace(id=830196453, full_name="Головний бухгалтер", username="acc"),
+        effective_chat=SimpleNamespace(id=-1004341305179),
+    )
+    await handle_rental_staff_callback(update_confirm_comm, context)
+
+    # 4. Перевірка Етапу 3А (завантаження договору з підписом Директора) та Етапу 3Б (оплата з попередженням) -> Етап 4
+    query_dir = SimpleNamespace(
+        data=f"rental_staff:legal_upload_dir:{order.id}",
+        message=SimpleNamespace(message_thread_id=13),
+        answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    await handle_rental_staff_callback(
+        SimpleNamespace(
+            callback_query=query_dir,
+            effective_user=SimpleNamespace(id=830196453, full_name="Юрист КП ОМЕТ", username="lawyer"),
+            effective_chat=SimpleNamespace(id=-1004341305179),
+        ),
+        context,
+    )
+    msg_dir_doc = SimpleNamespace(
+        text="",
+        caption=None,
+        document=SimpleNamespace(file_id="dir_signed_file_123", file_name="Contract_Director_Signed.pdf"),
+        photo=None,
+        message_thread_id=13,
+        reply_to_message=None,
+        reply_text=AsyncMock(),
+    )
+    assert await handle_staff_group_text_input(
+        SimpleNamespace(
+            message=msg_dir_doc,
+            effective_user=SimpleNamespace(id=830196453, full_name="Юрист КП ОМЕТ", username="lawyer"),
+            effective_chat=SimpleNamespace(id=-1004341305179),
+        ),
+        context,
+    ) is True
+
+    # Підтверджуємо відправку підписаного Директором договору клієнту
+    await handle_rental_staff_callback(
+        SimpleNamespace(
+            callback_query=SimpleNamespace(
+                data=f"rental_staff:confirm_dir_doc:{order.id}",
+                message=SimpleNamespace(message_thread_id=13),
+                answer=AsyncMock(),
+                edit_message_text=AsyncMock(),
+            ),
+            effective_user=SimpleNamespace(id=830196453, full_name="Юрист КП ОМЕТ", username="lawyer"),
+            effective_chat=SimpleNamespace(id=-1004341305179),
+        ),
+        context,
+    )
+
+    # Бухгалтерія підтверджує оплату
+    await handle_rental_staff_callback(
+        SimpleNamespace(
+            callback_query=SimpleNamespace(
+                data=f"rental_staff:confirm_acc_ok:{order.id}",
+                message=SimpleNamespace(message_thread_id=14),
+                answer=AsyncMock(),
+                edit_message_text=AsyncMock(),
+            ),
+            effective_user=SimpleNamespace(id=830196453, full_name="Головний бухгалтер", username="acc"),
+            effective_chat=SimpleNamespace(id=-1004341305179),
+        ),
+        context,
+    )
+
+    ready_order = await db.get_rental_order(order.id)
+    depot_ready_text = await format_depot_card_text(ready_order)
+    assert "🟢 ЗАЯВКА НА ВИПУСК ВАГОНА АКТИВОВАНО" in depot_ready_text
+
+    logs = await db.get_rental_audit_logs(order.id, limit=15)
     actions = [lg.action for lg in logs]
     assert "LEGAL_REVISION_REQUESTED" in actions
     assert "STAFF_COMMENT_CLIENT" in actions
+    assert "DIRECTOR_CONTRACT_SENT" in actions
+    assert "PAYMENT_CONFIRMED" in actions

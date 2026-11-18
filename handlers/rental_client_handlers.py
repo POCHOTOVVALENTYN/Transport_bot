@@ -1692,10 +1692,13 @@ async def _render_individual_name_input(
     if error_msg:
         prompt_text = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt_text
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt_text, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_CUSTOMER_NAME
 
@@ -1706,10 +1709,11 @@ async def _render_customer_name_input(update: Update, context: ContextTypes.DEFA
 
 async def rental_handle_customer_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
+    draft = _get_draft(context)
+    draft.pop("_editing_single_field", None)
     if query:
         await query.answer()
         chosen_type = query.data.split(":", 1)[1]
-        draft = _get_draft(context)
         draft["customer_type"] = chosen_type
 
     chosen = draft.get("customer_type", "individual")
@@ -1730,10 +1734,13 @@ async def _render_individual_phone_input(
     if error_msg:
         phone_prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + phone_prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити ПІБ", callback_data="rental_back_name")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити ПІБ", callback_data="rental_back_name")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, phone_prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_CUSTOMER_PHONE
 
@@ -1762,6 +1769,8 @@ async def rental_handle_name_input(update: Update, context: ContextTypes.DEFAULT
 
     draft = _get_draft(context)
     draft["user_full_name"] = name_val
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_individual_phone_input(update, context)
 
 
@@ -1786,6 +1795,8 @@ async def rental_handle_phone_input(update: Update, context: ContextTypes.DEFAUL
 
     draft = _get_draft(context)
     draft["user_phone"] = phone_val
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_individual_passport_input(update, context)
 
 
@@ -1794,22 +1805,23 @@ async def _render_individual_passport_input(
     context: ContextTypes.DEFAULT_TYPE,
     error_msg: Optional[str] = None,
 ) -> int:
-    """Запитує паспорт або ID-картку фізичної особи з можливістю заповнити при підписанні."""
+    """Запитує паспорт або ID-картку фізичної особи."""
     prompt = (
         "🪪 <b>ПАСПОРТНІ ДАНІ ЗАМОВНИКА</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "Введіть серію та номер паспорта громадянина України або номер ID-картки\n"
-        "(наприклад: <code>паспорт КМ 123456, виданий Приморським РВ</code> або <code>ID-картка №001234567</code>):\n\n"
-        "<i>Також Ви можете вказати ці дані безпосередньо при особистому підписанні.</i>"
+        "(наприклад: <code>паспорт КМ 123456, виданий Приморським РВ</code> або <code>ID-картка №001234567</code>):"
     )
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⏭️ Вказати під час підписання", callback_data="rental_passp_skip")],
-        [InlineKeyboardButton("⬅️ Змінити номер телефону", callback_data="rental_back_phone")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити номер телефону", callback_data="rental_back_phone")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_INDIVIDUAL_PASSPORT
 
@@ -1824,8 +1836,17 @@ async def rental_handle_individual_passport_input(update: Update, context: Conte
             await update.message.delete()
         except Exception:
             pass
-        draft["user_passport"] = update.message.text.strip()
+        val = update.message.text.strip()
+        if len(val) < 4:
+            return await _render_individual_passport_input(
+                update,
+                context,
+                error_msg="Введіть коректні серію та номер паспорта або ID-картки.",
+            )
+        draft["user_passport"] = val
 
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_individual_address_input(update, context)
 
 
@@ -1844,10 +1865,13 @@ async def _render_individual_address_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити паспортні дані", callback_data="rental_back_passport")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити паспортні дані", callback_data="rental_back_passport")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_INDIVIDUAL_ADDRESS
 
@@ -1872,6 +1896,8 @@ async def rental_handle_individual_address_input(update: Update, context: Contex
 
     draft = _get_draft(context)
     draft["user_address"] = addr_val
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_individual_tax_input(update, context)
 
 
@@ -1889,10 +1915,13 @@ async def _render_individual_tax_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити адресу реєстрації", callback_data="rental_back_indiv_addr")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити адресу реєстрації", callback_data="rental_back_indiv_addr")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_INDIVIDUAL_TAX_ID
 
@@ -1922,6 +1951,7 @@ async def rental_handle_individual_tax_input(update: Update, context: ContextTyp
 
     draft = _get_draft(context)
     draft["user_tax_id"] = digits
+    draft.pop("_editing_single_field", None)
     return await _render_final_confirmation(update, context)
 
 
@@ -1946,10 +1976,13 @@ async def _render_fop_name_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_FOP_NAME
 
@@ -1975,6 +2008,8 @@ async def rental_handle_fop_name_input(update: Update, context: ContextTypes.DEF
     draft = _get_draft(context)
     clean_name = re.sub(r"^(фоп|фізична особа-підприємець)\s+", "", name_val, flags=re.IGNORECASE).strip()
     draft["user_full_name"] = clean_name
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_fop_tax_input(update, context)
 
 
@@ -1992,10 +2027,13 @@ async def _render_fop_tax_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити ПІБ ФОП", callback_data="rental_back_fop_name")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити ПІБ ФОП", callback_data="rental_back_fop_name")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_FOP_TAX_ID
 
@@ -2021,6 +2059,8 @@ async def rental_handle_fop_tax_input(update: Update, context: ContextTypes.DEFA
 
     draft = _get_draft(context)
     draft["user_tax_id"] = digits
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_fop_address_input(update, context)
 
 
@@ -2039,10 +2079,13 @@ async def _render_fop_address_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити РНОКПП ФОП", callback_data="rental_back_fop_tax")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити РНОКПП ФОП", callback_data="rental_back_fop_tax")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_FOP_ADDRESS
 
@@ -2067,6 +2110,8 @@ async def rental_handle_fop_address_input(update: Update, context: ContextTypes.
 
     draft = _get_draft(context)
     draft["user_address"] = addr_val
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_fop_edr_input(update, context)
 
 
@@ -2084,11 +2129,15 @@ async def _render_fop_edr_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
+    draft = _get_draft(context)
     keyboard = [
         [InlineKeyboardButton("📄 Згідно Виписки з ЄДР (стандартно)", callback_data="rental_fop_edr_std")],
-        [InlineKeyboardButton("⬅️ Змінити податкову адресу", callback_data="rental_back_fop_addr")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
     ]
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити податкову адресу", callback_data="rental_back_fop_addr")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_FOP_EDR_DOC
 
@@ -2105,6 +2154,8 @@ async def rental_handle_fop_edr_input(update: Update, context: ContextTypes.DEFA
             pass
         draft["foundation_doc"] = update.message.text.strip()
 
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_fop_phone_input(update, context)
 
 
@@ -2118,10 +2169,13 @@ async def _render_fop_phone_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити підставу діяльності", callback_data="rental_back_fop_edr")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити підставу діяльності", callback_data="rental_back_fop_edr")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_FOP_PHONE
 
@@ -2147,6 +2201,7 @@ async def rental_handle_fop_phone_input(update: Update, context: ContextTypes.DE
 
     draft = _get_draft(context)
     draft["user_phone"] = phone_val
+    draft.pop("_editing_single_field", None)
     return await _render_final_confirmation(update, context)
 
 
@@ -2166,10 +2221,13 @@ async def _render_legal_edrpou_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_LEGAL_EDRPOU
 
@@ -2195,6 +2253,8 @@ async def rental_handle_legal_edrpou_input(update: Update, context: ContextTypes
 
     draft = _get_draft(context)
     draft["user_tax_id"] = digits
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_legal_name_input(update, context)
 
 
@@ -2213,10 +2273,13 @@ async def _render_legal_name_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити код ЄДРПОУ", callback_data="rental_back_legal_edrpou")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити код ЄДРПОУ", callback_data="rental_back_legal_edrpou")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_LEGAL_NAME
 
@@ -2242,6 +2305,8 @@ async def rental_handle_legal_name_input(update: Update, context: ContextTypes.D
     draft = _get_draft(context)
     draft["user_full_name"] = name_val
     draft["company_name"] = name_val
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_legal_address_input(update, context)
 
 
@@ -2250,20 +2315,23 @@ async def _render_legal_address_input(
     context: ContextTypes.DEFAULT_TYPE,
     error_msg: Optional[str] = None,
 ) -> int:
-    """Запитує офіційну юридичну адресу організації за ЄДР."""
+    """Запитує офіційну юридичну адресу та банківські реквізити організації."""
     prompt = (
-        "📍 <b>ЮРИДИЧНА АДРЕСА ОРГАНІЗАЦІЇ</b>\n"
+        "📍 <b>ЮРИДИЧНА АДРЕСА ТА РЕКВІЗИТИ ОРГАНІЗАЦІЇ</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "Введіть офіційну юридичну адресу підприємства за ЄДР\n"
-        "(наприклад: <code>вул. Водопровідна, 1, м. Одеса, 65007</code>):"
+        "Введіть юридичну адресу та реквізити підприємства\n"
+        "(наприклад: <code>вул. Водопровідна, 1, м. Одеса, 65007, IBAN UA..., в АБ «УКРГАЗБАНК», МФО 320478, ІПН ...</code>):"
     )
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити назву компанії", callback_data="rental_back_legal_name")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити назву компанії", callback_data="rental_back_legal_name")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_LEGAL_ADDRESS
 
@@ -2283,11 +2351,13 @@ async def rental_handle_legal_address_input(update: Update, context: ContextType
         return await _render_legal_address_input(
             update,
             context,
-            error_msg="Введіть повну юридичну адресу підприємства (мінімум 5 символів).",
+            error_msg="Введіть повну юридичну адресу та реквізити підприємства (мінімум 5 символів).",
         )
 
     draft = _get_draft(context)
     draft["user_address"] = addr_val
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_legal_signer_input(update, context)
 
 
@@ -2306,11 +2376,15 @@ async def _render_legal_signer_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
+    draft = _get_draft(context)
     keyboard = [
         [InlineKeyboardButton("📄 За замовчуванням: директор на підставі Статуту", callback_data="rental_legal_signer_std")],
-        [InlineKeyboardButton("⬅️ Змінити юридичну адресу", callback_data="rental_back_legal_addr")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
     ]
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити юридичну адресу", callback_data="rental_back_legal_addr")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_LEGAL_SIGNER
 
@@ -2332,6 +2406,8 @@ async def rental_handle_legal_signer_input(update: Update, context: ContextTypes
         draft["signer_title"] = "директора"
         draft["foundation_doc"] = "Статуту"
 
+    if draft.pop("_editing_single_field", False):
+        return await _render_final_confirmation(update, context)
     return await _render_legal_phone_input(update, context)
 
 
@@ -2345,10 +2421,13 @@ async def _render_legal_phone_input(
     if error_msg:
         prompt = f"⚠️ <b>{error_msg}</b>\n━━━━━━━━━━━━━━━━━━━━\n\n" + prompt
 
-    keyboard = [
-        [InlineKeyboardButton("⬅️ Змінити підписанта", callback_data="rental_back_legal_signer")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
-    ]
+    draft = _get_draft(context)
+    keyboard = []
+    if draft.get("_editing_single_field"):
+        keyboard.append([InlineKeyboardButton("⬅️ Назад до перевірки даних", callback_data="rental_back_final_confirm")])
+    else:
+        keyboard.append([InlineKeyboardButton("⬅️ Змінити підписанта", callback_data="rental_back_legal_signer")])
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, prompt, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_ENTER_LEGAL_PHONE
 
@@ -2374,11 +2453,68 @@ async def rental_handle_legal_phone_input(update: Update, context: ContextTypes.
 
     draft = _get_draft(context)
     draft["user_phone"] = phone_val
+    draft.pop("_editing_single_field", None)
+    return await _render_final_confirmation(update, context)
+
+
+async def rental_handle_back_to_final_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.callback_query:
+        await update.callback_query.answer()
+    draft = _get_draft(context)
+    draft.pop("_editing_single_field", None)
+    return await _render_final_confirmation(update, context)
+
+
+async def rental_handle_draft_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Дозволяє відредагувати будь-яке окреме поле реквізитів прямо з екрану фінальної перевірки."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    field = query.data.split(":", 1)[1] if query and ":" in query.data else "name"
+    draft = _get_draft(context)
+    draft["_editing_single_field"] = True
+    cust_type = draft.get("customer_type", "individual")
+
+    if cust_type == "legal_entity":
+        if field == "tax_id":
+            return await _render_legal_edrpou_input(update, context)
+        if field == "name":
+            return await _render_legal_name_input(update, context)
+        if field == "address":
+            return await _render_legal_address_input(update, context)
+        if field == "signer":
+            return await _render_legal_signer_input(update, context)
+        if field == "phone":
+            return await _render_legal_phone_input(update, context)
+    elif cust_type == "fop":
+        if field == "name":
+            return await _render_fop_name_input(update, context)
+        if field == "tax_id":
+            return await _render_fop_tax_input(update, context)
+        if field == "address":
+            return await _render_fop_address_input(update, context)
+        if field == "signer":
+            return await _render_fop_edr_input(update, context)
+        if field == "phone":
+            return await _render_fop_phone_input(update, context)
+    else:
+        if field == "name":
+            return await _render_individual_name_input(update, context)
+        if field == "phone":
+            return await _render_individual_phone_input(update, context)
+        if field == "passport":
+            return await _render_individual_passport_input(update, context)
+        if field == "address":
+            return await _render_individual_address_input(update, context)
+        if field == "tax_id":
+            return await _render_individual_tax_input(update, context)
+
     return await _render_final_confirmation(update, context)
 
 
 async def _render_final_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     draft = _get_draft(context)
+    draft.pop("_editing_single_field", None)
     via_str = " ➡️ ".join(draft.get("via_loops") or []) or "прямий рейс"
     scenario_ua = (
         "📱 Електронний договір (Дія.Підпис / КЕП)"
@@ -2393,13 +2529,28 @@ async def _render_final_confirmation(update: Update, context: ContextTypes.DEFAU
     min_note = " (застосовано мін. замовлення 1 год)" if draft.get("total_duration_min", 0) < 60 else ""
 
     cust_type = draft.get("customer_type", "individual")
+    edit_rows: List[List[InlineKeyboardButton]] = []
     if cust_type == "legal_entity":
         cust_summary = (
             f"🏢 <b>Замовник (Юридична особа):</b> {draft.get('user_full_name', 'Замовник')}\n"
             f"🔢 <b>Код ЄДРПОУ:</b> <code>{draft.get('user_tax_id', '—')}</code> | 📞 <b>Телефон:</b> {draft.get('user_phone', '—')}\n"
-            f"📍 <b>Юридична адреса:</b> {draft.get('user_address', '—')}\n"
+            f"📍 <b>Реквізити та адреса:</b> {draft.get('user_address', '—')}\n"
             f"✍️ <b>Підписант:</b> {draft.get('signer_name', draft.get('user_full_name', 'Керівник'))}\n"
         )
+        edit_rows = [
+            [
+                InlineKeyboardButton("✏️ Назва компанії", callback_data="rental_draft_edit:name"),
+                InlineKeyboardButton("✏️ Код ЄДРПОУ", callback_data="rental_draft_edit:tax_id"),
+            ],
+            [
+                InlineKeyboardButton("✏️ Реквізити / Адреса", callback_data="rental_draft_edit:address"),
+                InlineKeyboardButton("✏️ Підписант", callback_data="rental_draft_edit:signer"),
+            ],
+            [
+                InlineKeyboardButton("✏️ Телефон", callback_data="rental_draft_edit:phone"),
+                InlineKeyboardButton("🔄 Тип замовника", callback_data="rental_back_cust_type"),
+            ],
+        ]
     elif cust_type == "fop":
         cust_summary = (
             f"💼 <b>Замовник (ФОП):</b> {draft.get('user_full_name', 'Підприємець')}\n"
@@ -2407,14 +2558,42 @@ async def _render_final_confirmation(update: Update, context: ContextTypes.DEFAU
             f"📍 <b>Податкова адреса:</b> {draft.get('user_address', '—')}\n"
             f"📄 <b>Підстава:</b> {draft.get('foundation_doc', 'Виписка з ЄДР')}\n"
         )
+        edit_rows = [
+            [
+                InlineKeyboardButton("✏️ ПІБ ФОП", callback_data="rental_draft_edit:name"),
+                InlineKeyboardButton("✏️ РНОКПП", callback_data="rental_draft_edit:tax_id"),
+            ],
+            [
+                InlineKeyboardButton("✏️ Податкова адреса", callback_data="rental_draft_edit:address"),
+                InlineKeyboardButton("✏️ Виписка ЄДР", callback_data="rental_draft_edit:signer"),
+            ],
+            [
+                InlineKeyboardButton("✏️ Телефон", callback_data="rental_draft_edit:phone"),
+                InlineKeyboardButton("🔄 Тип замовника", callback_data="rental_back_cust_type"),
+            ],
+        ]
     else:
-        passp_label = draft.get("user_passport") or "Вказується при підписанні"
+        passp_label = draft.get("user_passport") or "—"
         cust_summary = (
             f"👤 <b>Замовник (Фізична особа):</b> {draft.get('user_full_name', 'Громадянин')}\n"
             f"📞 <b>Телефон:</b> {draft.get('user_phone', '—')} | 🪪 <b>РНОКПП:</b> <code>{draft.get('user_tax_id', '—')}</code>\n"
             f"📍 <b>Адреса реєстрації:</b> {draft.get('user_address', '—')}\n"
             f"🪪 <b>Паспорт/ID:</b> {passp_label}\n"
         )
+        edit_rows = [
+            [
+                InlineKeyboardButton("✏️ ПІБ", callback_data="rental_draft_edit:name"),
+                InlineKeyboardButton("✏️ РНОКПП (ІПН)", callback_data="rental_draft_edit:tax_id"),
+            ],
+            [
+                InlineKeyboardButton("✏️ Паспорт / ID", callback_data="rental_draft_edit:passport"),
+                InlineKeyboardButton("✏️ Адреса реєстрації", callback_data="rental_draft_edit:address"),
+            ],
+            [
+                InlineKeyboardButton("✏️ Телефон", callback_data="rental_draft_edit:phone"),
+                InlineKeyboardButton("🔄 Тип замовника", callback_data="rental_back_cust_type"),
+            ],
+        ]
 
     wagon_label = draft.get("wagon_title") or "Ретро-трамвай МТВ-82"
     r_date = draft.get("rental_date") or "узгоджується"
@@ -2427,36 +2606,37 @@ async def _render_final_confirmation(update: Update, context: ContextTypes.DEFAU
     vat_amt = float(draft.get("vat_20_uah") or (t_price - round(t_price / 1.2, 2)))
 
     text = (
-        "📑 <b>ПЕРЕВІРКА ТА ПІДТВЕРДЖЕННЯ ЗАМОВЛЕННЯ ОРЕНДИ</b>\n"
+        "📑 <b>ПЕРЕВІРКА ВВЕДЕНИХ ДАНИХ ТА ПІДТВЕРДЖЕННЯ ЗАЯВКИ</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
+        "Будь ласка, уважно перевірте Ваші реквізити для договору:\n"
         f"{cust_summary}"
+        "━━━━━━━━━━━━━━━━━━━━\n"
         f"🚊 <b>Транспорт:</b> {wagon_label}\n"
-        f"📅 <b>Дата та час:</b> <b>{r_date}</b> о <b>{r_slot}</b>\n"
+        f"📅 <b>Бажана дата та час подачі:</b> <b>{r_date}</b> о <b>{r_slot}</b>\n"
         f"🗺️ <b>Маршрут:</b> {p_stop} ➡️ [{via_str}] ➡️ {d_stop}\n"
         f"📏 <b>Пофазний баланс:</b> {t_dist:.2f} км | {t_dur} хв "
         f"(до оплати: {billable_label}{min_note})\n"
         f"📝 <b>Формат договору:</b> {scenario_ua}\n"
-        f"💳 <b>Загальна сума до оплати:</b> <b>{format_money_ua(t_price)} грн</b> "
+        f"💳 <b>Загальна сума за договором:</b> <b>{format_money_ua(t_price)} грн</b> "
         f"(у т.ч. ПДВ 20%: {format_money_ua(vat_amt)} грн)\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "Після підтвердження бот миттєво згенерує для Вас:\n"
-        "1. <b>Договір оренди (PDF)</b>\n"
-        "2. <b>Офіційний рахунок-фактуру IBAN (PDF)</b>\n"
-        "3. <b>Маршрутний лист Служби руху КП «ОМЕТ» (PDF)</b>."
+        "💡 <i>Якщо у реквізитах є помилка — натисніть відповідну кнопку «✏️ ...» нижче, щоб швидко виправити потрібне поле.</i>\n\n"
+        "Після натискання кнопки підтвердження заявка буде передана в <b>Депо КП «ОМЕТ»</b> для погодження часу подачі вагона. "
+        "Одразу після підтвердження часу бот автоматично надішле Вам Договір оренди та Рахунок-фактуру IBAN."
     )
-    keyboard = [
-        [InlineKeyboardButton("🚀 Підтвердити та оформити замовлення", callback_data="rental_confirm_create")],
-        [InlineKeyboardButton("⬅️ Змінити статус замовника", callback_data="rental_back_cust_type")],
-        [InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")],
+    keyboard: List[List[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("✅ Дані вірні — передати на погодження часу в Депо", callback_data="rental_confirm_create")],
     ]
+    keyboard.extend(edit_rows)
+    keyboard.append([InlineKeyboardButton("🚫 Скасувати", callback_data="rental_hub")])
     await _send_or_edit(update, context, text, InlineKeyboardMarkup(keyboard))
     return States.RENTAL_FINAL_CONFIRM
 
 
 async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Створює замовлення в БД, генерує 3 PDF-документи та публікує картку в оперативному штабі."""
+    """Створює замовлення в БД зі статусом 'pending_depot_time' та передає заявку на погодження часу виключно в Депо."""
     query = update.callback_query
-    await query.answer("Формуємо Договір №XXXX-О та IBAN-рахунок...")
+    await query.answer("Передаємо заявку в Депо для погодження часу...")
     user = update.effective_user
     draft = _get_draft(context)
 
@@ -2497,69 +2677,31 @@ async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TY
             "signing_scenario": draft["signing_scenario"],
             "rental_date": draft["rental_date"],
             "rental_time_slot": draft.get("rental_time_slot"),
+            "status": "pending_depot_time",
             "safety_accepted": True,
         }
     )
 
-    # Публікуємо живу картку в штабному чаті 6 підрозділів
+    # Публікуємо картку на Етапі 1 ВИКЛЮЧНО в тему ДЕПО (без ВУПтаП, Юрвідділу та Бухгалтерії)
     await post_or_update_staff_order_card(context, order.id)
 
-    # Генеруємо та надсилаємо повний пакет документів (DOCX + PDF) клієнту та у тему Юридичного відділу
-    await _send_order_pdf_package(context, user.id, order, send_to_legal_topic=True)
-
-    deadline_str = (
-        order.slot_lock_expires_at.strftime("%d.%m.%Y %H:%M")
-        if order.slot_lock_expires_at
-        else "протягом 36 годин"
-    )
-    if order.signing_scenario == "paper":
-        next_step_hint = (
-            f"🏢 <b>Паперовий договір:</b> роздрукуйте або підпишіть примірник в Управлінні КП «ОМЕТ» "
-            f"(<b>вул. Водопровідна, 1</b>, 09:00–17:00) та завантажте скан-копію в розділі "
-            f"<b>«📂 Діючі договори та замовлення»</b> до <b>{deadline_str}</b> (протягом 36 годин)."
-        )
-    else:
-        next_step_hint = (
-            "📱 <b>Електронний договір (КЕП / Дія.Підпис):</b> підпишіть отриманий файл Договору "
-            "у «Дії» або іншому сервісі КЕП та завантажте підписаний файл (<code>.p7s</code> або PDF з КЕП) "
-            "у розділі <b>«📂 Діючі договори та замовлення»</b>."
-        )
-
     summary_text = (
-        f"✅ <b>ЗАМОВЛЕННЯ УСПІШНО ОФОРМЛЕНО! ДОГОВІР № {order.contract_number}</b>\n"
+        f"⏳ <b>ЗАЯВКУ № {order.contract_number} ПЕРЕДАНО НА ПОГОДЖЕННЯ ЧАСУ В ДЕПО КП «ОМЕТ»</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Вище Вам надіслано офіційні документи (PDF):\n"
-        f"1️⃣ Договір оренди № {order.contract_number} (PDF)\n"
-        f"2️⃣ Офіційний рахунок-фактура IBAN на суму <b>{format_money_ua(order.total_price_uah)} грн</b>\n"
-        f"3️⃣ Маршрутний лист Служби руху КП «ОМЕТ» (PDF).\n\n"
-        f"{next_step_hint}"
+        f"🚊 <b>Транспорт:</b> {order.wagon_type} (Депо: {order.depot_code})\n"
+        f"📅 <b>Запитана дата та час подачі:</b> <b>{order.rental_date} о {order.rental_time_slot or 'узгоджується'}</b>\n"
+        f"📍 <b>Початкова зупинка:</b> {order.pickup_stop}\n"
+        f"💰 <b>Розрахована вартість:</b> <b>{format_money_ua(order.total_price_uah)} грн</b> (з ПДВ)\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🕘 <b>Важливе нагадування:</b>\n"
+        f"Заявки обробляються диспетчерами та фахівцями КП «ОМЕТ» <b>у робочий час підприємства (Пн–Пт з 08:00 до 17:00)</b>. "
+        f"Якщо Ви оформили заявку у неробочий або нічний час чи у вихідний день, відповідь надійде у найближчий робочий час.\n\n"
+        f"🔒 <b>Що далі:</b>\n"
+        f"1️⃣ Диспетчер Депо перевірить графік випуску вагона на <b>{order.rental_date} о {order.rental_time_slot}</b> та погодить час (або запропонує інший вільний час на цю дату).\n"
+        f"2️⃣ Тільки після погодження часу подачі бот автоматично надішле Вам у цей чат сформований <b>Договір оренди (PDF)</b> та <b>Рахунок-фактуру IBAN</b> для підписання та оплати."
     )
     keyboard = [
-        [
-            InlineKeyboardButton(
-                f"📤 Завантажити підписаний договір №{order.contract_number}",
-                callback_data=f"rental_upload_signed:{order.id}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                f"💳 Завантажити квитанцію оплати IBAN",
-                callback_data=f"rental_upload_payment:{order.id}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "✏️ Виправити реквізити договору",
-                callback_data=f"rental_fix_requisites:{order.id}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📥 Отримати мої документи повторно (PDF)",
-                callback_data=f"rental_resend_docs:{order.id}",
-            )
-        ],
-        [InlineKeyboardButton("📂 Діючі договори та замовлення", callback_data="rental_my_contracts")],
+        [InlineKeyboardButton("📂 Мої діючі договори та замовлення", callback_data="rental_my_contracts")],
         [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")],
     ]
     await _send_or_edit(update, context, summary_text, InlineKeyboardMarkup(keyboard))
@@ -2707,24 +2849,23 @@ async def _send_order_pdf_package(
 
 
 async def rental_handle_delete_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Видаляє повідомлення з прикріпленим документом за запитом користувача."""
+    """Видаляє повідомлення або прикріплений документ за запитом користувача."""
     query = update.callback_query
     if not query:
         return
     try:
-        await query.answer("Файл видалено з чату.")
+        await query.answer("Повідомлення видалено з чату.")
         if query.message:
             await query.message.delete()
     except Exception as exc:
-        logger.warning(f"Не вдалося видалити повідомлення з файлом: {exc}")
+        logger.warning(f"Не вдалося видалити повідомлення: {exc}")
 
 
 async def rental_handle_resend_docs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Повторно надсилає клієнту повний пакет документів та реквізити замовлення."""
+    """Повторно надсилає клієнту повний пакет документів та реквізити замовлення (лише після погодження часу в Депо)."""
     query = update.callback_query
     if not query:
         return
-    await query.answer("Надсилаємо документи...")
     try:
         order_id = int(query.data.split(":")[1])
     except Exception:
@@ -2733,7 +2874,14 @@ async def rental_handle_resend_docs(update: Update, context: ContextTypes.DEFAUL
     if not order or order.user_id != update.effective_user.id:
         await query.answer("Замовлення не знайдено.", show_alert=True)
         return
-    await _send_order_pdf_package(context, update.effective_chat.id, order)
+    if order.status in ("pending_depot_time", "pending_slots", "awaiting_slot_choice") and not getattr(order, "depot_time_approved_by", None):
+        await query.answer(
+            "⏳ Спочатку необхідно узгодити час подачі вагона з Депо (заявки обробляються у робочий час підприємства).",
+            show_alert=True,
+        )
+        return
+    await query.answer("Надсилаємо документи...")
+    await _send_order_pdf_package(context, update.effective_chat.id, order, send_to_legal_topic=False)
 
 
 # ================= 8. КАБІНЕТ КЛІЄНТА: «📂 ДІЮЧІ ДОГОВОРИ ТА ЗАМОВЛЕННЯ» =================
@@ -2765,7 +2913,7 @@ async def show_my_rental_contracts(update: Update, context: ContextTypes.DEFAULT
     text = (
         "📂 <b>ВАШІ ДІЮЧІ ДОГОВОРИ ТА ЗАМОВЛЕННЯ ОРЕНДИ</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "Оберіть договір зі списку нижче, щоб завантажити PDF-документи, обрати час подачі "
+        "Оберіть договір зі списку нижче, щоб переглянути статус погодження часу, завантажити PDF-документи "
         "або прикріпити підписаний договір (.p7s / скан) та квитанцію IBAN:\n\n"
     )
     buttons: List[List[InlineKeyboardButton]] = []
@@ -2800,11 +2948,13 @@ async def show_my_rental_contracts(update: Update, context: ContextTypes.DEFAULT
 async def show_rental_contract_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Детальна картка конкретного договору в кабінеті клієнта."""
     query = update.callback_query
-    await query.answer()
+    if query:
+        await query.answer()
     order_id = int(query.data.split(":")[1])
     order = await db.get_rental_order(order_id)
     if not order or order.user_id != update.effective_user.id:
-        await query.answer("Договір не знайдено.", show_alert=True)
+        if query:
+            await query.answer("Договір не знайдено.", show_alert=True)
         return
 
     via_loops: List[str] = []
@@ -2813,6 +2963,57 @@ async def show_rental_contract_detail(update: Update, context: ContextTypes.DEFA
     except Exception:
         via_loops = []
     via_str = " ➡️ ".join(via_loops) if via_loops else "прямий рейс"
+
+    is_stage_1 = (
+        order.status in ("pending_depot_time", "pending_slots", "awaiting_slot_choice")
+        and not getattr(order, "depot_time_approved_by", None)
+    )
+
+    if is_stage_1:
+        prop_slots: List[str] = []
+        try:
+            prop_slots = json.loads(getattr(order, "proposed_times_json", "") or "[]")
+        except Exception:
+            prop_slots = []
+        if not prop_slots and order.status == "awaiting_slot_choice":
+            prop_slots = await db.get_available_rental_slots(order.rental_date, order.transport_type)
+
+        if order.status == "awaiting_slot_choice" and prop_slots:
+            stage_note = (
+                f"🕒 <b>Депо КП «ОМЕТ» запропонувало інший вільний час подачі на {order.rental_date}:</b>\n"
+                f"Оберіть підходящий час кнопкою нижче. Одразу після вибору часу бот автоматично сформує та надішле Вам Договір оренди і Рахунок-фактуру IBAN."
+            )
+        else:
+            stage_note = (
+                f"⏳ <b>Заявка перебуває на погодженні часу подачі вагона у Депо КП «ОМЕТ».</b>\n\n"
+                f"🕘 <b>Нагадування:</b> Заявки опрацьовуються фахівцями КП «ОМЕТ» <b>у робочий час підприємства (Пн–Пт з 08:00 до 17:00)</b>.\n"
+                f"🔒 Перехід до наступних кроків (отримання Договору, Рахунку-фактури та оплата) стане доступним автоматично після підтвердження часу подачі."
+            )
+
+        text = (
+            f"📄 <b>ЗАЯВКА ЗА ДОГОВОРОМ № {order.contract_number}</b>\n"
+            f"Статус: <b>{STATUS_LABELS_UA.get(order.status, order.status)}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🚊 <b>Транспорт:</b> {order.wagon_type} (Депо: {order.depot_code})\n"
+            f"📅 <b>Запитана дата та час:</b> {order.rental_date} о <b>{order.rental_time_slot or 'очікує вибору'}</b>\n"
+            f"🗺️ <b>Маршрут:</b> {order.pickup_stop} ➡️ [{via_str}] ➡️ {order.dropoff_stop}\n"
+            f"📏 <b>Тривалість та пробіг:</b> {order.total_duration_min} хв | {order.total_distance_km:.2f} км\n"
+            f"💰 <b>Розрахована сума:</b> <b>{order.total_price_uah:.2f} грн</b> (з ПДВ 20%)\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{stage_note}"
+        )
+        buttons: List[List[InlineKeyboardButton]] = []
+        if order.status == "awaiting_slot_choice" and prop_slots:
+            for sl in prop_slots:
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"🕒 Обрати {sl} ({order.rental_date})",
+                        callback_data=f"rental_pick_order_slot:{order.id}:{sl}",
+                    )
+                ])
+        buttons.append([InlineKeyboardButton("⬅️ До списку договорів", callback_data="rental_my_contracts")])
+        await _send_or_edit(update, context, text, InlineKeyboardMarkup(buttons))
+        return
 
     purpose = build_nbu_iban_payment_purpose(
         order.contract_number,
@@ -2838,9 +3039,9 @@ async def show_rental_contract_detail(update: Update, context: ContextTypes.DEFA
         f"Статус: <b>{STATUS_LABELS_UA.get(order.status, order.status)}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🚊 <b>Транспорт:</b> {order.wagon_type} (Депо: {order.depot_code})\n"
-        f"📅 <b>Дата та час подачі:</b> {order.rental_date} о <b>{order.rental_time_slot or 'очікує вибору слоту'}</b>\n"
+        f"📅 <b>Узгоджена дата та час подачі:</b> {order.rental_date} о <b>{order.rental_time_slot or '—'}</b>\n"
         f"🗺️ <b>Маршрут:</b> {order.pickup_stop} ➡️ [{via_str}] ➡️ {order.dropoff_stop}\n"
-        f"📏 <b>Кілометраж Wialon:</b> {order.total_distance_km:.2f} км ({order.total_duration_min} хв)"
+        f"📏 <b>Кілометраж та час:</b> {order.total_distance_km:.2f} км ({order.total_duration_min} хв)"
         f"{deadline_info}{vehicle_info}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💳 <b>РЕКВІЗИТИ ОПЛАТИ IBAN (З ПДВ 20%):</b>\n"
@@ -2851,10 +3052,10 @@ async def show_rental_contract_detail(update: Update, context: ContextTypes.DEFA
         f"• Призначення платежу:\n<code>{purpose}</code>"
     )
 
-    buttons: List[List[InlineKeyboardButton]] = [
+    buttons = [
         [
             InlineKeyboardButton(
-                "📤 Завантажити підписаний договір (.p7s / скан)",
+                "📤 Завантажити підписаний договір (1 або декілька файлів)",
                 callback_data=f"rental_upload_signed:{order.id}",
             )
         ],
@@ -2894,9 +3095,9 @@ async def handle_rental_redownload_pdfs(update: Update, context: ContextTypes.DE
 
 async def handle_client_pick_order_slot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Коли Служба руху додає вільні слоти у пул на дату, клієнт натискає кнопку
+    Коли Депо запропонувало доступні години на дату, клієнт натискає кнопку
     `rental_pick_order_slot:<order_id>:<slot_time>`.
-    Обраний слот бронюється за цим замовленням, а інші слоти залишаються вільними!
+    Обраний слот фіксується, вмикається таймер 36 год, і клієнт отримує Договір та Рахунок IBAN!
     """
     query = update.callback_query
     parts = query.data.split(":", 2)
@@ -2908,37 +3109,24 @@ async def handle_client_pick_order_slot(update: Update, context: ContextTypes.DE
         await query.answer("Замовлення не знайдено.", show_alert=True)
         return
 
-    locked_ok = await db.lock_rental_slot(
+    await db.lock_rental_slot(
         rental_date=order.rental_date,
         slot_time=slot_time,
         transport_type=order.transport_type,
         order_id=order.id,
     )
-    if not locked_ok:
-        free_left = await db.get_available_rental_slots(order.rental_date, order.transport_type)
-        await query.answer(
-            "⚠️ Цей слот щойно забронював інший замовник! Оберіть інший вільний час зі списку.",
-            show_alert=True,
-        )
-        if free_left:
-            kb = [
-                [InlineKeyboardButton(f"🕒 Обрати {sl}", callback_data=f"rental_pick_order_slot:{order.id}:{sl}")]
-                for sl in free_left
-            ]
-            await _send_or_edit(
-                update,
-                context,
-                f"Оберіть доступний слот на <b>{order.rental_date}</b>:",
-                InlineKeyboardMarkup(kb),
-            )
-        return
 
-    lock_hours = RENTAL_PAPER_LOCK_HOURS if order.signing_scenario == "paper" else 24
-    expires_at = datetime.datetime.now() + datetime.timedelta(hours=lock_hours)
+    now_dt = datetime.datetime.now()
+    lock_hours = RENTAL_PAPER_LOCK_HOURS
+    expires_at = now_dt + datetime.timedelta(hours=lock_hours)
     updated = await db.update_rental_order_fields(
         order.id,
         {
             "rental_time_slot": slot_time,
+            "depot_time_approved_by": f"Узгоджено клієнтом ({slot_time})",
+            "depot_time_approved_at": now_dt,
+            "traffic_approved_by": f"Узгоджено клієнтом ({slot_time})",
+            "traffic_approved_at": now_dt,
             "slot_lock_expires_at": expires_at,
             "status": "awaiting_signature",
         },
@@ -2949,24 +3137,45 @@ async def handle_client_pick_order_slot(update: Update, context: ContextTypes.DE
         actor_name=order.user_full_name,
         actor_role="Клієнт",
         action="SLOT_LOCKED",
-        details=f"Клієнт обрав слот {slot_time} на {order.rental_date} (бронь до {expires_at.strftime('%d.%m %H:%M')})",
+        details=f"Клієнт обрав запропонований Депо час {slot_time} на {order.rental_date} (бронь 36 год до {expires_at.strftime('%d.%m %H:%M')})",
     )
     await post_or_update_staff_order_card(context, order.id)
-    await query.answer(f"✅ Слот {slot_time} успішно заброньовано!")
+    try:
+        await send_to_staff_topic(
+            context,
+            "depot",
+            (
+                f"✅ <b>Клієнт погодився на запропонований час подачі!</b>\n"
+                f"Договір: <b>№ {order.contract_number}</b> ({order.company_name or order.user_full_name})\n"
+                f"Обраний час подачі: <b>{order.rental_date} о {slot_time}</b>.\n"
+                f"Договір та рахунок автоматично надіслано клієнту."
+            ),
+        )
+    except Exception:
+        pass
+
+    await query.answer(f"✅ Час {slot_time} зафіксовано! Формуємо Договір та Рахунок...")
 
     if updated:
-        await _send_order_pdf_package(context, order.user_id, updated)
+        await _send_order_pdf_package(context, order.user_id, updated, send_to_legal_topic=False)
         await _send_or_edit(
             update,
             context,
-            f"✅ <b>Часовий слот {slot_time} на {order.rental_date} закріплено за Договором № {order.contract_number}!</b>\n"
-            f"Оновлений пакет документів (Договір + Рахунок IBAN з QR-кодом) надіслано вище.",
+            f"✅ <b>Час подачі {slot_time} на {order.rental_date} закріплено за Договором № {order.contract_number}!</b>\n"
+            f"Вище Вам надіслано сформований пакет документів (Договір оренди PDF, Рахунок-фактура IBAN та Маршрутний лист).\n\n"
+            f"Підпишіть договір та здійсніть оплату протягом 36 годин (до <b>{expires_at.strftime('%d.%m.%Y %H:%M')}</b>):",
             InlineKeyboardMarkup(
                 [
                     [
                         InlineKeyboardButton(
-                            "📤 Завантажити підписаний договір (.p7s / скан)",
+                            "📤 Завантажити підписаний договір (1 або декілька файлів)",
                             callback_data=f"rental_upload_signed:{order.id}",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "💳 Завантажити квитанцію оплати IBAN",
+                            callback_data=f"rental_upload_payment:{order.id}",
                         )
                     ],
                     [InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")],
@@ -2975,12 +3184,13 @@ async def handle_client_pick_order_slot(update: Update, context: ContextTypes.DE
         )
 
 
-# ================= 9. ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ (.P7S / СКАН) ТА КВИТАНЦІЇ IBAN =================
+# ================= 9. ПАКЕТНЕ ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ (ДЕКІЛЬКА ФАЙЛІВ) ТА КВИТАНЦІЇ IBAN =================
 
 async def rental_start_upload_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Переводить клієнта в режим завантаження підписаного договору або квитанції IBAN."""
+    """Переводить клієнта в режим пакетного завантаження підписаного договору або квитанції IBAN."""
     query = update.callback_query
-    await query.answer()
+    if not query:
+        return ConversationHandler.END
     action, order_id_str = query.data.split(":", 1)
     order_id = int(order_id_str)
     order = await db.get_rental_order(order_id)
@@ -2988,25 +3198,36 @@ async def rental_start_upload_document(update: Update, context: ContextTypes.DEF
         await query.answer("Договір не знайдено.", show_alert=True)
         return ConversationHandler.END
 
+    if order.status in ("pending_depot_time", "pending_slots", "awaiting_slot_choice") and not getattr(order, "depot_time_approved_by", None):
+        await query.answer(
+            "⏳ Спочатку необхідно узгодити час подачі вагона з Депо (заявки обробляються у робочий час підприємства).",
+            show_alert=True,
+        )
+        return ConversationHandler.END
+
+    await query.answer()
     upload_kind = "signed_contract" if action == "rental_upload_signed" else "payment_receipt"
     context.user_data["rental_upload_target"] = {
         "order_id": order.id,
         "kind": upload_kind,
+        "files": [],
     }
 
     if upload_kind == "signed_contract":
         prompt_text = (
             f"📤 <b>ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ № {order.contract_number}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"Надішліть у відповідь файл або фото:\n"
-            f"• Для електронного підпису (Дія.Підпис / Вчасно): файл із розширенням <code>.p7s</code> або підписаний <code>.pdf</code>;\n"
-            f"• Для паперового договору (підписаного в Управлінні КП на вул. Водопровідна, 1): скан-копію або чітке фото підписаного примірника."
+            f"Ви можете надіслати <b>1 або декілька файлів/фото поспіль</b>:\n"
+            f"• Для електронного підпису (Дія.Підпис / КЕП): файл(и) <code>.p7s</code> або підписаний <code>.pdf</code>\n"
+            f"• Для паперового договору: скан-копію або фото кожної сторінки договору.\n\n"
+            f"📎 <i>Після завантаження всіх файлів натисніть кнопку <b>«✅ Завершити завантаження та надіслати»</b>.</i>"
         )
     else:
         prompt_text = (
             f"💳 <b>ЗАВАНТАЖЕННЯ КВИТАНЦІЇ ОПЛАТИ IBAN ЗА ДОГОВОРОМ № {order.contract_number}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"Надішліть у відповідь PDF-квитанцію або скріншот оплати з Приват24 / Monobank на суму <b>{order.total_price_uah:.2f} грн</b>."
+            f"Надішліть 1 або декілька файлів (PDF-квитанцію або скріншот оплати на суму <b>{order.total_price_uah:.2f} грн</b>).\n\n"
+            f"📎 <i>Після додавання файлу(ів) натисніть кнопку <b>«✅ Завершити завантаження та надіслати»</b>.</i>"
         )
 
     keyboard = [[InlineKeyboardButton("⬅️ Скасувати завантаження", callback_data=f"rental_contract_view:{order.id}")]]
@@ -3014,8 +3235,33 @@ async def rental_start_upload_document(update: Update, context: ContextTypes.DEF
     return States.RENTAL_UPLOAD_SIGNED_DOC
 
 
+async def rental_clear_upload_batch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Очищує поточний пакет завантажених файлів клієнта, щоб завантажити заново."""
+    query = update.callback_query
+    if query:
+        await query.answer("Список прикріплених файлів очищено.")
+    target = context.user_data.get("rental_upload_target")
+    if not target:
+        return ConversationHandler.END
+    target["files"] = []
+    order_id = int(target["order_id"])
+    order = await db.get_rental_order(order_id)
+    if not order:
+        return ConversationHandler.END
+
+    kind_title = "ПІДПИСАНОГО ДОГОВОРУ" if target["kind"] == "signed_contract" else "КВИТАНЦІЇ ОПЛАТИ IBAN"
+    prompt_text = (
+        f"🔄 <b>Список очищено. ЗАВАНТАЖЕННЯ {kind_title} № {order.contract_number}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Надішліть 1 або декілька файлів/фото у відповідь:"
+    )
+    keyboard = [[InlineKeyboardButton("⬅️ Скасувати завантаження", callback_data=f"rental_contract_view:{order.id}")]]
+    await _send_or_edit(update, context, prompt_text, InlineKeyboardMarkup(keyboard))
+    return States.RENTAL_UPLOAD_SIGNED_DOC
+
+
 async def rental_receive_uploaded_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Приймає файл або фото від клієнта, пересилає в штабний чат, на email Юрвідділу та оновлює статус."""
+    """Накопичує 1 або декілька файлів/фото від клієнта у пакеті перед фінальною відправкою в Юрвідділ або Бухгалтерію."""
     msg = update.message
     target = context.user_data.get("rental_upload_target")
     if not msg or not target:
@@ -3037,8 +3283,10 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         )
         return ConversationHandler.END
 
+    files_batch: List[Dict[str, Any]] = target.setdefault("files", [])
+    idx_next = len(files_batch) + 1
     file_id: Optional[str] = None
-    file_name: str = f"Contract_{order.contract_number}.pdf"
+    file_name: str = f"Contract_{order.contract_number}_{idx_next}.pdf"
     is_photo = False
 
     if msg.document:
@@ -3046,7 +3294,7 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         file_name = msg.document.file_name or file_name
     elif msg.photo:
         file_id = msg.photo[-1].file_id
-        file_name = f"Scan_{order.contract_number}.jpg"
+        file_name = f"Scan_{order.contract_number}_page_{idx_next}.jpg"
         is_photo = True
     else:
         try:
@@ -3056,39 +3304,102 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         prompt_text = (
             "⚠️ <b>Будь ласка, надішліть документ (файл .p7s / .pdf) або фотографію.</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Надішліть файл для Договору <b>№ {order.contract_number}</b>:"
         )
-        if kind == "signed_contract":
-            prompt_text += (
-                f"✍️ <b>ЗАВАНТАЖЕННЯ ПІДПИСАНОГО ДОГОВОРУ № {order.contract_number}</b>\n\n"
-                "Будь ласка, надішліть сюди у відповідь підписаний файл договору:\n"
-                "• <b>Електронний підпис:</b> файл із розширенням <code>.p7s</code> (Дія.Підпис / КЕП)\n"
-                "• <b>Паперовий примірник:</b> скан-копію або якісне фото кожної сторінки (.pdf / .jpg)."
-            )
-        else:
-            prompt_text += (
-                f"💳 <b>ЗАВАНТАЖЕННЯ КВИТАНЦІЇ ОПЛАТИ IBAN (Договір № {order.contract_number})</b>\n\n"
-                f"Будь ласка, надішліть файл квитанції або фото чека про переказ коштів на суму "
-                f"<b>{order.total_price_uah:.2f} грн</b> за офіційними реквізитами КП «ОМЕТ»."
-            )
-        keyboard = [[InlineKeyboardButton("⬅️ Скасувати завантаження", callback_data=f"rental_contract_view:{order.id}")]]
-        await _send_or_edit(update, context, prompt_text, InlineKeyboardMarkup(keyboard))
+        kb_rows = []
+        if files_batch:
+            kb_rows.append([
+                InlineKeyboardButton(
+                    f"✅ Завершити завантаження та надіслати ({len(files_batch)} ф.)",
+                    callback_data=f"rental_upload_finish:{order.id}",
+                )
+            ])
+        kb_rows.append([InlineKeyboardButton("⬅️ Скасувати завантаження", callback_data=f"rental_contract_view:{order.id}")])
+        await _send_or_edit(update, context, prompt_text, InlineKeyboardMarkup(kb_rows))
         return States.RENTAL_UPLOAD_SIGNED_DOC
 
-    # Видаляємо повідомлення користувача з надісланим документом для чистоти чату
-    try:
-        await msg.delete()
-    except Exception:
-        pass
+    files_batch.append({
+        "file_id": file_id,
+        "file_name": file_name,
+        "is_photo": is_photo,
+    })
 
+    files_list_str = "\n".join(
+        f"   {i}. <code>{item['file_name']}</code>"
+        for i, item in enumerate(files_batch, start=1)
+    )
+    doc_type_ua = "Підписаний договір" if kind == "signed_contract" else "Квитанція про оплату"
+
+    status_text = (
+        f"📎 <b>ДОДАНО ФАЙЛ ДО ПАКЕТА ({doc_type_ua} № {order.contract_number})</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Усього прикріплено файлів (<b>{len(files_batch)} шт.</b>):\n"
+        f"{files_list_str}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"➕ <b>Ви можете надіслати ще файли/фото</b> (наприклад, наступну сторінку договору або файл <code>.p7s</code>),\n"
+        f"або натиснути кнопку нижче для відправки всього пакета в КП «ОМЕТ»:"
+    )
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                f"✅ Завершити завантаження та надіслати ({len(files_batch)} ф.)",
+                callback_data=f"rental_upload_finish:{order.id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔄 Очистити список і додати заново",
+                callback_data=f"rental_upload_clear:{order.id}",
+            )
+        ],
+        [InlineKeyboardButton("⬅️ Скасувати завантаження", callback_data=f"rental_contract_view:{order.id}")],
+    ])
+    await _send_or_edit(update, context, status_text, kb)
+    return States.RENTAL_UPLOAD_SIGNED_DOC
+
+
+async def rental_finish_upload_batch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Завершує пакетне завантаження файлів клієнта:
+    - Для підписаного договору: ЛИШЕ ТЕПЕР створює картку та надсилає всі файли у тему Юридичного відділу ('legal').
+    - Для квитанції про оплату: ЛИШЕ ТЕПЕР створює картку та надсилає всі файли у тему Бухгалтерії ('accounting').
+    """
+    query = update.callback_query
+    if query:
+        await query.answer("Відправляємо файли у відповідний підрозділ КП «ОМЕТ»...")
+
+    target = context.user_data.get("rental_upload_target")
+    if not target or not target.get("files"):
+        if query:
+            await query.answer("Спочатку надішліть хоча б один файл або фото.", show_alert=True)
+        return States.RENTAL_UPLOAD_SIGNED_DOC
+
+    order_id = int(target["order_id"])
+    kind = target["kind"]
+    files_batch: List[Dict[str, Any]] = target["files"]
+    order = await db.get_rental_order(order_id)
+    if not order:
+        context.user_data.pop("rental_upload_target", None)
+        return ConversationHandler.END
+
+    first_file = files_batch[0]
+    file_id = first_file["file_id"]
+    file_name = first_file["file_name"]
+    all_names_str = ", ".join(f["file_name"] for f in files_batch)
     staff_chat_id = order.staff_chat_id or get_active_staff_chat_id()
 
     if kind == "signed_contract":
-        new_status = "signed_uploaded" if order.status in ("awaiting_signature", "pending_slots", "awaiting_slot_choice") else order.status
+        new_status = (
+            "signed_uploaded"
+            if order.status in ("awaiting_signature", "pending_slots", "awaiting_slot_choice", "revision_requested")
+            else order.status
+        )
         await db.update_rental_order_fields(
             order.id,
             {
                 "signed_file_id": file_id,
                 "signed_file_name": file_name,
+                "signed_files_json": json.dumps(files_batch, ensure_ascii=False),
                 "status": new_status,
             },
         )
@@ -3098,10 +3409,13 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
             actor_name=order.user_full_name,
             actor_role="Клієнт",
             action="SIGNED_DOC_UPLOADED",
-            details=f"Завантажено підписаний договір: {file_name}",
+            details=f"Завантажено підписаний договір ({len(files_batch)} ф.): {all_names_str}",
         )
 
-        # Завантажуємо файл у тимчасову папку для відправки на email Юридичного відділу
+        # Спочатку оновлюємо/створюємо картку замовлення в темі Юридичного відділу ('legal')
+        await post_or_update_staff_order_card(context, order.id)
+
+        # Завантажуємо перший файл для відправки на email Юридичного відділу
         try:
             tg_file = await context.bot.get_file(file_id)
             tmp_dir = Path(tempfile.gettempdir()) / "transport_bot_rentals"
@@ -3119,35 +3433,35 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         except Exception as email_err:
             logger.warning(f"Не вдалося надіслати файл договору на email Юрвідділу: {email_err}")
 
-        # Дублюємо файл у профільну тему Юридичного відділу
-        caption_staff = (
-            f"✍️ <b>ОТРИМАНО ПІДПИСАНИЙ ДОГОВІР № {order.contract_number}</b>\n"
-            f"👤 Замовник: {order.user_full_name} ({order.user_phone})\n"
-            f"📎 Файл: <code>{file_name}</code>\n"
-            f"⚖️ Для погодження натисніть <b>«⚖️ Договір перевірено та погоджено»</b> на картці замовлення."
-        )
+        # Пересилаємо всі завантажені клієнтом файли у тему Юридичного відділу ('legal')
         legal_thread_id = get_staff_topic_thread_id("legal")
-        send_doc_kwargs: Dict[str, Any] = {
-            "chat_id": staff_chat_id,
-            "caption": caption_staff,
-            "parse_mode": ParseMode.HTML,
-        }
-        if legal_thread_id is not None:
-            send_doc_kwargs["message_thread_id"] = legal_thread_id
-        try:
-            if is_photo:
-                await context.bot.send_photo(photo=file_id, **send_doc_kwargs)
-            else:
-                await context.bot.send_document(document=file_id, **send_doc_kwargs)
-        except Exception as st_err:
-            logger.warning(f"Не вдалося переслати підписаний договір у штабний чат: {st_err}")
+        for idx, f_item in enumerate(files_batch, start=1):
+            caption_staff = (
+                f"✍️ <b>ПІДПИСАНИЙ КЛІЄНТОМ ДОГОВІР № {order.contract_number} (файл {idx}/{len(files_batch)})</b>\n"
+                f"👤 Замовник: <b>{order.company_name or order.user_full_name}</b> ({order.user_phone})\n"
+                f"📎 Файл: <code>{f_item['file_name']}</code>\n"
+                f"📥 Завантажте цей файл для підписання Директором КП «ОМЕТ», а потім прикріпіть двосторонньо підписаний договір кнопкою на картці вище."
+            )
+            send_doc_kwargs: Dict[str, Any] = {
+                "chat_id": staff_chat_id,
+                "caption": caption_staff,
+                "parse_mode": ParseMode.HTML,
+            }
+            if legal_thread_id is not None:
+                send_doc_kwargs["message_thread_id"] = legal_thread_id
+            try:
+                if f_item.get("is_photo"):
+                    await context.bot.send_photo(photo=f_item["file_id"], **send_doc_kwargs)
+                else:
+                    await context.bot.send_document(document=f_item["file_id"], **send_doc_kwargs)
+            except Exception as st_err:
+                logger.warning(f"Не вдалося переслати підписаний договір у тему Юрвідділу: {st_err}")
 
-        await post_or_update_staff_order_card(context, order.id)
-        del context.user_data["rental_upload_target"]
+        context.user_data.pop("rental_upload_target", None)
 
         confirm_text = (
-            f"✅ <b>Підписаний договір № {order.contract_number} ({file_name}) успішно отримано!</b>\n\n"
-            f"Документ передано до Відділу правового супроводу КП «ОМЕТ» та зафіксовано в системі."
+            f"✅ <b>Підписаний договір № {order.contract_number} ({len(files_batch)} файл(ів)) успішно передано до Відділу правового супроводу КП «ОМЕТ»!</b>\n\n"
+            f"Після підписання договору з боку Директора КП «ОМЕТ» бот автоматично надішле Вам двосторонньо підписаний примірник у цей чат."
         )
         confirm_kb = InlineKeyboardMarkup(
             [
@@ -3164,45 +3478,54 @@ async def rental_receive_uploaded_document(update: Update, context: ContextTypes
         return ConversationHandler.END
 
     # kind == "payment_receipt"
-    await db.update_rental_order_fields(order.id, {"payment_file_id": file_id})
+    await db.update_rental_order_fields(
+        order.id,
+        {
+            "payment_file_id": file_id,
+            "payment_files_json": json.dumps(files_batch, ensure_ascii=False),
+        },
+    )
     await db.add_rental_audit_log(
         order_id=order.id,
         actor_id=order.user_id,
         actor_name=order.user_full_name,
         actor_role="Клієнт",
         action="PAYMENT_RECEIPT_UPLOADED",
-        details=f"Завантажено квитанцію оплати IBAN ({file_name}) на суму {order.total_price_uah:.2f} грн",
+        details=f"Завантажено квитанцію оплати IBAN ({len(files_batch)} ф.: {all_names_str}) на суму {order.total_price_uah:.2f} грн",
     )
 
-    caption_acc = (
-        f"💳 <b>ОТРИМАНО КВИТАНЦІЮ ОПЛАТИ IBAN ЗА ДОГОВОРОМ № {order.contract_number}</b>\n"
-        f"👤 Замовник: {order.user_full_name} ({order.user_phone})\n"
-        f"💰 Сума за договором: <b>{order.total_price_uah:.2f} грн</b>\n"
-        f"Для підтвердження зарахування коштів натисніть <b>«💳 Оплату IBAN зараховано (100%)»</b> на картці замовлення."
-    )
-    acc_thread_id = get_staff_topic_thread_id("accounting")
-    send_acc_kwargs: Dict[str, Any] = {
-        "chat_id": staff_chat_id,
-        "caption": caption_acc,
-        "parse_mode": ParseMode.HTML,
-    }
-    if acc_thread_id is not None:
-        send_acc_kwargs["message_thread_id"] = acc_thread_id
-    try:
-        if is_photo:
-            await context.bot.send_photo(photo=file_id, **send_acc_kwargs)
-        else:
-            await context.bot.send_document(document=file_id, **send_acc_kwargs)
-    except Exception as st_err:
-        logger.warning(f"Не вдалося переслати квитанцію у штабний чат: {st_err}")
-
+    # Спочатку оновлюємо/створюємо картку замовлення в темі Бухгалтерії ('accounting')
     await post_or_update_staff_order_card(context, order.id)
-    del context.user_data["rental_upload_target"]
+
+    acc_thread_id = get_staff_topic_thread_id("accounting")
+    for idx, f_item in enumerate(files_batch, start=1):
+        caption_acc = (
+            f"💳 <b>КВИТАНЦІЯ ОПЛАТИ IBAN ЗА ДОГОВОРОМ № {order.contract_number} (файл {idx}/{len(files_batch)})</b>\n"
+            f"👤 Замовник: <b>{order.company_name or order.user_full_name}</b> ({order.user_phone})\n"
+            f"💰 Сума за договором: <b>{order.total_price_uah:.2f} грн</b>\n"
+            f"Для підтвердження зарахування коштів натисніть кнопку <b>«💳 Підтвердити оплату IBAN за №{order.contract_number}»</b> на картці вище."
+        )
+        send_acc_kwargs: Dict[str, Any] = {
+            "chat_id": staff_chat_id,
+            "caption": caption_acc,
+            "parse_mode": ParseMode.HTML,
+        }
+        if acc_thread_id is not None:
+            send_acc_kwargs["message_thread_id"] = acc_thread_id
+        try:
+            if f_item.get("is_photo"):
+                await context.bot.send_photo(photo=f_item["file_id"], **send_acc_kwargs)
+            else:
+                await context.bot.send_document(document=f_item["file_id"], **send_acc_kwargs)
+        except Exception as st_err:
+            logger.warning(f"Не вдалося переслати квитанцію у тему Бухгалтерії: {st_err}")
+
+    context.user_data.pop("rental_upload_target", None)
 
     receipt_text = (
-        f"✅ <b>Квитанцію оплати IBAN за Договором № {order.contract_number} успішно отримано!</b>\n\n"
-        f"Документ передано до Бухгалтерії КП «ОМЕТ». Після підтвердження оплати та призначення вагона в депо "
-        f"Ви отримаєте електронний посадковий талон із QR-кодом."
+        f"✅ <b>Квитанцію оплати IBAN за Договором № {order.contract_number} ({len(files_batch)} файл(ів)) успішно передано до Бухгалтерії КП «ОМЕТ»!</b>\n\n"
+        f"Після підтвердження зарахування коштів та призначення вагона і водія в Депо "
+        f"Ви автоматично отримаєте електронний посадковий талон та правила безпеки."
     )
     receipt_kb = InlineKeyboardMarkup(
         [[InlineKeyboardButton("📂 Мої діючі договори", callback_data="rental_my_contracts")]]
@@ -3356,7 +3679,12 @@ async def rental_receive_fixed_requisite(update: Update, context: ContextTypes.D
 
     if updated_order:
         await post_or_update_staff_order_card(context, updated_order.id)
-        await _send_order_pdf_package(context, updated_order.user_id, updated_order, send_to_legal_topic=True)
+        await _send_order_pdf_package(
+            context,
+            updated_order.user_id,
+            updated_order,
+            send_to_legal_topic=bool(updated_order.signed_file_id),
+        )
 
     done_text = (
         f"✅ <b>Реквізити Договору № {order.contract_number} успішно оновлено!</b>\n"
