@@ -10,13 +10,24 @@ import time
 
 
 class MuseumService:
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._is_initialized = False
+        return cls._instance
+
     def __init__(self):
+        if getattr(self, "_is_initialized", False):
+            return
         self.sheets = GoogleSheetsClient()
         self._dates_cache = []
         self._last_cache_update = 0
         self._holiday_dates_cache = []
         self._last_holiday_cache_update = 0
         self._cache_ttl = 300  # Кеш живе 5 хвилин (300 сек)
+        self._is_initialized = True
 
     def invalidate_dates_cache(self) -> None:
         """Скидає кеш дат після змін у Google Sheets (адмін: додавання/видалення)."""
@@ -29,6 +40,23 @@ class MuseumService:
         self._holiday_dates_cache = []
         self._last_holiday_cache_update = 0
         logger.info("🗑️ Museum holiday dates cache invalidated")
+
+    @staticmethod
+    def find_first_empty_row(existing_rows: list, min_row: int = 2) -> int:
+        """
+        Знаходить номер першого доступного порожнього рядка для запису дати.
+        Починає пошук з min_row (за замовчуванням 2, щоб не чіпати рядок заголовків).
+        Повторно використовує клітинки, очищені через clear_cell.
+        """
+        if not existing_rows:
+            return min_row
+
+        for idx in range(min_row - 1, len(existing_rows)):
+            row = existing_rows[idx]
+            if not row or not str(row[0]).strip():
+                return idx + 1
+
+        return max(min_row, len(existing_rows) + 1)
 
     async def get_available_dates(self) -> list:
         """
@@ -49,12 +77,12 @@ class MuseumService:
         raw_dates = await loop.run_in_executor(
             None,
             self.sheets.read_range,
-            "MuseumDates!A2:A50"
+            "MuseumDates!A2:A100"
         )
 
         if raw_dates:
-            # Оновлюємо кеш
-            self._dates_cache = [row[0] for row in raw_dates if row]
+            # Оновлюємо кеш (фільтруємо порожні значення та обрізаємо пробіли)
+            self._dates_cache = [str(row[0]).strip() for row in raw_dates if row and str(row[0]).strip()]
             self._last_cache_update = current_time
             return self._dates_cache
 
@@ -76,11 +104,11 @@ class MuseumService:
         raw_dates = await loop.run_in_executor(
             None,
             self.sheets.read_range,
-            "MuseumDates!B2:B50"
+            "MuseumDates!B2:B100"
         )
 
         if raw_dates:
-            self._holiday_dates_cache = [row[0] for row in raw_dates if row]
+            self._holiday_dates_cache = [str(row[0]).strip() for row in raw_dates if row and str(row[0]).strip()]
             self._last_holiday_cache_update = current_time
             return self._holiday_dates_cache
 
@@ -691,3 +719,7 @@ class MuseumService:
         except Exception as db_err:
             logger.error(f"❌ Error fetching visitors from DB: {db_err}")
             return []
+
+
+# Глобальний екземпляр сервісу (Singleton)
+museum_service = MuseumService()

@@ -2584,9 +2584,9 @@ async def admin_add_date_start(update: Update, context: ContextTypes.DEFAULT_TYP
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     text = (
-        "Будь ласка, введіть дату та час екскурсії у чіткому форматі:\n\n"
-        "<code>ДД.ММ.РРРР ГГ:ХХ</code>\n\n"
-        "Наприклад: <code>25.11.2025 11:00</code>"
+        "Будь ласка, введіть дату та час екскурсії у форматі:\n\n"
+        "<code>ДД.ММ.РРРР ГГ:ХХ</code> або просто <code>ДД.ММ.РРРР</code>\n\n"
+        "Наприклад: <code>25.11.2026 11:00</code> або <code>13.12.2026</code> (час буде встановлено на 12:00)"
     )
 
     await query.edit_message_text(
@@ -2600,15 +2600,20 @@ async def admin_add_date_start(update: Update, context: ContextTypes.DEFAULT_TYP
 async def admin_add_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in MUSEUM_ADMIN_IDS: return ConversationHandler.END
 
-    date_text = update.message.text.strip()
+    raw_date_text = update.message.text.strip()
+    date_text = raw_date_text
+    is_auto_time = False
 
     # --- ПОЧАТОК ВАЛІДАЦІЇ ---
     try:
-        # 1. Перевірка формату (ДД.ММ.РРРР ГГ:ХХ)
-        if not re.match(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$", date_text):
-            raise ValueError("Невірний формат. Очікується <code>ДД.ММ.РРРР ГГ:ХХ</code>.")
+        # 1. Перевірка формату (ДД.ММ.РРРР ГГ:ХХ або ДД.ММ.РРРР)
+        if re.match(r"^\d{2}\.\d{2}\.\d{4}$", raw_date_text):
+            date_text = f"{raw_date_text} 12:00"
+            is_auto_time = True
+        elif not re.match(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$", raw_date_text):
+            raise ValueError("Невірний формат. Очікується <code>ДД.ММ.РРРР ГГ:ХХ</code> або <code>ДД.ММ.РРРР</code>.")
 
-        # 2. Перевірка коректності дати (напр., не 30.02.2025)
+        # 2. Перевірка коректності дати (напр., не 30.02.2026)
         try:
             parsed_date = datetime.strptime(date_text, '%d.%m.%Y %H:%M')
         except ValueError:
@@ -2627,8 +2632,9 @@ async def admin_add_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE
             [InlineKeyboardButton("45 місць", callback_data="admin_date_cap:45"), InlineKeyboardButton("30 місць", callback_data="admin_date_cap:30")],
             [InlineKeyboardButton("⬅️ Скасувати", callback_data="admin_museum_menu")]
         ]
+        time_hint = " <i>(час автоматично встановлено на 12:00)</i>" if is_auto_time else ""
         await update.message.reply_text(
-            f"🗓️ Дата: <b>{date_text}</b>\n\n"
+            f"🗓️ Дата: <b>{date_text}</b>{time_hint}\n\n"
             f"Вкажіть максимальну кількість вільних місць на цю дату:\n"
             f"• Оберіть кнопку швидкого вибору або\n"
             f"• Напишіть число від 1 до 200 вручну в чат.",
@@ -2707,21 +2713,19 @@ async def admin_add_date_capacity_save(update: Update, context: ContextTypes.DEF
             sheets.read_range,
             "MuseumDates!A1:A100"
         )
-        first_empty_row = 1
-        if dates_data:
-            first_empty_row = len(dates_data) + 1
+        first_empty_row = museum_service.find_first_empty_row(dates_data, min_row=2)
 
         cell_date = f"A{first_empty_row}"
         cell_cap = f"C{first_empty_row}"
 
-        await loop.run_in_executor(
+        is_date_saved = await loop.run_in_executor(
             None,
             sheets.update_cell,
             "MuseumDates",
             cell_date,
             date_text
         )
-        await loop.run_in_executor(
+        is_cap_saved = await loop.run_in_executor(
             None,
             sheets.update_cell,
             "MuseumDates",
@@ -2730,8 +2734,16 @@ async def admin_add_date_capacity_save(update: Update, context: ContextTypes.DEF
         )
         museum_service.invalidate_dates_cache()
 
-        logger.info(f"✅ Admin added new regular date: {date_text} with capacity {capacity} in {cell_date}/{cell_cap}")
-        success_msg = f"✅ Звичайну екскурсію на '<b>{date_text}</b>' з лімітом <b>{capacity} місць</b> успішно додано."
+        if is_date_saved:
+            logger.info(f"✅ Admin added new regular date: {date_text} with capacity {capacity} in {cell_date}/{cell_cap}")
+            success_msg = f"✅ Звичайну екскурсію на '<b>{date_text}</b>' з лімітом <b>{capacity} місць</b> успішно додано (комірка {cell_date})."
+        else:
+            logger.warning(f"⚠️ Date {date_text} saved to DB, but failed to write to Google Sheets ({cell_date})")
+            success_msg = (
+                f"⚠️ Дату '<b>{date_text}</b>' (ліміт: <b>{capacity} місць</b>) збережено в базі даних, "
+                f"але сталася помилка запису в Google Sheets (перевірте налаштування та права доступу)."
+            )
+
         if query:
             await query.message.reply_text(success_msg, parse_mode=ParseMode.HTML)
         else:
@@ -3015,9 +3027,9 @@ async def admin_add_holiday_date_start(update: Update, context: ContextTypes.DEF
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     text = (
-        "Будь ласка, введіть дату та час <b>святкової екскурсії</b> у чіткому форматі:\n\n"
-        "<code>ДД.ММ.РРРР ГГ:ХХ</code>\n\n"
-        "Наприклад: <code>25.11.2025 11:00</code>"
+        "Будь ласка, введіть дату та час <b>святкової екскурсії</b> у форматі:\n\n"
+        "<code>ДД.ММ.РРРР ГГ:ХХ</code> або просто <code>ДД.ММ.РРРР</code>\n\n"
+        "Наприклад: <code>25.11.2026 11:00</code> або <code>13.12.2026</code> (час буде встановлено на 12:00)"
     )
 
     await query.edit_message_text(
@@ -3031,11 +3043,16 @@ async def admin_add_holiday_date_start(update: Update, context: ContextTypes.DEF
 async def admin_add_holiday_date_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in MUSEUM_ADMIN_IDS: return ConversationHandler.END
 
-    date_text = update.message.text.strip()
+    raw_date_text = update.message.text.strip()
+    date_text = raw_date_text
+    is_auto_time = False
 
     try:
-        if not re.match(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$", date_text):
-            raise ValueError("Невірний формат. Очікується <code>ДД.ММ.РРРР ГГ:ХХ</code>.")
+        if re.match(r"^\d{2}\.\d{2}\.\d{4}$", raw_date_text):
+            date_text = f"{raw_date_text} 12:00"
+            is_auto_time = True
+        elif not re.match(r"^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$", raw_date_text):
+            raise ValueError("Невірний формат. Очікується <code>ДД.ММ.РРРР ГГ:ХХ</code> або <code>ДД.ММ.РРРР</code>.")
 
         try:
             parsed_date = datetime.strptime(date_text, '%d.%m.%Y %H:%M')
@@ -3054,8 +3071,9 @@ async def admin_add_holiday_date_save(update: Update, context: ContextTypes.DEFA
             [InlineKeyboardButton("30 місць", callback_data="admin_holiday_cap:30"), InlineKeyboardButton("20 місць", callback_data="admin_holiday_cap:20")],
             [InlineKeyboardButton("⬅️ Скасувати", callback_data="admin_museum_menu")]
         ]
+        time_hint = " <i>(час автоматично встановлено на 12:00)</i>" if is_auto_time else ""
         await update.message.reply_text(
-            f"🎉 Святкова дата: <b>{date_text}</b>\n\n"
+            f"🎉 Святкова дата: <b>{date_text}</b>{time_hint}\n\n"
             f"Вкажіть максимальну кількість вільних місць на цю святкову дату:\n"
             f"• Оберіть кнопку швидкого вибору або\n"
             f"• Напишіть число від 1 до 200 вручну в чат.",
@@ -3132,21 +3150,19 @@ async def admin_add_holiday_date_capacity_save(update: Update, context: ContextT
             sheets.read_range,
             "MuseumDates!B1:B100"
         )
-        first_empty_row = 1
-        if dates_data:
-            first_empty_row = len(dates_data) + 1
+        first_empty_row = museum_service.find_first_empty_row(dates_data, min_row=2)
 
         cell_date = f"B{first_empty_row}"
         cell_cap = f"D{first_empty_row}"
 
-        await loop.run_in_executor(
+        is_date_saved = await loop.run_in_executor(
             None,
             sheets.update_cell,
             "MuseumDates",
             cell_date,
             date_text
         )
-        await loop.run_in_executor(
+        is_cap_saved = await loop.run_in_executor(
             None,
             sheets.update_cell,
             "MuseumDates",
@@ -3155,8 +3171,16 @@ async def admin_add_holiday_date_capacity_save(update: Update, context: ContextT
         )
         museum_service.invalidate_holiday_dates_cache()
 
-        logger.info(f"✅ Admin added new holiday date: {date_text} with capacity {capacity} in {cell_date}/{cell_cap}")
-        success_msg = f"✅ Святкову екскурсію на '<b>{date_text}</b>' з лімітом <b>{capacity} місць</b> успішно додано."
+        if is_date_saved:
+            logger.info(f"✅ Admin added new holiday date: {date_text} with capacity {capacity} in {cell_date}/{cell_cap}")
+            success_msg = f"✅ Святкову екскурсію на '<b>{date_text}</b>' з лімітом <b>{capacity} місць</b> успішно додано (комірка {cell_date})."
+        else:
+            logger.warning(f"⚠️ Holiday date {date_text} saved to DB, but failed to write to Google Sheets ({cell_date})")
+            success_msg = (
+                f"⚠️ Святкову дату '<b>{date_text}</b>' (ліміт: <b>{capacity} місць</b>) збережено в базі даних, "
+                f"але сталася помилка запису в Google Sheets (перевірте налаштування та права доступу)."
+            )
+
         if query:
             await query.message.reply_text(success_msg, parse_mode=ParseMode.HTML)
         else:
