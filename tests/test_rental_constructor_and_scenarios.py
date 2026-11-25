@@ -741,3 +741,70 @@ def test_stop_directional_options_and_dashboard_editing() -> None:
     assert len(arcadia_opts) == 1
     assert arcadia_opts[0]["platform_id"] != ""
 
+
+def test_anti_hater_and_checksum_requisite_validators() -> None:
+    """Перевіряє захист від хейтерів, нецензурної лексики, клавіатурного сміття та математичні контрольні суми РНОКПП і ЄДРПОУ."""
+    from utils.rental_validators import (
+        compute_rnokpp_check_digit,
+        validate_edrpou_code,
+        validate_legal_company_name,
+        validate_person_full_name,
+        validate_postal_address,
+        validate_rnokpp_tax_id,
+        validate_ua_phone,
+        validate_ukr_passport,
+    )
+
+    # 1. ПІБ: валідне українське ПІБ vs мат/сміття/латиниця
+    ok_name, norm_name, _ = validate_person_full_name("коваленко сергій васильович")
+    assert ok_name is True
+    assert norm_name == "Коваленко Сергій Васильович"
+
+    assert validate_person_full_name("йцукен фыва")[0] is False
+    assert validate_person_full_name("бвгджз клмнпр")[0] is False
+    assert validate_person_full_name("Іван")[0] is False
+    assert validate_person_full_name("Тест Тестович")[0] is False
+    assert validate_person_full_name("John Doe")[0] is False
+
+    # 2. РНОКПП (ІПН): справжня контрольна сума vs фейковий код для звичайного користувача vs тестовий доступ для Валентина
+    base9 = "328721234"
+    valid_rnokpp = base9 + str(compute_rnokpp_check_digit(base9))
+    assert validate_rnokpp_tax_id(valid_rnokpp, user_id=999999)[0] is True
+    assert validate_rnokpp_tax_id("1234567890", user_id=999999)[0] is False
+    assert validate_rnokpp_tax_id("1234567890", user_id=VALENTIN_ADMIN_ID)[0] is True
+
+    # 3. ЄДРПОУ: реальний код КП «ОМЕТ» (03328497) vs фейковий код vs тестовий доступ для Валентина
+    assert validate_edrpou_code("03328497", user_id=999999)[0] is True
+    assert validate_edrpou_code("12345678", user_id=999999)[0] is False
+    assert validate_edrpou_code("44556677", user_id=VALENTIN_ADMIN_ID)[0] is True
+
+    # 4. Паспорт та ID-картка
+    assert validate_ukr_passport("паспорт КМ 123456, виданий Приморським РВ")[0] is True
+    assert validate_ukr_passport("004512389")[0] is True
+    assert validate_ukr_passport("КМ 000000")[0] is False
+    assert validate_ukr_passport("немає паспорта")[0] is False
+
+    # 5. Телефон України
+    ok_ph, norm_ph, _ = validate_ua_phone("067-123-45-89")
+    assert ok_ph is True
+    assert norm_ph == "+380671234589"
+    assert validate_ua_phone("+380670000000")[0] is False
+    assert validate_ua_phone("+380111234567")[0] is False
+
+    # 6. Адреса та IBAN
+    assert validate_postal_address("м. Одеса, вул. Водопровідна, 1")[0] is True
+    assert validate_postal_address("м. Одеса, вул. Дерибасівська")[0] is False
+    assert validate_postal_address(
+        "вул. Водопровідна, 1, м. Одеса, IBAN UA903281680000000026000122581",
+        check_optional_iban=True,
+    )[0] is True
+    assert validate_postal_address(
+        "вул. Водопровідна, 1, м. Одеса, IBAN UA12345",
+        check_optional_iban=True,
+    )[0] is False
+
+    # 7. Назва юрособи
+    assert validate_legal_company_name("ТОВ «Одеський Трамвай»")[0] is True
+    assert validate_legal_company_name("бвгджз")[0] is False
+
+

@@ -30,6 +30,17 @@ from config.settings import (
     RENTAL_MIN_DAYS_PAPER,
     RENTAL_PAPER_LOCK_HOURS,
     RENTAL_RETRO_HUB_IMAGE,
+    VALENTIN_ADMIN_ID,
+)
+from utils.rental_validators import (
+    validate_edrpou_code,
+    validate_legal_company_name,
+    validate_person_full_name,
+    validate_postal_address,
+    validate_rnokpp_tax_id,
+    validate_signer_or_foundation,
+    validate_ua_phone,
+    validate_ukr_passport,
 )
 from database.db import Database, RentalOrder
 from handlers.rental_staff_handlers import (
@@ -1760,15 +1771,16 @@ async def rental_handle_name_input(update: Update, context: ContextTypes.DEFAULT
     except Exception:
         pass
 
-    if len(name_val) < 3:
+    ok, normalized_name, err_msg = validate_person_full_name(name_val)
+    if not ok:
         return await _render_individual_name_input(
             update,
             context,
-            error_msg="Будь ласка, введіть коректне ПІБ (мінімум 3 символи).",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
-    draft["user_full_name"] = name_val
+    draft["user_full_name"] = normalized_name
     if draft.pop("_editing_single_field", False):
         return await _render_final_confirmation(update, context)
     return await _render_individual_phone_input(update, context)
@@ -1785,16 +1797,17 @@ async def rental_handle_phone_input(update: Update, context: ContextTypes.DEFAUL
     except Exception:
         pass
 
-    digits = re.sub(r"\D", "", phone_val)
-    if len(digits) < 9:
+    uid = update.effective_user.id if update.effective_user else None
+    ok, normalized_phone, err_msg = validate_ua_phone(phone_val, user_id=uid)
+    if not ok:
         return await _render_individual_phone_input(
             update,
             context,
-            error_msg="Некоректний номер телефону. Введіть номер у форматі +380XXXXXXXXX.",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
-    draft["user_phone"] = phone_val
+    draft["user_phone"] = normalized_phone
     if draft.pop("_editing_single_field", False):
         return await _render_final_confirmation(update, context)
     return await _render_individual_passport_input(update, context)
@@ -1837,13 +1850,14 @@ async def rental_handle_individual_passport_input(update: Update, context: Conte
         except Exception:
             pass
         val = update.message.text.strip()
-        if len(val) < 4:
+        ok, norm_passp, err_msg = validate_ukr_passport(val)
+        if not ok:
             return await _render_individual_passport_input(
                 update,
                 context,
-                error_msg="Введіть коректні серію та номер паспорта або ID-картки.",
+                error_msg=err_msg,
             )
-        draft["user_passport"] = val
+        draft["user_passport"] = norm_passp
 
     if draft.pop("_editing_single_field", False):
         return await _render_final_confirmation(update, context)
@@ -1887,15 +1901,16 @@ async def rental_handle_individual_address_input(update: Update, context: Contex
     except Exception:
         pass
 
-    if len(addr_val) < 5:
+    ok, norm_addr, err_msg = validate_postal_address(addr_val)
+    if not ok:
         return await _render_individual_address_input(
             update,
             context,
-            error_msg="Введіть повну адресу (місто, вулиця, будинок). Мінімум 5 символів.",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
-    draft["user_address"] = addr_val
+    draft["user_address"] = norm_addr
     if draft.pop("_editing_single_field", False):
         return await _render_final_confirmation(update, context)
     return await _render_individual_tax_input(update, context)
@@ -1941,12 +1956,13 @@ async def rental_handle_individual_tax_input(update: Update, context: ContextTyp
     except Exception:
         pass
 
-    digits = re.sub(r"\D", "", tax_val)
-    if len(digits) != 10:
+    uid = update.effective_user.id if update.effective_user else None
+    ok, digits, err_msg = validate_rnokpp_tax_id(tax_val, user_id=uid)
+    if not ok:
         return await _render_individual_tax_input(
             update,
             context,
-            error_msg="РНОКПП має складатися рівно з 10 цифр. Перевірте та повторіть введення.",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
@@ -1998,15 +2014,15 @@ async def rental_handle_fop_name_input(update: Update, context: ContextTypes.DEF
     except Exception:
         pass
 
-    if len(name_val) < 3:
+    ok, clean_name, err_msg = validate_person_full_name(name_val)
+    if not ok:
         return await _render_fop_name_input(
             update,
             context,
-            error_msg="Будь ласка, введіть ПІБ підприємця (мінімум 3 символи).",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
-    clean_name = re.sub(r"^(фоп|фізична особа-підприємець)\s+", "", name_val, flags=re.IGNORECASE).strip()
     draft["user_full_name"] = clean_name
     if draft.pop("_editing_single_field", False):
         return await _render_final_confirmation(update, context)
@@ -2049,12 +2065,13 @@ async def rental_handle_fop_tax_input(update: Update, context: ContextTypes.DEFA
     except Exception:
         pass
 
-    digits = re.sub(r"\D", "", tax_val)
-    if len(digits) != 10:
+    uid = update.effective_user.id if update.effective_user else None
+    ok, digits, err_msg = validate_rnokpp_tax_id(tax_val, user_id=uid)
+    if not ok:
         return await _render_fop_tax_input(
             update,
             context,
-            error_msg="РНОКПП ФОП має містити рівно 10 цифр. Повторіть введення.",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
@@ -2101,15 +2118,16 @@ async def rental_handle_fop_address_input(update: Update, context: ContextTypes.
     except Exception:
         pass
 
-    if len(addr_val) < 5:
+    ok, norm_addr, err_msg = validate_postal_address(addr_val)
+    if not ok:
         return await _render_fop_address_input(
             update,
             context,
-            error_msg="Введіть повну податкову адресу ФОП (мінімум 5 символів).",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
-    draft["user_address"] = addr_val
+    draft["user_address"] = norm_addr
     if draft.pop("_editing_single_field", False):
         return await _render_final_confirmation(update, context)
     return await _render_fop_edr_input(update, context)
@@ -2152,7 +2170,10 @@ async def rental_handle_fop_edr_input(update: Update, context: ContextTypes.DEFA
             await update.message.delete()
         except Exception:
             pass
-        draft["foundation_doc"] = update.message.text.strip()
+        ok, norm_doc, err_msg = validate_signer_or_foundation(update.message.text.strip())
+        if not ok:
+            return await _render_fop_edr_input(update, context, error_msg=err_msg)
+        draft["foundation_doc"] = norm_doc
 
     if draft.pop("_editing_single_field", False):
         return await _render_final_confirmation(update, context)
@@ -2191,16 +2212,17 @@ async def rental_handle_fop_phone_input(update: Update, context: ContextTypes.DE
     except Exception:
         pass
 
-    digits = re.sub(r"\D", "", phone_val)
-    if len(digits) < 9:
+    uid = update.effective_user.id if update.effective_user else None
+    ok, norm_phone, err_msg = validate_ua_phone(phone_val, user_id=uid)
+    if not ok:
         return await _render_fop_phone_input(
             update,
             context,
-            error_msg="Некоректний номер телефону. Введіть номер у форматі +380XXXXXXXXX.",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
-    draft["user_phone"] = phone_val
+    draft["user_phone"] = norm_phone
     draft.pop("_editing_single_field", None)
     return await _render_final_confirmation(update, context)
 
@@ -2243,12 +2265,13 @@ async def rental_handle_legal_edrpou_input(update: Update, context: ContextTypes
     except Exception:
         pass
 
-    digits = re.sub(r"\D", "", val)
-    if len(digits) != 8:
+    uid = update.effective_user.id if update.effective_user else None
+    ok, digits, err_msg = validate_edrpou_code(val, user_id=uid)
+    if not ok:
         return await _render_legal_edrpou_input(
             update,
             context,
-            error_msg="Код ЄДРПОУ має містити рівно 8 цифр. Повторіть введення.",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
@@ -2295,16 +2318,17 @@ async def rental_handle_legal_name_input(update: Update, context: ContextTypes.D
     except Exception:
         pass
 
-    if len(name_val) < 3:
+    ok, norm_name, err_msg = validate_legal_company_name(name_val)
+    if not ok:
         return await _render_legal_name_input(
             update,
             context,
-            error_msg="Найменування компанії має містити щонайменше 3 символи.",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
-    draft["user_full_name"] = name_val
-    draft["company_name"] = name_val
+    draft["user_full_name"] = norm_name
+    draft["company_name"] = norm_name
     if draft.pop("_editing_single_field", False):
         return await _render_final_confirmation(update, context)
     return await _render_legal_address_input(update, context)
@@ -2347,15 +2371,16 @@ async def rental_handle_legal_address_input(update: Update, context: ContextType
     except Exception:
         pass
 
-    if len(addr_val) < 5:
+    ok, norm_addr, err_msg = validate_postal_address(addr_val, check_optional_iban=True)
+    if not ok:
         return await _render_legal_address_input(
             update,
             context,
-            error_msg="Введіть повну юридичну адресу та реквізити підприємства (мінімум 5 символів).",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
-    draft["user_address"] = addr_val
+    draft["user_address"] = norm_addr
     if draft.pop("_editing_single_field", False):
         return await _render_final_confirmation(update, context)
     return await _render_legal_signer_input(update, context)
@@ -2401,8 +2426,10 @@ async def rental_handle_legal_signer_input(update: Update, context: ContextTypes
             await update.message.delete()
         except Exception:
             pass
-        raw = update.message.text.strip()
-        draft["signer_name"] = raw
+        ok, norm_signer, err_msg = validate_signer_or_foundation(update.message.text.strip())
+        if not ok:
+            return await _render_legal_signer_input(update, context, error_msg=err_msg)
+        draft["signer_name"] = norm_signer
         draft["signer_title"] = "директора"
         draft["foundation_doc"] = "Статуту"
 
@@ -2443,16 +2470,17 @@ async def rental_handle_legal_phone_input(update: Update, context: ContextTypes.
     except Exception:
         pass
 
-    digits = re.sub(r"\D", "", phone_val)
-    if len(digits) < 7:
+    uid = update.effective_user.id if update.effective_user else None
+    ok, norm_phone, err_msg = validate_ua_phone(phone_val, user_id=uid)
+    if not ok:
         return await _render_legal_phone_input(
             update,
             context,
-            error_msg="Некоректний номер телефону. Введіть телефон організації.",
+            error_msg=err_msg,
         )
 
     draft = _get_draft(context)
-    draft["user_phone"] = phone_val
+    draft["user_phone"] = norm_phone
     draft.pop("_editing_single_field", None)
     return await _render_final_confirmation(update, context)
 
@@ -2636,9 +2664,36 @@ async def _render_final_confirmation(update: Update, context: ContextTypes.DEFAU
 async def rental_finalize_order(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Створює замовлення в БД зі статусом 'pending_depot_time' та передає заявку на погодження часу виключно в Депо."""
     query = update.callback_query
-    await query.answer("Передаємо заявку в Депо для погодження часу...")
     user = update.effective_user
     draft = _get_draft(context)
+
+    if int(user.id) != int(VALENTIN_ADMIN_ID):
+        active_orders = await db.get_user_active_rental_orders(user.id)
+        unpaid_pending = [
+            o for o in active_orders
+            if o.status in ("pending_depot_time", "pending_slots", "awaiting_slot_choice", "awaiting_signature")
+        ]
+        if len(unpaid_pending) >= 2:
+            if query:
+                await query.answer(
+                    "⚠️ У Вас вже є 2 активні заявки на погодженні або підписанні. Завершіть їх оформлення у розділі «Мої діючі договори».",
+                    show_alert=True,
+                )
+            limit_text = (
+                "⚠️ <b>ПЕРЕВИЩЕНО ЛІМІТ ОДНОЧАСНИХ НЕОПЛАЧЕНИХ ЗАЯВОК (МАКСИМУМ 2)</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "У Вас вже є 2 активні заявки, які очікують погодження часу або підписання договору.\n"
+                "Будь ласка, перейдіть у розділ <b>«📂 Мої діючі договори та замовлення»</b> для продовження роботи з ними."
+            )
+            limit_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📂 Мої діючі договори та замовлення", callback_data="rental_my_contracts")],
+                [InlineKeyboardButton("🏠 Головне меню", callback_data="main_menu")],
+            ])
+            await _send_or_edit(update, context, limit_text, limit_kb)
+            return ConversationHandler.END
+
+    if query:
+        await query.answer("Передаємо заявку в Депо для погодження часу...")
 
     order = await db.create_rental_order(
         {
@@ -3646,21 +3701,61 @@ async def rental_receive_fixed_requisite(update: Update, context: ContextTypes.D
 
     updates: Dict[str, Any] = {}
     cust_type = getattr(order, "customer_type", "individual") or "individual"
+    uid = update.effective_user.id if update.effective_user else order.user_id
+    val_ok = True
+    val_err: Optional[str] = None
+    norm_val = new_val
+
     if field_key == "name":
-        updates["user_full_name"] = new_val
-        if cust_type in ("fop", "legal_entity"):
-            updates["company_name"] = new_val
+        if cust_type == "legal_entity":
+            val_ok, norm_val, val_err = validate_legal_company_name(new_val)
+        else:
+            val_ok, norm_val, val_err = validate_person_full_name(new_val)
+        if val_ok:
+            updates["user_full_name"] = norm_val
+            if cust_type in ("fop", "legal_entity"):
+                updates["company_name"] = norm_val
     elif field_key == "tax_id":
-        updates["user_tax_id"] = new_val
+        if cust_type == "legal_entity":
+            val_ok, norm_val, val_err = validate_edrpou_code(new_val, user_id=uid)
+        else:
+            val_ok, norm_val, val_err = validate_rnokpp_tax_id(new_val, user_id=uid)
+        if val_ok:
+            updates["user_tax_id"] = norm_val
     elif field_key == "passport":
-        updates["user_passport"] = new_val
+        val_ok, norm_val, val_err = validate_ukr_passport(new_val)
+        if val_ok:
+            updates["user_passport"] = norm_val
     elif field_key == "address":
-        updates["user_address"] = new_val
+        val_ok, norm_val, val_err = validate_postal_address(new_val, check_optional_iban=(cust_type == "legal_entity"))
+        if val_ok:
+            updates["user_address"] = norm_val
     elif field_key == "signer":
-        updates["signer_name"] = new_val
-        updates["foundation_doc"] = new_val
+        val_ok, norm_val, val_err = validate_signer_or_foundation(new_val)
+        if val_ok:
+            updates["signer_name"] = norm_val
+            updates["foundation_doc"] = norm_val
     elif field_key == "phone":
-        updates["user_phone"] = new_val
+        val_ok, norm_val, val_err = validate_ua_phone(new_val, user_id=uid)
+        if val_ok:
+            updates["user_phone"] = norm_val
+
+    if not val_ok:
+        label = FIX_FIELD_LABELS_UA.get(field_key, field_key)
+        err_prompt = (
+            f"⚠️ <b>{val_err}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"✏️ <b>ОНОВЛЕННЯ РЕКВІЗИТУ ({label})</b>\n"
+            f"Договір: <b>№ {order.contract_number}</b>\n"
+            f"Введіть коректне значення у відповідь:"
+        )
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Скасувати", callback_data=f"rental_fix_requisites:{order.id}")]
+        ])
+        await _send_or_edit(update, context, err_prompt, kb)
+        return States.RENTAL_EDIT_REQUISITES
+
+    new_val = norm_val
 
     if order.status == "revision_requested":
         updates["status"] = "awaiting_signature"
